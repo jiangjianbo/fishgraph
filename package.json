@@ -1,0 +1,25 @@
+{
+  "name": "fishgraph",
+  "version": "0.1.0",
+  "description": "核力式力导向图布局算法 —— 节点间短程强斥力 + 连线引力 + 弱基础引力 + 边-节点避让斥力",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "demo": "vite"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.1",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.0",
+    "vitest": "^2.0.5"
+  }
+}
