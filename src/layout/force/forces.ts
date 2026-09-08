@@ -20,42 +20,15 @@
  * 所有力都由势能求导得到（F = −∇E），保证与求解器的能量单调下降一致。
  */
 
-import type { AccuracyMode, GravityMode, NodeId, ShapeSpec } from './types.js';
-import { closestPointOnSegment, shapeSdf } from './geometry.js';
-import { jitterDirection } from './rng.js';
+import type { AccuracyMode, GravityMode, LayoutStage } from '../../types.js';
+import { closestPointOnSegment, shapeSdf } from '../../geometry.js';
+import { jitterDirection } from '../../rng.js';
+import type { InternalEdge, LayoutNode } from '../../graph/store.js';
 import { QuadTree, type BHPoint, type QuadCell } from './quadtree.js';
 import { SpatialGrid, type GridItem } from './spatialgrid.js';
 
 /** 标签软墙的全压强度（× 力单位 k_a/L²）：足以对抗弹簧，把节点撑开到恰好容纳文字。 */
 const LABEL_STRENGTH = 50;
-
-export interface LayoutNode {
-  id: NodeId;
-  x: number;
-  y: number;
-  fx: number;
-  fy: number;
-  /** 包围圆半径（节点-节点力用；阶段 3 会因节点文字变大）。 */
-  r: number;
-  /** 初始的形状包围半径（不含节点文字）。 */
-  baseR: number;
-  mass: number;
-  shape: ShapeSpec;
-  label: string | null;
-  fixed: boolean;
-  /** 用户是否显式给了初始位置。 */
-  placed: boolean;
-}
-
-export interface InternalEdge {
-  /** 节点下标。 */
-  a: number;
-  b: number;
-  label: string | null;
-  /** 标签包围盒半宽/半高（无标签时为 0）。 */
-  labelHw: number;
-  labelHh: number;
-}
 
 export interface DerivedParams {
   L: number;
@@ -79,15 +52,6 @@ export interface DerivedParams {
   /** 接触弹簧的作用距离（间隙小于它进入重叠推离区），随布局尺度缩放。 */
   gFloor: number;
 }
-
-/**
- * 力的阶段（分阶段弛豫调度）：
- *  0 = 只有节点-节点力（斥力 + 弱引力/调和约束），连线不参与；
- *  1 = 加入连线引力与线性张力；
- *  2 = 加入边-节点避让墙与边文字软墙；
- *  3 = 节点文字生效（节点有效半径变大后继续微调）。
- */
-export type LayoutStage = 0 | 1 | 2 | 3;
 
 export interface ForceContext {
   nodes: LayoutNode[];

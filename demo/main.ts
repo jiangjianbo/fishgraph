@@ -129,6 +129,7 @@ const viewCanvas = $<HTMLCanvasElement>('view');
 const energyCanvas = $<HTMLCanvasElement>('energy');
 const statusEl = $('status');
 const graphSel = $<HTMLSelectElement>('graph');
+const algorithmSel = $<HTMLSelectElement>('algorithm');
 const gravitySel = $<HTMLSelectElement>('gravity');
 const accuracySel = $<HTMLSelectElement>('accuracy');
 const initSel = $<HTMLSelectElement>('init');
@@ -148,6 +149,7 @@ const labelCollision = $<HTMLInputElement>('lc');
 
 function optionsFromUi(): LayoutOptions {
   return {
+    algorithm: algorithmSel.value,
     naturalLength: Number(sliders.L.value),
     edgeNodeRepulsion: Number(sliders.en.value),
     weakGravityRatio: Number(sliders.wg.value) / 100,
@@ -268,7 +270,7 @@ for (const el of [...Object.values(sliders), labelCollision]) {
     converged = false;
   });
 }
-for (const el of [gravitySel, accuracySel]) {
+for (const el of [algorithmSel, gravitySel, accuracySel]) {
   el.addEventListener('change', () => {
     layout?.updateOptions(optionsFromUi());
     converged = false;

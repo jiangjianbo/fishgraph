@@ -46,7 +46,19 @@ export type GravityMode = 'pairwise' | 'centroid';
 export type AccuracyMode = 'exact' | 'barnes-hut';
 export type InitMode = 'bfs' | 'circle' | 'grid' | 'random';
 
+/**
+ * 分阶段弛豫的力阶段（策略内部调度概念，供动画/调试观察进度）：
+ *  0 = 只有节点力场；1 = 加入连线；2 = 加入避让与边文字；3 = 节点文字生效。
+ */
+export type LayoutStage = 0 | 1 | 2 | 3;
+
 export interface LayoutOptions {
+  /**
+   * 布局算法（策略名）。默认 'force-directed'（力导向）。
+   * 内置：'force-directed' | 'circle'；可用 registerStrategy 注册自定义策略。
+   * 运行时切换用 layout.setStrategy(name)（保留图数据，重新初始化位置）。
+   */
+  algorithm?: string;
   /**
    * 自然边长：相邻节点表面的平衡间距（不是中心距）。
    * 由核力常数校准导出：无张力时平衡间隙 g* = naturalLength。

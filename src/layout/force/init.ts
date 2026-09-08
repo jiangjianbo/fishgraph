@@ -6,9 +6,9 @@
  * 增量顺序天然打破对称，产出的初始结构与图拓扑同构，收敛快且稳定。
  */
 
-import type { LayoutNode } from './forces.js';
-import { mulberry32 } from './rng.js';
-import type { InitMode } from './types.js';
+import type { LayoutNode } from '../../graph/store.js';
+import { mulberry32 } from '../../rng.js';
+import type { InitMode } from '../../types.js';
 
 /** 度数优先的 BFS 增量放置。nodes 为全量节点，仅 movable 且未放置的会被摆放。 */
 function placeByBfs(

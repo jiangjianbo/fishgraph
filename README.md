@@ -96,6 +96,31 @@ CJK 逐字断），取包围盒面积最小者。
 2000 节点压力测试在秒级完成。`accuracy: 'exact'` 为 O(n²) 参考实现，
 两者结果一致性有测试保证。
 
+## 架构（策略模式）
+
+布局算法随时在变，节点管理与界面展示是稳定的 —— 三者严格分离：
+
+```
+src/
+  graph/store.ts          节点/边管理（稳定底座）：图数据、邻接、固定状态、
+                          文字度量、增删改查。不含任何布局算法。
+  layout/strategy.ts      LayoutStrategy 接缝：策略接口 + 注册表
+                          （registerStrategy / createStrategy / listStrategies）。
+  layout/force/           力导向算法（独立子目录）：力学内核 forces.ts、
+                          Barnes-Hut、空间网格、求解器、初始摆放、strategy.ts 组装。
+  layout/circle/          环形布局（独立子目录）：最小策略示例。
+  layout.ts               ForceLayout 门面：装配 store + 当前策略，公共 API 委派。
+```
+
+- 策略只通过 `GraphStore` 读图、写坐标，不拥有图数据；图结构变化后由门面通知
+  `rebuild()`，用户拖拽通知 `invalidate()`。
+- 运行时切换：`layout.setStrategy('circle')` 或 `updateOptions({ algorithm })` ——
+  图数据保留，位置由新策略重新初始化。
+- **新增布局算法** = 新建一个子目录实现 `LayoutStrategy`（5 个必选成员 +
+  若干只读状态），调用 `registerStrategy(name, factory)` 即接入，测试与界面无需改动。
+- 多个算法共享的公共部分（如通用求解器）未来可抽独立子目录；当前只有
+  一个力学算法，暂不抽取。
+
 ## API
 
 ```ts
@@ -121,6 +146,7 @@ r.converged;        // 力残差判据
 
 | 参数 | 默认 | 作用 |
 |---|---|---|
+| `algorithm` | 'force-directed' | 布局策略名；运行时用 `layout.setStrategy(name)` 切换 |
 | `naturalLength` | 120 | 一切尺度的锚：平衡边长 = 它，斥力作用域 = 2×它 |
 | `edgeTension` | 0.1 | >0 让长边额外收缩；过大时会把多跳路径压成叠线 |
 | `edgeNodeRepulsion` | 3 | 压线推开力度；大矩形+回环枢纽的图可加到 10–20 |
