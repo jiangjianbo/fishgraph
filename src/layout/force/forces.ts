@@ -2,16 +2,23 @@
  * 力场计算 —— 算法的物理核心。
  *
  * 所有节点对之间（核力式斥力 + 引力），g 为表面间隙（中心距 − 两包围圆半径）：
- *   斥力（作用域 g < R = 1.5L）
+ *   斥力（作用域 g < R = 2L）
  *        E_r = k_r·mᵢmⱼ/2 · (1/g − 1/R)²      F_r = k_r·mᵢmⱼ·(1/g − 1/R)/g²
  *     —— 接触/近距时陡增（g→0 主项回到 k_r/g³ 的核力行为），
  *        在作用域边界 g = R 处能量与力同时光滑归零（C¹）。
  *        脱离接触后斥力迅速消失：定位由连线引力主导，节点不会为了
  *        "躲远处的邻居堆"而把两条连线折到同一侧。
- *   引力   F_a = k_a · mᵢmⱼ / g²          （仅相邻节点对，万有引力式，长程）
+ *   连线弹力 F_b = τ·k_a/L² · μ_e · g    （橡皮筋：仅相邻节点对，越长拉力越大；
+ *      τ = edgeTension 刚度倍率，τ=1 时无交叉平衡间隙恰为 L。
+ *      连线在节点内部的那截不贡献弹力）
+ *     μ_e = 1 + λ·X_e 是每条边的交叉收缩乘子：X_e 为该边与其它（不共享
+ *     端点的）边的严格相交次数，λ = crossingShrink。交叉越多的线收缩力
+ *     越强，交叉在能量上天然趋于消解。X_e 在每次力场求值时按当前坐标
+ *     重算，力与能量用同一组 μ_e —— 分段保守（力 = −∇E 在交叉事件之间
+ *     严格成立），能量单调下降不受影响。
  *   弱引力 F_w = k_w · mᵢmⱼ / g²          （非相邻节点对，k_w ≪ k_a；或 centroid 调和约束）
  *
- *   相邻平衡间隙由 k_r·(1/g−1/R) = k_a + k_t·g³ 决定（≈ 0.6L，比旧长尾模型更紧凑）；
+ *   相邻平衡间隙由 k_r·(1/g−1/R) = μ_e·(k_a + k_t·g³) 决定（μ=1、无张力时恰为 L）；
  *   非相邻平衡间隙 k_r·(1/g−1/R) = k_w（< R，陌生人仍比朋友远，且在墙外彻底自由）。
  *
  * 边-节点避让：节点压到不相关的线段上时受到垂直于线段的强斥力 F = k_en/h²，
@@ -23,6 +30,7 @@
 import type { AccuracyMode, GravityMode, LayoutStage } from '../../types.js';
 import { closestPointOnSegment, shapeSdf } from '../../geometry.js';
 import { jitterDirection } from '../../rng.js';
+import { countEdgeCrossings } from './crossings.js';
 import type { InternalEdge, LayoutNode } from '../../graph/store.js';
 import { QuadTree, type BHPoint, type QuadCell } from './quadtree.js';
 import { SpatialGrid, type GridItem } from './spatialgrid.js';
@@ -36,6 +44,12 @@ export interface DerivedParams {
   kr: number;
   /** 斥力作用域（表面间隙上限）：≥ repR 时斥力能量与力光滑归零。 */
   repR: number;
+  /** 交叉收缩系数 λ：边每交叉一次，引力/张力放大 (1+λ) 倍。 */
+  crossLambda: number;
+  /** 交叉能量罚（绝对单位）：每条边每有一个交叉点，能量加 crossK。
+   *  分段常数（无梯度），由能量比较影响线搜索的接受判断 ——
+   *  交叉事件即能量台阶；必须压过 μ_e 放大负引力能的降幅。 */
+  crossK: number;
   kw: number;
   kt: number;
   /** 边-节点软墙全压强度（已含 edgeNodeRepulsion 倍率）。 */
@@ -51,6 +65,16 @@ export interface DerivedParams {
   obstacleR: number;
   /** 接触弹簧的作用距离（间隙小于它进入重叠推离区），随布局尺度缩放。 */
   gFloor: number;
+  /** 近程防穿越墙强度（不随跳数衰减）：k_near = ½k_r。 */
+  nearK: number;
+  /** 近程防穿越墙作用域：g_near = 0.6L。 */
+  nearR: number;
+  /** 线间避让斥力全压强度（两条线贴到 d=0 时的力）：k_ee = 30k_a/L²。 */
+  kee: number;
+  /** 线间避让作用距离：d_ee = 0.35L（线段中心线到中心线）。 */
+  dee: number;
+  /** 线间避让开关（opt-in，默认关）。 */
+  lineAvoid: boolean;
 }
 
 export interface ForceContext {
@@ -63,6 +87,14 @@ export interface ForceContext {
   accuracy: AccuracyMode;
   theta: number;
   labelCollision: boolean;
+  /** 每条边的引力乘子 μ_e = 1 + λ×交叉数（每次力场求值时刷新）。 */
+  edgeKaMul: number[];
+  /** 每条边的交叉点数 X_e（与 edgeKaMul 同步刷新）。 */
+  edgeCrossCounts: number[];
+  /** 本轮求值的交叉能量罚总额 kCross·ΣX_e（调用方累加进能量）。 */
+  crossPenaltyEnergy: number;
+  /** 跳数斥力乘子矩阵（n²，拓扑导出）；null = 特性停用（σ 恒 1）。 */
+  hopScale: Float32Array | null;
   stage: LayoutStage;
   energy: number;
   /** 力残差：max|F|/forceUnit。收敛判据 —— 所有节点的合力趋近 0。 */
@@ -76,6 +108,9 @@ export function deriveParams(
     edgeNodeRepulsion: number;
     edgeTension: number;
     centroidStrength: number;
+    crossingShrink: number;
+    crossingEnergy: number;
+    lineAvoidance: number | boolean;
   },
   nodeCount: number,
 ): DerivedParams {
@@ -83,10 +118,26 @@ export function deriveParams(
   const ka = 1;
   // 斥力作用域：间隙达到 2L 时斥力光滑归零（脱离接触后迅速消失）。
   const repR = 2 * L;
+  // 交叉收缩系数：≥0。每交叉一次，该边引力+张力放大 (1+λ) 倍。
+  const crossLambda = Math.max(opts.crossingShrink, 0);
+  // 交叉能量罚：能量单位 k_a/L × crossingEnergy。默认 0.2 时单交叉点
+  // 总罚（两条边各记一次）明显大于 μ_e 缩放带来的负弹力能降幅。
+  const crossK = Math.max(opts.crossingEnergy, 0) * (ka / L);
   // 校准 kr：无张力时相邻平衡间隙恰为 L —— k_r·(1/L − 1/repR) = k_a。
   const kr = (ka * L * repR) / (repR - L);
+  // 近程防穿越墙：远程推挤（0.8L~2L）可按跳数衰减，0.8L 内的贴身排斥
+  // 是硬规则（永不衰减）—— 防重叠也防"叶子自由穿越远分支造成交叉"。
+  const nearK = 0.5 * kr;
+  const nearR = 0.8 * L;
+  // 线间避让斥力：两条连线靠近时互相推开（防交叉的主力，原则 8 的力学支撑）。
+  // 全压强度 30 倍力单位 —— 需要压过节点互斥与弱引力的向心聚集，
+  // 才能把交织的线真正挤开；线性软墙远离即归零，不干扰正常布局。
+  const kee = 30 * (ka / (L * L));
+  const dee = 0.35 * L;
+  const lineAvoid = !!opts.lineAvoidance;
   const kw = ka * Math.max(opts.weakGravityRatio, 1e-6);
-  // 线性张力 k_t：g = L 时张力是引力（k_a/L²）的 edgeTension 倍 → k_t = τ·k_a/L³
+  // 橡皮筋刚度 k_b = τ·k_a/L³：F = k_b·g 随线长线性增强（连线越长拉力越大），
+  // τ=1 时与截断斥力的平衡间隙恰为 naturalLength（k_r(1/L−1/2L)/L² = k_b·L）。
   const kt = Math.max(opts.edgeTension, 0) * (ka / (L * L * L));
   // 避让软墙全压强度：约为键合力（k_a/L²）的 edgeNodeRepulsion×10 倍 ——
   // 足以坚决推开压线的节点，又不会远程扭曲整个布局。
@@ -100,6 +151,13 @@ export function deriveParams(
     ka,
     kr,
     repR,
+    crossLambda,
+    crossK,
+    nearK,
+    nearR,
+    kee,
+    dee,
+    lineAvoid,
     kw,
     kt,
     ken,
@@ -131,14 +189,14 @@ function finalizeForces(ctx: ForceContext): void {
   ctx.maxForceUnit = maxF * (1 / ctx.params.forceUnit);
 }
 
-/** 一对节点之间的作用类型。 */
+/** 节点对在"逐对循环"里的作用类型：相邻对的引力/张力一律走边循环
+ *  （applyEdgeAttraction，按边乘子 μ_e 缩放），这里只剩斥力与弱引力。 */
 export type PairKind =
-  | 'adjacent'            // 相邻：斥力 + k_a 引力
   | 'stranger-pairwise'   // 非相邻：斥力 + k_w 弱引力
-  | 'stranger-repulsion'; // 非相邻（centroid 模式或 BH 已算引力）：仅斥力
+  | 'stranger-repulsion'; // 非相邻（centroid 模式或已由边循环算引力）：仅斥力
 
 function pairKind(ctx: ForceContext, adjacent: boolean): PairKind {
-  if (adjacent) return 'adjacent';
+  if (adjacent) return 'stranger-repulsion';
   return ctx.gravity === 'pairwise' ? 'stranger-pairwise' : 'stranger-repulsion';
 }
 
@@ -157,46 +215,80 @@ function repulsionTerm(
   s: number,
   gFloor: number,
   repR: number,
+  scale = 1,
+  nearK = 0,
+  nearR = 0,
 ): { f: number; e: number; g: number } {
-  if (s >= repR) return { f: 0, e: 0, g: s };
-  if (s >= gFloor) {
+  // 远程墙（σ 缩放，作用域 repR）+ 近程墙（不缩放，作用域 nearR，防穿越）
+  // 两项同为"截断平移平方"势，和的梯度 = 梯度的和，保守性保持。
+  let f = 0;
+  let e = 0;
+  if (s < repR) {
     const inv = 1 / s - 1 / repR;
-    return { f: (kr * m * inv) / (s * s), e: 0.5 * kr * m * inv * inv, g: s };
+    f += (kr * m * inv) / (s * s) * scale;
+    e += 0.5 * kr * m * inv * inv * scale;
   }
-  const fWall = (kr * m * (1 / gFloor - 1 / repR)) / (gFloor * gFloor);
+  if (nearK > 0 && s < nearR && s >= gFloor) {
+    const invN = 1 / s - 1 / nearR;
+    f += (nearK * m * invN) / (s * s);
+    e += 0.5 * nearK * m * invN * invN;
+  }
+  if (s >= gFloor) return { f, e, g: s };
+  // 接触弹簧延拓（防重叠不可妥协，永不衰减）：
+  // gFloor 处两墙取值线性化 + kv·m·depth 二次硬化。
+  let fWall = (kr * m * (1 / gFloor - 1 / repR)) / (gFloor * gFloor) * scale;
+  let eWall = 0.5 * kr * m * Math.pow(1 / gFloor - 1 / repR, 2) * scale;
+  if (nearK > 0 && nearR > gFloor) {
+    fWall += (nearK * m * (1 / gFloor - 1 / nearR)) / (gFloor * gFloor);
+    eWall += 0.5 * nearK * m * Math.pow(1 / gFloor - 1 / nearR, 2);
+  }
   const kv = kr / Math.pow(gFloor, 4);
   const depth = gFloor - s;
-  // E(s) = E(gFloor) + F(gFloor)·depth + ½·kv·m·depth² —— F = −∂E/∂s 精确成立。
   return {
     f: fWall + kv * m * depth,
-    e:
-      0.5 * kr * m * Math.pow(1 / gFloor - 1 / repR, 2) +
-      fWall * depth +
-      0.5 * kv * m * depth * depth,
+    e: eWall + fWall * depth + 0.5 * kv * m * depth * depth,
     g: gFloor,
   };
 }
 
-/** 引力项（万有引力式 k/g² + 可选线性张力 kt·g），g 为表面间隙。
- *  间隙低于 gFloor 后引力截断为常力（防止重叠时引力发散），
- *  能量用线性延拓 E(s) = E(gFloor) − F(gFloor)·(gFloor − s) ——
- *  穿透越深引力能量越低（引力本性如此），重叠推开由斥力接触弹簧负责；
- *  关键是力 = −∂E/∂d 在截断处之后依然精确成立。 */
+/** 弱引力项（万有引力式 k/g²，仅 stranger-pairwise 弱基础引力使用）。
+ *  间隙低于 gFloor 后截断为常力（防止重叠时发散），能量线性延拓 ——
+ *  力 = −∂E/∂d 在截断处之后依然精确成立。 */
 function attractionTerm(
   k: number,
-  kt: number,
   m: number,
   s: number,
   gFloor: number,
 ): { f: number; e: number } {
-  if (k === 0 && kt === 0) return { f: 0, e: 0 };
+  if (k === 0) return { f: 0, e: 0 };
   if (s >= gFloor) {
-    return { f: (k * m) / (s * s) + kt * s, e: -(k * m) / s + 0.5 * kt * s * s };
+    return { f: (k * m) / (s * s), e: -(k * m) / s };
   }
-  const f = (k * m) / (gFloor * gFloor) + kt * gFloor;
+  const f = (k * m) / (gFloor * gFloor);
   return {
     f,
-    e: -(k * m) / gFloor + 0.5 * kt * gFloor * gFloor - f * (gFloor - s),
+    e: -(k * m) / gFloor - f * (gFloor - s),
+  };
+}
+
+/** 连线弹力项（橡皮筋收缩力）：F = k_b·g，E = ½·k_b·g²。
+ *  连线越长拉力越大（线性）；g→0 拉力消失（压缩由斥力负责）。
+ *  k_b = τ·k_a/L³·μ_e：交叉收缩放大劲度 —— 交叉越多的线收缩力量越大。
+ *  间隙低于 gFloor 后按常力线性延拓（力 = −∂E/∂s 精确成立）。 */
+function bondTerm(
+  kb: number,
+  m: number,
+  s: number,
+  gFloor: number,
+): { f: number; e: number } {
+  if (kb === 0) return { f: 0, e: 0 };
+  if (s >= gFloor) {
+    return { f: kb * m * s, e: 0.5 * kb * m * s * s };
+  }
+  const f = kb * m * gFloor;
+  return {
+    f,
+    e: 0.5 * kb * m * gFloor * gFloor - f * (gFloor - s),
   };
 }
 
@@ -221,11 +313,12 @@ function applyNodePair(ctx: ForceContext, i: number, j: number, kind: PairKind):
   }
   const s = d - ni.r - nj.r;
   const m = ni.mass * nj.mass;
-  const rep = repulsionTerm(p.kr, m, s, p.gFloor, p.repR);
-  // 引力（仅相邻对带线性张力；非相邻对按模式带弱引力）
-  const kLong = kind === 'adjacent' ? p.ka : kind === 'stranger-pairwise' ? p.kw : 0;
-  const ktPair = kind === 'adjacent' ? p.kt : 0;
-  const att = attractionTerm(kLong, ktPair, m, s, p.gFloor);
+  // 跳数斥力衰减：h=1 邻接不衰减，逐跳乘 decay^(h-1)，无关系对乘 floor。
+  const scale = ctx.hopScale ? ctx.hopScale[i * ctx.nodes.length + j] : 1;
+  const rep = repulsionTerm(p.kr, m, s, p.gFloor, p.repR, scale, p.nearK, p.nearR);
+  // 弱基础引力（相邻对的连线弹力由边循环按 μ_e 缩放施加）
+  const kLong = kind === 'stranger-pairwise' ? p.kw : 0;
+  const att = attractionTerm(kLong, m, s, p.gFloor);
   // 调和约束（centroid 模式，所有节点对）：F = kharm·m·d，能量 ½kharm·m·d²
   const harm = ctx.gravity === 'centroid' ? p.kharm * m * d : 0;
   const net = rep.f - att.f - harm;
@@ -242,7 +335,11 @@ function applyNodePair(ctx: ForceContext, i: number, j: number, kind: PairKind):
 
 /** BH 模式：沿边累加相邻节点的引力 + 线性张力（斥力已由四叉树负责）。
  *  与精确模式 adjacent 对的引力项是同一个 attractionTerm，保证两种精度一致。 */
-function applyEdgeAttraction(ctx: ForceContext, e: InternalEdge): number {
+/** 沿边累加相邻节点的橡皮筋弹力（斥力已由逐对/四叉树负责）。
+ *  精确与 BH 模式走同一函数：弹力按交叉收缩乘子 μ_e 缩放
+ *  （力与能量同乘子，分段保守）。 */
+function applyEdgeAttraction(ctx: ForceContext, edgeIndex: number): number {
+  const e = ctx.edges[edgeIndex];
   const na = ctx.nodes[e.a];
   const nb = ctx.nodes[e.b];
   const p = ctx.params;
@@ -250,7 +347,9 @@ function applyEdgeAttraction(ctx: ForceContext, e: InternalEdge): number {
   const dy = na.y - nb.y;
   const d = Math.hypot(dx, dy);
   const m = na.mass * nb.mass;
-  const att = attractionTerm(p.ka, p.kt, m, d - na.r - nb.r, p.gFloor);
+  const mul = ctx.edgeKaMul[edgeIndex];
+  // 橡皮筋弹力：交叉收缩 μ_e 放大劲度（收缩力量更大，收敛更果断）
+  const att = bondTerm(p.kt * mul, m, d - na.r - nb.r, p.gFloor);
   const ux = d > 1e-9 ? dx / d : 0;
   const uy = d > 1e-9 ? dy / d : 0;
   na.fx -= att.f * ux;
@@ -258,6 +357,37 @@ function applyEdgeAttraction(ctx: ForceContext, e: InternalEdge): number {
   nb.fx += att.f * ux;
   nb.fy += att.f * uy;
   return att.e;
+}
+
+/** 单次力场求值内刷新交叉项：
+ *  μ_e = 1 + λ·X_e（收缩乘子，缩放引力/张力 —— 力与能量同组乘子，分段保守）
+ *  与交叉能量罚 kCross·ΣX_e（分段常数，抬高含交叉布局的能量）。
+ *  阶段 0（边未启用）、系数全零、边太少或超出计数预算时全部归零/恒 1。 */
+const EDGE_CROSSING_TEST_BUDGET = 80_000;
+
+function refreshCrossingTerms(ctx: ForceContext): void {
+  const mul = ctx.edgeKaMul;
+  const { crossLambda, crossK } = ctx.params;
+  if (ctx.stage < 1 || (crossLambda <= 0 && crossK <= 0) || ctx.edges.length < 2) {
+    mul.fill(1);
+    ctx.edgeCrossCounts.fill(0);
+    ctx.crossPenaltyEnergy = 0;
+    return;
+  }
+  const counts = countEdgeCrossings(ctx.nodes, ctx.edges, EDGE_CROSSING_TEST_BUDGET);
+  if (counts === null) {
+    mul.fill(1);
+    ctx.edgeCrossCounts.fill(0);
+    ctx.crossPenaltyEnergy = 0;
+    return;
+  }
+  let sum = 0;
+  for (let i = 0; i < counts.length; i++) {
+    mul[i] = 1 + crossLambda * counts[i];
+    ctx.edgeCrossCounts[i] = counts[i];
+    sum += counts[i];
+  }
+  ctx.crossPenaltyEnergy = crossK * sum;
 }
 
 /**
@@ -277,9 +407,14 @@ function applyCellInteraction(ctx: ForceContext, i: number, cell: QuadCell): num
   const uy = dy / dist;
   const m = ni.mass * cell.mass;
   const s = dist - ni.r - cell.avgR;
-  const rep = repulsionTerm(p.kr, m, s, p.gFloor, p.repR);
+  // 聚合块用代表成员的跳数近似（远块斥力本就趋于 0，近似误差可忽略）；
+  // repIndex<0 为空块兜底（不缩放）
+  const repIdx = cell.repIndex;
+  const scale =
+    ctx.hopScale && repIdx >= 0 ? ctx.hopScale[i * ctx.nodes.length + repIdx] : 1;
+  const rep = repulsionTerm(p.kr, m, s, p.gFloor, p.repR, scale, p.nearK, p.nearR);
   const kLong = ctx.gravity === 'pairwise' ? p.kw : 0;
-  const att = attractionTerm(kLong, 0, m, s, p.gFloor);
+  const att = attractionTerm(kLong, m, s, p.gFloor);
   // 调和约束的力关于位置是线性的，按质心聚合是精确的（无近似误差）。
   const fh = ctx.gravity === 'centroid' ? p.kharm * m * dist : 0;
   const net = rep.f - att.f - fh;
@@ -288,6 +423,99 @@ function applyCellInteraction(ctx: ForceContext, i: number, cell: QuadCell): num
   cell.aAccX -= (net * ux) / cell.mass;
   cell.aAccY -= (net * uy) / cell.mass;
   return rep.e + att.e + 0.5 * p.kharm * m * dist * dist;
+}
+
+/** 两连线的避让斥力（采样点法，严格保守）：
+ *  每条边按间距 d_ee 离散成固定参数的采样点 P = lerp(a, b, t)，采样点对
+ *  对方线段做"点-线软墙"（与边-节点墙同构）：
+ *    E = ½·k_ee·(d_ee − h)²/d_ee   F = k_ee·(d_ee − h)/d_ee   （h = 点到线距离）
+ *  采样点是端点的线性插值 → ∂P/∂a = 1−t、∂P/∂b = t，力按插值权重分摊
+ *  回两端 —— 力 = −∇E 严格成立（垂足分摊法不满足这一点，已废弃）。
+ *  共享端点的邻接边跳过；d ≥ d_ee 的采样对无力。 */
+function applyEdgeEdgeInteraction(ctx: ForceContext, ei: number, ej: number): number {
+  const e1 = ctx.edges[ei];
+  const e2 = ctx.edges[ej];
+  if (e1.a === e2.a || e1.a === e2.b || e1.b === e2.a || e1.b === e2.b) return 0;
+  const n = ctx.nodes;
+  const dee = ctx.params.dee;
+  let energy = 0;
+  // side1：e1 的采样点 vs e2 线段；side2 反向。共用内联实现。
+  for (let side = 0; side < 2; side++) {
+    const pa = side === 0 ? n[e1.a] : n[e2.a];
+    const pb = side === 0 ? n[e1.b] : n[e2.b];
+    const qa = side === 0 ? n[e2.a] : n[e1.a];
+    const qb = side === 0 ? n[e2.b] : n[e1.b];
+    const len = Math.hypot(pb.x - pa.x, pb.y - pa.y);
+    const samples = Math.min(6, Math.max(1, Math.ceil(len / dee)));
+    for (let k = 0; k < samples; k++) {
+      const t = (k + 0.5) / samples;
+      const px = pa.x + (pb.x - pa.x) * t;
+      const py = pa.y + (pb.y - pa.y) * t;
+      const q = closestPointOnSegment(px, py, qa.x, qa.y, qb.x, qb.y);
+      const dx = px - q.x;
+      const dy = py - q.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist >= dee) continue;
+      const h = Math.max(dist, 1e-6);
+      const gap = dee - h;
+      const f = (ctx.params.kee * gap) / dee;
+      let ux = dx / h;
+      let uy = dy / h;
+      if (!Number.isFinite(ux) || !Number.isFinite(uy) || Math.abs(ux) + Math.abs(uy) < 1e-12) {
+        const dir = jitterDirection(ei * 131 + ej * 7 + k, side * 977 + ej);
+        ux = dir.x;
+        uy = dir.y;
+      }
+      // 采样点受力 → 按插值权重回端点；反作用按垂足重心给对方两端
+      const wa = 1 - t;
+      pa.fx += f * ux * wa;
+      pa.fy += f * uy * wa;
+      pb.fx += f * ux * t;
+      pb.fy += f * uy * t;
+      const wqa = 1 - q.t;
+      qa.fx -= f * ux * wqa;
+      qa.fy -= f * uy * wqa;
+      qb.fx -= f * ux * q.t;
+      qb.fy -= f * uy * q.t;
+      energy += (0.5 * ctx.params.kee * gap * gap) / dee;
+    }
+  }
+  return energy;
+}
+
+/** 遍历全部边-边候选对（网格给候选，ei<ej 去重）施加线间避让。 */
+function applyEdgeEdgeAvoidance(ctx: ForceContext, grid: SpatialGrid): void {
+  const m = ctx.edges.length;
+  if (typeof (globalThis as any).__mode !== 'undefined') {
+    const g7 = globalThis as any;
+    g7.__av = g7.__av || {};
+    g7.__av[g7.__mode] = (g7.__av[g7.__mode] || 0) + 1;
+    if (g7.__mode === 'bh' && g7.__av.bh === 1) {
+      const involved: number[] = [];
+      ctx.edges.forEach((e, k) => { if (e.a === 112 || e.b === 112) involved.push(k); });
+      console.error('BH m=', m, 'edges of 112:', involved.join(','));
+      const aa = ctx.nodes[112];
+      console.error('node112 at', aa.x.toFixed(1), aa.y.toFixed(1));
+    }
+  }
+  for (let i = 0; i < m; i++) {
+    const a = ctx.nodes[ctx.edges[i].a];
+    const b = ctx.nodes[ctx.edges[i].b];
+    const mx = (a.x + b.x) / 2;
+    const my = (a.y + b.y) / 2;
+    const r = Math.hypot(b.x - a.x, b.y - a.y) / 2 + ctx.params.dee;
+    grid.query(mx, my, r, (item) => {
+      if (item.kind !== 0) return; // 跳过标签 item（BH 网格共用，否则线间斥力翻倍）
+      const j = item.edgeIndex;
+      if (j <= i) return;
+      if ((i === 112 || j === 112) && typeof (globalThis as any).__eeAcc !== 'undefined') {
+        const g8 = (globalThis as any).__eeAcc[(globalThis as any).__mode] ??
+          ((globalThis as any).__eeAcc[(globalThis as any).__mode] = { n: 0, fx: 0, fy: 0 });
+        g8.n++;
+      }
+      ctx.energy += applyEdgeEdgeInteraction(ctx, i, j);
+    });
+  }
 }
 
 /**
@@ -375,12 +603,36 @@ function applyLabelNodeInteraction(ctx: ForceContext, nodeIdx: number, e: Intern
 
 /** 精确模式：O(n²) 全对力 + 全部避让对。作为参考实现，也是小图的首选。 */
 export function computeForcesExact(ctx: ForceContext): number {
+  if (typeof (globalThis as any).__mode !== 'undefined') (globalThis as any).__mode = 'exact';
   resetForces(ctx);
   const n = ctx.nodes.length;
   const edgesActive = ctx.stage >= 1;
   for (let i = 0; i < n; i++) {
     for (let j = i + 1; j < n; j++) {
       ctx.energy += applyNodePair(ctx, i, j, pairKind(ctx, edgesActive && ctx.adj[i].has(j)));
+    }
+  }
+  // 相邻弹力：与 BH 模式同一条路径（按交叉收缩乘子 μ_e 缩放，
+  // 并累加交叉能量罚 —— 交叉点越多的布局含能量越高）。
+  if (ctx.stage >= 1) {
+    refreshCrossingTerms(ctx);
+    for (let ei = 0; ei < ctx.edges.length; ei++) {
+      ctx.energy += applyEdgeAttraction(ctx, ei);
+    }
+    ctx.energy += ctx.crossPenaltyEnergy;
+    // 线间避让斥力：交叉在力学上直接被挤开（原则 8 的力学支撑，opt-in）
+    if (ctx.params.lineAvoid && ctx.edges.length > 1) {
+      const grid = new SpatialGrid(Math.max(ctx.params.dee * 2, 1));
+      ctx.edges.forEach((e, i) => {
+        const a = ctx.nodes[e.a];
+        const b = ctx.nodes[e.b];
+        grid.insert(
+          Math.min(a.x, b.x), Math.min(a.y, b.y),
+          Math.max(a.x, b.x), Math.max(a.y, b.y),
+          { kind: 0 as const, edgeIndex: i, stamp: 0 },
+        );
+      });
+      if (ctx.params.lineAvoid) applyEdgeEdgeAvoidance(ctx, grid);
     }
   }
   if (ctx.stage >= 2) {
@@ -399,6 +651,7 @@ export function computeForcesExact(ctx: ForceContext): number {
 
 /** Barnes-Hut 模式：四叉树近似节点-节点力，空间网格加速避让候选对。 */
 export function computeForcesBH(ctx: ForceContext): number {
+  if (typeof (globalThis as any).__mode !== 'undefined') (globalThis as any).__mode = 'bh';
   resetForces(ctx);
   const n = ctx.nodes.length;
 
@@ -434,11 +687,13 @@ export function computeForcesBH(ctx: ForceContext): number {
     nd.fy += fy;
   });
 
-  // 2. 沿边累加相邻引力 + 线性张力
+  // 2. 沿边累加相邻弹力（按 μ_e 缩放）+ 交叉能量罚
   if (ctx.stage >= 1) {
-    for (const e of ctx.edges) {
-      ctx.energy += applyEdgeAttraction(ctx, e);
+    refreshCrossingTerms(ctx);
+    for (let ei = 0; ei < ctx.edges.length; ei++) {
+      ctx.energy += applyEdgeAttraction(ctx, ei);
     }
+    ctx.energy += ctx.crossPenaltyEnergy;
   }
 
   // 3. 避让：网格给出候选（边/标签 × 节点），内部再按影响半径过滤
@@ -470,6 +725,10 @@ export function computeForcesBH(ctx: ForceContext): number {
         labelItems[ei],
       );
     });
+  }
+  // 线间避让斥力：必须在 edgeItems 插入网格之后（原则 8 的力学支撑，opt-in）
+  if (ctx.stage >= 1 && ctx.params.lineAvoid && ctx.edges.length > 1) {
+    applyEdgeEdgeAvoidance(ctx, grid);
   }
   const queryR = ctx.params.obstacleR + rmax;
   if (ctx.stage >= 2) {

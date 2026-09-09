@@ -13,9 +13,8 @@
  *   - 核力式斥力只在短程作用域（表面间隙 < 2×naturalLength）内存在：
  *     接触/近距陡增保证不重叠，在作用域边界处能量与力光滑归零 ——
  *     脱离接触的节点互不干扰，图自然趋向紧凑（覆盖面积趋小）
- *   - 有连线才会有的万有引力式吸引（∝ 1/g²，长程）+ 线性张力（连线越长拉力越大）
- *   - 非相邻节点对之间只有很弱的基础引力（pairwise，平衡距饱和于斥力作用域）
- *     或调和约束（centroid，默认）
+ *   - 有连线才有橡皮筋收缩弹力（F ∝ g，连线越长拉力越大；自然长度 = naturalLength）
+ *   - 非相邻节点对之间只有很弱的基础引力（pairwise）或调和约束（centroid，默认）
  *   - 节点压到不相关的线段上会受到线性软墙强斥力，线段两端也被反向推动（让路）
  *   - 边文字是软墙：文字贴到节点才加压，把两端撑开到恰好容纳文字；
  *     长文字按"占用面积最小"自动回绕
@@ -46,7 +45,18 @@ const DEFAULTS = {
   // pairwise 弱引力比例：陌生人的平衡间隙 g = 1/(k_w/k_r + 1/2L)，饱和于斥力作用域。
   weakGravityRatio: 0.2,
   edgeNodeRepulsion: 3,
-  edgeTension: 0.1,
+  // 橡皮筋刚度倍率：τ=1 时平衡间隙恰为 naturalLength（越长拉力越大）
+  edgeTension: 1,
+  // 交叉收缩：边每交叉一次，引力/张力放大 15% —— 交叉越多的线越努力变短。
+  crossingShrink: 0.15,
+  // 交叉能量罚：每个交叉点抬高总能量 0.2×(k_a/L)，交叉布局天然能量更高。0 关闭。
+  crossingEnergy: 0.05,
+  // 线间避让斥力（opt-in）：稀疏流程图防交叉的重武器；全连接图/高密度图关闭
+  lineAvoidance: false,
+  // 跳数斥力衰减：相距 h 跳的节点斥力乘 0.5^(h-1)；不同分量的节点对乘 0.1
+  // —— 无直接或间接关系的节点几乎互不推挤（防重叠接触弹簧不衰减）。
+  hopRepulsionDecay: 0.7,
+  unrelatedRepulsion: 0.35,
   labelCollision: true,
   labelFontSize: 12,
   labelPadding: 4,

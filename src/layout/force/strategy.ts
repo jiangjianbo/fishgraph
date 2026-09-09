@@ -10,6 +10,7 @@ import type { GraphStore } from '../../graph/store.js';
 import { applyInitPlacement } from './init.js';
 import { deriveParams, type DerivedParams, type ForceContext } from './forces.js';
 import { RelaxationSolver, type SolverOptions } from './solver.js';
+import { buildHopScale } from './hops.js';
 import { registerStrategy } from '../strategy.js';
 import type { ForceSnapshot, LayoutStrategy, ResolvedLayoutOptions } from '../strategy.js';
 import type { AccuracyMode, LayoutStage, RunOptions, RunResult } from '../../types.js';
@@ -61,6 +62,10 @@ export class ForceDirectedStrategy implements LayoutStrategy {
       accuracy: options.accuracy,
       theta: options.theta,
       labelCollision: options.labelCollision,
+      hopScale: this.buildHopScale(),
+      edgeKaMul: new Array<number>(this.store.edges.length).fill(1),
+      edgeCrossCounts: new Array<number>(this.store.edges.length).fill(0),
+      crossPenaltyEnergy: 0,
       stage: 3,
       energy: 0,
       maxForceUnit: 0,
@@ -70,14 +75,24 @@ export class ForceDirectedStrategy implements LayoutStrategy {
 
   // ── 生命周期 ────────────────────────────────────────────
 
+  /** 跳数斥力乘子矩阵（拓扑导出，坐标无关；仅在图结构或系数变化时重建）。 */
+  private buildHopScale(): Float32Array | null {
+    return buildHopScale(
+      this.store.adj,
+      this.options.hopRepulsionDecay,
+      this.options.unrelatedRepulsion,
+    );
+  }
+
   private solverOptions(): SolverOptions {
     const L = this.params.L;
     return {
       maxStep: Math.max(1e-3, this.options.maxStepRatio * L),
       initStep: L * 0.05,
       minStep: 1e-3,
-      // 力残差阈值随尺度放大：对应位置精度 ~0.05px（曲率 ~ O(1/L)）
-      forceEps: Math.min(0.02, Math.max(2.5e-3, 1 / L)),
+      // 力残差阈值：0.5/L。线间避让斥力满额约 30 单位，远高于该阈值，
+      // 交叉态不会被误判为平衡；低于它的残余力对位移的影响可忽略。
+      forceEps: Math.min(0.02, Math.max(1.5e-3, 0.5 / L)),
       calmNeeded: 5,
       driftForceEps: 1e-6,
       driftRatio: 0.1,
@@ -94,6 +109,13 @@ export class ForceDirectedStrategy implements LayoutStrategy {
     this.ctx.accuracy = options.accuracy;
     this.ctx.theta = options.theta;
     this.ctx.labelCollision = options.labelCollision;
+    // 跳数系数变化时重建乘子矩阵（拓扑没变，仅系数变）
+    if (
+      options.hopRepulsionDecay !== this.options.hopRepulsionDecay ||
+      options.unrelatedRepulsion !== this.options.unrelatedRepulsion
+    ) {
+      this.ctx.hopScale = this.buildHopScale();
+    }
     this.store.refreshLabelBoxes();
     this.store.applyNodeLabelSizes(this.ctx.stage >= 3);
     Object.assign(this.solver.opts, this.solverOptions());
@@ -114,6 +136,10 @@ export class ForceDirectedStrategy implements LayoutStrategy {
     this.ctx.nodes = this.store.nodes;
     this.ctx.edges = this.store.edges;
     this.ctx.adj = this.store.adj;
+    this.ctx.edgeKaMul = new Array<number>(this.store.edges.length).fill(1);
+    this.ctx.edgeCrossCounts = new Array<number>(this.store.edges.length).fill(0);
+    this.ctx.crossPenaltyEnergy = 0;
+    this.ctx.hopScale = this.buildHopScale();
     const spreadD =
       this.options.gravity === 'centroid'
         ? this.params.L * Math.pow(1 / (2 * Math.max(this.options.centroidStrength, 1e-4)), 0.25)

@@ -1,6 +1,6 @@
 /** 几何工具：向量、点到线段投影、形状 SDF（带符号距离函数）。 */
 
-import type { ShapeSpec } from './types.js';
+import type { ShapeSpec, Vec2 } from './types.js';
 
 export interface ClosestPoint {
   x: number;
@@ -96,3 +96,41 @@ export function boundingRadius(shape: ShapeSpec): number {
 }
 
 export const DEFAULT_SHAPE: ShapeSpec = { kind: 'circle', r: 10 };
+
+export interface SegmentPair {
+  /** 两线段最近点对与距离（端点钳制）。 */
+  p1: Vec2;
+  p2: Vec2;
+  dist: number;
+}
+
+/** 线段 [A1,A2] 与 [B1,B2] 的最近点对（参数钳制，一次牛顿式修正）。 */
+export function segmentClosestPoints(
+  a1x: number, a1y: number, a2x: number, a2y: number,
+  b1x: number, b1y: number, b2x: number, b2y: number,
+): SegmentPair {
+  const d1x = a2x - a1x;
+  const d1y = a2y - a1y;
+  const d2x = b2x - b1x;
+  const d2y = b2y - b1y;
+  const rx = a1x - b1x;
+  const ry = a1y - b1y;
+  const a = d1x * d1x + d1y * d1y;
+  const e = d2x * d2x + d2y * d2y;
+  const f = d2x * rx + d2y * ry;
+  const EPS = 1e-9;
+  let s = 0;
+  if (a > EPS) s = Math.min(1, Math.max(0, -(d1x * rx + d1y * ry) / a));
+  let t = 0;
+  if (e > EPS) t = Math.min(1, Math.max(0, f / e));
+  // 平行/退化时的一次修正
+  if (a > EPS && e > EPS) {
+    const t2 = Math.min(1, Math.max(0, (t * (d2x * d1x + d2y * d1y) + f) / e));
+    const s2 = Math.min(1, Math.max(0, (s * a - t2 * (d2x * d1x + d2y * d1y)) / a));
+    s = s2;
+    t = t2;
+  }
+  const p1 = { x: a1x + d1x * s, y: a1y + d1y * s };
+  const p2 = { x: b1x + d2x * t, y: b1y + d2y * t };
+  return { p1, p2, dist: Math.hypot(p1.x - p2.x, p1.y - p2.y) };
+}

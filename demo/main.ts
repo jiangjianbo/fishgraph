@@ -138,12 +138,16 @@ const sliders = {
   en: $<HTMLInputElement>('en'),
   wg: $<HTMLInputElement>('wg'),
   kt: $<HTMLInputElement>('kt'),
+  cs: $<HTMLInputElement>('cs'),
+  hd: $<HTMLInputElement>('hd'),
 };
 const outs = {
   L: $<HTMLOutputElement>('Lv'),
   en: $<HTMLOutputElement>('env'),
   wg: $<HTMLOutputElement>('wgv'),
   kt: $<HTMLOutputElement>('ktv'),
+  cs: $<HTMLOutputElement>('csv'),
+  hd: $<HTMLOutputElement>('hdv'),
 };
 const labelCollision = $<HTMLInputElement>('lc');
 
@@ -154,6 +158,8 @@ function optionsFromUi(): LayoutOptions {
     edgeNodeRepulsion: Number(sliders.en.value),
     weakGravityRatio: Number(sliders.wg.value) / 100,
     edgeTension: Number(sliders.kt.value) / 10,
+    crossingShrink: Number(sliders.cs.value) / 100,
+    hopRepulsionDecay: Number(sliders.hd.value) / 100,
     labelCollision: labelCollision.checked,
     gravity: gravitySel.value as LayoutOptions['gravity'],
     accuracy: accuracySel.value as LayoutOptions['accuracy'],
@@ -167,6 +173,8 @@ function syncOutputs(): void {
   outs.en.value = sliders.en.value;
   outs.wg.value = `${(Number(sliders.wg.value) / 100).toFixed(2)}`;
   outs.kt.value = (Number(sliders.kt.value) / 10).toFixed(1);
+  outs.cs.value = (Number(sliders.cs.value) / 100).toFixed(2);
+  outs.hd.value = (Number(sliders.hd.value) / 100).toFixed(2);
 }
 
 // ── 布局实例与动画状态 ────────────────────────────────────

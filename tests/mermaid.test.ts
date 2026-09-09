@@ -209,12 +209,14 @@ describe('mermaid 流程图（用户样本）', () => {
   it(
     '收敛、无重叠、连线不穿节点，并渲染 SVG 供目视比对',
     () => {
-    // edgeNodeRepulsion: 20 —— 大矩形节点图上"线遮盖节点产生强斥力"必须坚决
-    // 生效（默认 3 在紧凑布局里会被链条弹簧力压过，留下个别穿越的亚稳态）。
+    // edgeNodeRepulsion: 40 —— 大矩形节点图 + 跳数衰减的紧凑布局里，
+    // 软墙必须坚决生效才能守住"零线穿节点"。
     const layout = new ForceLayout(MERMAID_GRAPH, {
       naturalLength: 120,
       seed: 42,
-      edgeNodeRepulsion: 20,
+      // edgeNodeRepulsion 40：跳数衰减(0.7)让图更紧凑，软墙需同步加强
+      // 才能守住"零线穿节点"（20 会被挤压穿透，40 实测零穿透且收敛）。
+      edgeNodeRepulsion: 40,
     });
     const r = layout.run({ maxIterations: 24000 });
     expect(r.converged).toBe(true);
@@ -272,7 +274,7 @@ describe('mermaid 流程图（用户样本）', () => {
     expect(maxPair).toBeLessThan(4000);
 
     // 确定性：相同 seed 两次完整求解结果逐位一致
-    const again = new ForceLayout(MERMAID_GRAPH, { naturalLength: 120, seed: 42, edgeNodeRepulsion: 20 });
+    const again = new ForceLayout(MERMAID_GRAPH, { naturalLength: 120, seed: 42, edgeNodeRepulsion: 40 });
     again.run({ maxIterations: 24000 });
     for (let i = 0; i < layout.nodeViews.length; i++) {
       expect(again.nodeViews[i].x).toBeCloseTo(layout.nodeViews[i].x, 6);

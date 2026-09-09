@@ -33,6 +33,8 @@ export interface QuadCell {
   /** 块内最大包围圆半径（分离判据用它，avgR 会低估大块边界）。 */
   maxR: number;
   count: number;
+  /** 代表成员下标（聚合交互里做逐对查表，如跳数斥力系数）。 */
+  repIndex: number;
   /** 对质心的转动惯量 Σᵢ mᵢ|xᵢ−COM|²（远块聚合能量的低阶修正）。 */
   inertia: number;
   /**
@@ -60,6 +62,7 @@ function newCell(x0: number, y0: number, size: number): QuadCell {
     avgR: 0,
     maxR: 0,
     count: 0,
+    repIndex: -1,
     inertia: 0,
     aAccX: 0,
     aAccY: 0,
@@ -140,6 +143,8 @@ export class QuadTree {
         if (p.radius > mr) mr = p.radius;
       }
       cell.count = cell.points.length;
+      // 细分后可能留下空叶（所有点挤进同一象限）：repIndex 置 -1 由调用方兜底
+      cell.repIndex = cell.points.length > 0 ? cell.points[0].index : -1;
       cell.mass = m;
       cell.comX = m > 0 ? sx / m : cell.x0 + cell.size / 2;
       cell.comY = m > 0 ? sy / m : cell.y0 + cell.size / 2;
@@ -166,6 +171,7 @@ export class QuadTree {
       if (c.maxR > mr) mr = c.maxR;
     }
     cell.count = count;
+    cell.repIndex = children.find((c) => c.count > 0)!.repIndex;
     cell.mass = m;
     cell.comX = m > 0 ? sx / m : cell.x0 + cell.size / 2;
     cell.comY = m > 0 ? sy / m : cell.y0 + cell.size / 2;
