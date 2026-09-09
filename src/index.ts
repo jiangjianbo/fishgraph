@@ -6,7 +6,8 @@ export { ForceLayout } from './layout.js';
 export { estimateLabelBox, type LabelBox } from './label.js';
 
 // 节点/边管理（稳定底座）
-export { GraphStore, type InternalEdge, type LayoutNode } from './graph/store.js';
+export { GraphStore, type GroupRoles, type InternalEdge, type LayoutNode } from './graph/store.js';
+export { detectHiddenGroups, type HiddenGroup } from './graph/groups.js';
 
 // 布局策略接缝
 export {
@@ -23,6 +24,7 @@ export type {
   AccuracyMode,
   EdgeSpec,
   GraphSpec,
+  GroupSpec,
   GravityMode,
   InitMode,
   LayoutOptions,

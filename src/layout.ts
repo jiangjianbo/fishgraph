@@ -53,6 +53,8 @@ const DEFAULTS = {
   crossingEnergy: 0.05,
   // 线间避让斥力（opt-in）：稀疏流程图防交叉的重武器；全连接图/高密度图关闭
   lineAvoidance: false,
+  // 隐藏组聚集强度：hidden-group 成员向组质心的简谐束缚（越大越紧凑）
+  groupCohesion: 3,
   // 跳数斥力衰减：相距 h 跳的节点斥力乘 0.5^(h-1)；不同分量的节点对乘 0.1
   // —— 无直接或间接关系的节点几乎互不推挤（防重叠接触弹簧不衰减）。
   hopRepulsionDecay: 0.7,

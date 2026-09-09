@@ -73,6 +73,10 @@ export interface DerivedParams {
   kee: number;
   /** 线间避让作用距离：d_ee = 0.35L（线段中心线到中心线）。 */
   dee: number;
+  /** subgraph 包含墙强度（成员出界拉回）：k_in = 12k_a/L²。 */
+  kin: number;
+  /** 隐藏组聚集系数（groupCohesion 选项值）。 */
+  groupCohesion: number;
   /** 线间避让开关（opt-in，默认关）。 */
   lineAvoid: boolean;
 }
@@ -95,6 +99,12 @@ export interface ForceContext {
   crossPenaltyEnergy: number;
   /** 跳数斥力乘子矩阵（n²，拓扑导出）；null = 特性停用（σ 恒 1）。 */
   hopScale: Float32Array | null;
+  /** 下标 → 所属 subgraph 的 hub 下标（非 subgraph 成员为 -1）。 */
+  hubOfMember: Int32Array;
+  /** hidden-group 聚集束缚：成员下标 + 每成员束缚系数（k_a/L²·cohesion/n）。 */
+  hiddenGroups: Array<{ members: number[]; k: number }>;
+  /** subgraph 包含墙：hub 下标 + 成员下标 + 内切半径 + 墙强度。 */
+  subgraphBoxes: Array<{ hub: number; members: number[]; rIn: number; k: number }>;
   stage: LayoutStage;
   energy: number;
   /** 力残差：max|F|/forceUnit。收敛判据 —— 所有节点的合力趋近 0。 */
@@ -111,6 +121,7 @@ export function deriveParams(
     crossingShrink: number;
     crossingEnergy: number;
     lineAvoidance: number | boolean;
+    groupCohesion: number;
   },
   nodeCount: number,
 ): DerivedParams {
@@ -135,6 +146,9 @@ export function deriveParams(
   const kee = 30 * (ka / (L * L));
   const dee = 0.35 * L;
   const lineAvoid = !!opts.lineAvoidance;
+  // subgraph 包含墙：成员出界 1 单位间隙时拉回力约 12 力单位。
+  const kin = 12 * (ka / (L * L));
+  const groupCohesion = Math.max(opts.groupCohesion, 0);
   const kw = ka * Math.max(opts.weakGravityRatio, 1e-6);
   // 橡皮筋刚度 k_b = τ·k_a/L³：F = k_b·g 随线长线性增强（连线越长拉力越大），
   // τ=1 时与截断斥力的平衡间隙恰为 naturalLength（k_r(1/L−1/2L)/L² = k_b·L）。
@@ -157,6 +171,8 @@ export function deriveParams(
     nearR,
     kee,
     dee,
+    kin,
+    groupCohesion,
     lineAvoid,
     kw,
     kt,
@@ -219,6 +235,10 @@ function repulsionTerm(
   nearK = 0,
   nearR = 0,
 ): { f: number; e: number; g: number } {
+  // scale=0 语义 = 这一对之间完全没有斥力（subgraph hub vs 其成员）：
+  // 远程墙、近程墙、接触弹簧一并豁免 —— 成员位于 hub 内部是期望状态，
+  // 不算穿透（防重叠由成员间互斥与包含墙保证）。
+  if (scale === 0) return { f: 0, e: 0, g: s };
   // 远程墙（σ 缩放，作用域 repR）+ 近程墙（不缩放，作用域 nearR，防穿越）
   // 两项同为"截断平移平方"势，和的梯度 = 梯度的和，保守性保持。
   let f = 0;
@@ -314,7 +334,13 @@ function applyNodePair(ctx: ForceContext, i: number, j: number, kind: PairKind):
   const s = d - ni.r - nj.r;
   const m = ni.mass * nj.mass;
   // 跳数斥力衰减：h=1 邻接不衰减，逐跳乘 decay^(h-1)，无关系对乘 floor。
-  const scale = ctx.hopScale ? ctx.hopScale[i * ctx.nodes.length + j] : 1;
+  let scale = ctx.hopScale ? ctx.hopScale[i * ctx.nodes.length + j] : 1;
+  // subgraph 的 hub 是"区域"而非实体：hub 与其成员之间无斥力
+  // （成员被包含墙约束在 hub 内部区域内，靠近 hub 是期望行为）。
+  if ((ctx.hubOfMember[i] === j && ctx.hubOfMember[i] >= 0) ||
+      (ctx.hubOfMember[j] === i && ctx.hubOfMember[j] >= 0)) {
+    scale = 0;
+  }
   const rep = repulsionTerm(p.kr, m, s, p.gFloor, p.repR, scale, p.nearK, p.nearR);
   // 弱基础引力（相邻对的连线弹力由边循环按 μ_e 缩放施加）
   const kLong = kind === 'stranger-pairwise' ? p.kw : 0;
@@ -483,6 +509,54 @@ function applyEdgeEdgeInteraction(ctx: ForceContext, ei: number, ej: number): nu
   return energy;
 }
 
+/** 组束缚力（精确与 BH 共用，O(成员数)）：
+ *  - hidden-group：成员到组质心的简谐束缚（平行轴定理下等价于组内全对
+ *    弹簧，保守、总合力零）—— "隐藏组内的节点倾向于聚集在一起"；
+ *  - subgraph：成员出界软墙 —— 成员中心保持在 hub 内部区域内，
+ *    g_out = d + member.r − rIn > 0 时向心拉回，E = ½k·g_out²/rIn；
+ *    反作用推 hub（容器被成员向外顶），hub 由全局力场定位。 */
+function applyGroupForces(ctx: ForceContext): number {
+  let energy = 0;
+  for (const hg of ctx.hiddenGroups) {
+    const m = hg.members.length;
+    if (m === 0) continue;
+    let cx = 0;
+    let cy = 0;
+    for (const idx of hg.members) {
+      cx += ctx.nodes[idx].x;
+      cy += ctx.nodes[idx].y;
+    }
+    cx /= m;
+    cy /= m;
+    for (const idx of hg.members) {
+      const nd = ctx.nodes[idx];
+      const fx = (hg.k * nd.mass) * (cx - nd.x);
+      const fy = (hg.k * nd.mass) * (cy - nd.y);
+      nd.fx += fx;
+      nd.fy += fy;
+      energy += 0.5 * hg.k * nd.mass * ((nd.x - cx) ** 2 + (nd.y - cy) ** 2);
+    }
+  }
+  for (const box of ctx.subgraphBoxes) {
+    const hub = ctx.nodes[box.hub];
+    for (const idx of box.members) {
+      const nd = ctx.nodes[idx];
+      const d = Math.hypot(nd.x - hub.x, nd.y - hub.y) || 1e-9;
+      const gOut = d + nd.r - box.rIn;
+      if (gOut <= 0) continue;
+      const f = (box.k * gOut) / box.rIn;
+      const ux = (hub.x - nd.x) / d;
+      const uy = (hub.y - nd.y) / d;
+      nd.fx += f * ux;
+      nd.fy += f * uy;
+      hub.fx -= f * ux;
+      hub.fy -= f * uy;
+      energy += (0.5 * box.k * gOut * gOut) / box.rIn;
+    }
+  }
+  return energy;
+}
+
 /** 遍历全部边-边候选对（网格给候选，ei<ej 去重）施加线间避让。 */
 function applyEdgeEdgeAvoidance(ctx: ForceContext, grid: SpatialGrid): void {
   const m = ctx.edges.length;
@@ -634,6 +708,7 @@ export function computeForcesExact(ctx: ForceContext): number {
       });
       if (ctx.params.lineAvoid) applyEdgeEdgeAvoidance(ctx, grid);
     }
+    ctx.energy += applyGroupForces(ctx);
   }
   if (ctx.stage >= 2) {
     for (let c = 0; c < n; c++) {
@@ -730,6 +805,7 @@ export function computeForcesBH(ctx: ForceContext): number {
   if (ctx.stage >= 1 && ctx.params.lineAvoid && ctx.edges.length > 1) {
     applyEdgeEdgeAvoidance(ctx, grid);
   }
+  ctx.energy += applyGroupForces(ctx);
   const queryR = ctx.params.obstacleR + rmax;
   if (ctx.stage >= 2) {
     for (let c = 0; c < n; c++) {

@@ -113,6 +113,33 @@ function shapesGraph(): GraphSpec {
   };
 }
 
+function groupsGraph(): GraphSpec {
+  return {
+    nodes: [
+      { id: 'in-a', label: 'in-a' },
+      { id: 'in-b', label: 'in-b' },
+      { id: 'in-c', label: 'in-c' },
+      { id: 'chain-1', label: '链1' },
+      { id: 'chain-2', label: '链2' },
+      { id: 'chain-3', label: '链3' },
+      { id: 'ext-1', label: '外部1' },
+      { id: 'ext-2', label: '外部2' },
+    ],
+    edges: [
+      { source: 'in-a', target: 'in-b' },
+      { source: 'in-b', target: 'in-c' },
+      { source: 'chain-1', target: 'chain-2' },
+      { source: 'chain-2', target: 'chain-3' },
+      { source: 'sub', target: 'ext-1' },
+      { source: 'ext-2', target: 'sub' },
+    ],
+    groups: [
+      { id: 'sub', shape: { kind: 'rect', w: 380, h: 280 }, label: '子图', members: ['in-a', 'in-b', 'in-c'] },
+      { id: 'hidden', members: ['chain-1', 'chain-2', 'chain-3'] },
+    ],
+  };
+}
+
 const GRAPHS: Record<string, () => GraphSpec> = {
   tree: treeGraph,
   grid: gridGraph,
@@ -120,6 +147,7 @@ const GRAPHS: Record<string, () => GraphSpec> = {
   mixed: mixedGraph,
   random: randomGraph,
   shapes: shapesGraph,
+  groups: groupsGraph,
 };
 
 // ── UI 元素 ───────────────────────────────────────────────

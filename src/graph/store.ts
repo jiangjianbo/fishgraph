@@ -13,7 +13,7 @@
 
 import { estimateLabelBox } from '../label.js';
 import { DEFAULT_SHAPE, boundingRadius } from '../geometry.js';
-import type { EdgeSpec, GraphSpec, NodeId, NodeSpec, NodeView, ShapeSpec } from '../types.js';
+import type { EdgeSpec, GraphSpec, GroupSpec, NodeId, NodeSpec, NodeView, ShapeSpec } from '../types.js';
 
 export interface LayoutNode {
   id: NodeId;
@@ -33,6 +33,16 @@ export interface LayoutNode {
   placed: boolean;
 }
 
+/** group 内成员的角色：与组外有连线的成员是边界（入口/出口），纯内连是内部。 */
+export interface GroupRoles {
+  group: GroupSpec;
+  /** 组的下标（store.groups）。-1 表示非成员。 */
+  indexOf: (memberId: NodeId) => number;
+  entry: NodeId[];
+  exit: NodeId[];
+  internal: NodeId[];
+}
+
 export interface InternalEdge {
   /** 节点下标。 */
   a: number;
@@ -48,13 +58,112 @@ export class GraphStore {
   edges: InternalEdge[] = [];
   /** adj[i] = 与下标 i 相邻的节点下标集合。 */
   readonly adj: Array<Set<number>> = [];
+  /** 分组声明（hidden-group 与 subgraph）。 */
+  readonly groups: GroupSpec[] = [];
+  /** group.id → hub 节点下标（subgraph 的虚拟大节点）。 */
+  readonly groupHub = new Map<NodeId, number>();
+  /** 成员下标 → 所属 group 下标（groups 数组下标）。非成员为 -1。 */
+  readonly groupOf = new Map<number, number>();
   private idToIndex = new Map<NodeId, number>();
   private labelFontSize = 12;
   private labelPadding = 4;
 
   constructor(graph: GraphSpec) {
     graph.nodes.forEach((spec) => this.insertNode(spec));
+    // subgraph 先于边处理：外部边可以以 group.id 为端点（映射到虚拟 hub 节点）
+    for (const spec of graph.groups ?? []) {
+      if (spec.shape) this.insertSubgraphHub(spec);
+    }
     for (const spec of graph.edges) this.insertEdge(spec);
+    for (const spec of graph.groups ?? []) this.groups.push(spec);
+    this.buildGroupMembership();
+  }
+
+  /** subgraph：生成虚拟大节点（hub），成员被约束在其内部区域内。 */
+  private insertSubgraphHub(spec: GroupSpec): void {
+    if (this.idToIndex.has(spec.id)) {
+      throw new Error(`duplicate node id: ${String(spec.id)}（与 subgraph id 冲突）`);
+    }
+    for (const m of spec.members) {
+      if (!this.idToIndex.has(m)) {
+        throw new Error(`group ${String(spec.id)} 引用未知成员：${String(m)}`);
+      }
+    }
+    this.insertNode({
+      id: spec.id,
+      shape: spec.shape,
+      label: spec.label,
+      // 质量随成员数增长：外部视角的"大节点"惯性更大
+      mass: spec.members.length + 1,
+    });
+    this.groupHub.set(spec.id, this.nodes.length - 1);
+  }
+
+  private buildGroupMembership(): void {
+    this.groups.forEach((spec, gi) => {
+      if (spec.shape) {
+        // subgraph：成员 → 组（hub 下标映射见 groupHub）
+        for (const m of spec.members) {
+          const mi = this.idToIndex.get(m);
+          if (mi !== undefined) this.groupOf.set(mi, gi);
+        }
+      } else {
+        // hidden-group：成员 → 组（无 hub）
+        for (const m of spec.members) {
+          const mi = this.idToIndex.get(m);
+          if (mi !== undefined) this.groupOf.set(mi, gi);
+        }
+      }
+    });
+  }
+
+  /** 下标是否为某 subgraph 的 hub 节点。 */
+  isGroupHub(index: number): boolean {
+    for (const hubIdx of this.groupHub.values()) if (hubIdx === index) return true;
+    return false;
+  }
+
+  /** 下标所属 subgraph 的 hub 下标（非 subgraph 成员返回 -1）。 */
+  hubOfMember(index: number): number {
+    const gi = this.groupOf.get(index);
+    if (gi === undefined) return -1;
+    const spec = this.groups[gi];
+    if (!spec?.shape) return -1;
+    return this.groupHub.get(spec.id) ?? -1;
+  }
+
+  /**
+   * group 内成员角色：与组外有连线的是边界节点（有向边 外→成员 = 入口，
+   * 成员→外 = 出口），纯内连的是内部节点。
+   */
+  groupRoles(groupId: NodeId): GroupRoles | null {
+    const gi = this.groups.findIndex((g) => g.id === groupId);
+    if (gi === -1) return null;
+    const spec = this.groups[gi];
+    const memberIdx = new Set(
+      spec.members.map((m) => this.idToIndex.get(m)).filter((x): x is number => x !== undefined),
+    );
+    const entry: NodeId[] = [];
+    const exit: NodeId[] = [];
+    const internal: NodeId[] = [];
+    for (const m of spec.members) {
+      const mi = this.idToIndex.get(m);
+      if (mi === undefined) continue;
+      let hasIn = false;
+      let hasOut = false;
+      for (const e of this.edges) {
+        const fromMember = memberIdx.has(e.a);
+        const toMember = memberIdx.has(e.b);
+        if (fromMember && toMember) continue;
+        if (e.a === mi && !toMember) hasOut = true;
+        if (e.b === mi && !fromMember) hasIn = true;
+      }
+      if (hasIn && !hasOut) entry.push(m);
+      else if (hasOut && !hasIn) exit.push(m);
+      else if (hasIn && hasOut) { entry.push(m); exit.push(m); }
+      else internal.push(m);
+    }
+    return { group: spec, indexOf: (m) => this.idToIndex.get(m) ?? -1, entry, exit, internal };
   }
 
   // ── 构建 ────────────────────────────────────────────────

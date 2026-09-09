@@ -40,6 +40,23 @@ export interface EdgeSpec {
 export interface GraphSpec {
   nodes: NodeSpec[];
   edges: EdgeSpec[];
+  /**
+   * 分组声明。有 shape 的组是 **subgraph**：布局时生成一个虚拟大节点
+   * （外部连线可直接以 group.id 为端点），成员被约束在其内部区域内；
+   * 无 shape 的组是 **hidden-group**：不产生可见实体，仅对成员施加
+   * "聚集在一起"的束缚（形状 = 成员包围盒）。
+   * groups 也可不声明，由 detectHiddenGroups 按拓扑自动推断。
+   */
+  groups?: GroupSpec[];
+}
+
+export interface GroupSpec {
+  id: NodeId;
+  /** 声明形状 → subgraph；省略 → hidden-group。 */
+  shape?: ShapeSpec;
+  label?: string;
+  /** 组内成员（节点 id）。 */
+  members: NodeId[];
 }
 
 export type GravityMode = 'pairwise' | 'centroid';
@@ -99,6 +116,23 @@ export interface LayoutOptions {
    * 穿过中心区域）与高密度图应保持关闭，否则结构被边-边互斥撑坏。
    */
   lineAvoidance?: boolean;
+  /**
+   * 隐藏组聚集强度（默认 3）：hidden-group 的成员到组质心的简谐束缚强度
+   * （相对力单位 k_a/L²、按成员数归一）。越大组内越紧凑。
+   */
+  groupCohesion?: number;
+  /**
+   * 坐标系（注册名，默认 'free'）。布局完成后以最优布局为基础做一次
+   * 坐标修正（CoordinateSystem.refine）：'free' 恒等；'grid' 网格化吸附
+   * （就近格点 + 冲突消解，保证不重叠）。可用 registerCoordinateSystem
+   * 注册自定义坐标系（hex/polar 等）。
+   */
+  coordinateSystem?: string;
+  /**
+   * 网格间距（px，coordinateSystem: 'grid' 时生效）。默认 = naturalLength。
+   * 实际吸附保证任意两节点不重叠（必要时自动放大间距或就近挪格）。
+   */
+  gridSize?: number;
   /**
    * 跳数斥力衰减（默认 0.7）：图上相距 2..3 跳的两节点，中程斥力乘
    * hopRepulsionDecay^(h−1)。邻接对（h=1）不衰减、键合平衡不变。

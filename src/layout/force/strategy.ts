@@ -62,10 +62,13 @@ export class ForceDirectedStrategy implements LayoutStrategy {
       accuracy: options.accuracy,
       theta: options.theta,
       labelCollision: options.labelCollision,
-      hopScale: this.buildHopScale(),
       edgeKaMul: new Array<number>(this.store.edges.length).fill(1),
       edgeCrossCounts: new Array<number>(this.store.edges.length).fill(0),
       crossPenaltyEnergy: 0,
+      hopScale: this.buildHopScale(),
+      hubOfMember: this.buildHubMap(),
+      hiddenGroups: this.buildHiddenGroupConstraints(),
+      subgraphBoxes: this.buildSubgraphConstraints(),
       stage: 3,
       energy: 0,
       maxForceUnit: 0,
@@ -74,6 +77,47 @@ export class ForceDirectedStrategy implements LayoutStrategy {
   }
 
   // ── 生命周期 ────────────────────────────────────────────
+
+  /** 下标 → 所属 subgraph hub 下标。 */
+  private buildHubMap(): Int32Array {
+    const map = new Int32Array(this.store.nodes.length).fill(-1);
+    for (let i = 0; i < this.store.nodes.length; i++) {
+      const h = this.store.hubOfMember(i);
+      map[i] = h;
+    }
+    return map;
+  }
+
+  /** hidden-group 聚集束缚（成员数归一，groupCohesion 可调）。 */
+  private buildHiddenGroupConstraints(): Array<{ members: number[]; k: number }> {
+    const L = this.options.naturalLength;
+    return this.store.groups
+      .filter((g) => !g.shape)
+      .map((g) => {
+        const members = g.members
+          .map((m) => this.store.indexOf(m))
+          .filter((x) => x >= 0);
+        return { members, k: (this.options.groupCohesion * 1) / (L * L * Math.max(members.length, 1)) };
+      })
+      .filter((g) => g.members.length >= 2);
+  }
+
+  /** subgraph 包含墙（成员出界拉回；内切半径近似 = 包围半径 × 0.55）。 */
+  private buildSubgraphConstraints(): Array<{ hub: number; members: number[]; rIn: number; k: number }> {
+    const kin = 12 / (this.options.naturalLength * this.options.naturalLength);
+    return this.store.groups
+      .filter((g) => !!g.shape)
+      .map((g) => {
+        const hub = this.store.groupHub.get(g.id) ?? -1;
+        if (hub < 0) return null;
+        const members = g.members
+          .map((m) => this.store.indexOf(m))
+          .filter((x) => x >= 0);
+        const hubR = this.store.nodes[hub].r;
+        return { hub, members, rIn: hubR * 0.55, k: kin };
+      })
+      .filter((x): x is { hub: number; members: number[]; rIn: number; k: number } => x !== null);
+  }
 
   /** 跳数斥力乘子矩阵（拓扑导出，坐标无关；仅在图结构或系数变化时重建）。 */
   private buildHopScale(): Float32Array | null {
@@ -116,6 +160,9 @@ export class ForceDirectedStrategy implements LayoutStrategy {
     ) {
       this.ctx.hopScale = this.buildHopScale();
     }
+    if (options.groupCohesion !== this.options.groupCohesion) {
+      this.ctx.hiddenGroups = this.buildHiddenGroupConstraints();
+    }
     this.store.refreshLabelBoxes();
     this.store.applyNodeLabelSizes(this.ctx.stage >= 3);
     Object.assign(this.solver.opts, this.solverOptions());
@@ -140,6 +187,9 @@ export class ForceDirectedStrategy implements LayoutStrategy {
     this.ctx.edgeCrossCounts = new Array<number>(this.store.edges.length).fill(0);
     this.ctx.crossPenaltyEnergy = 0;
     this.ctx.hopScale = this.buildHopScale();
+    this.ctx.hubOfMember = this.buildHubMap();
+    this.ctx.hiddenGroups = this.buildHiddenGroupConstraints();
+    this.ctx.subgraphBoxes = this.buildSubgraphConstraints();
     const spreadD =
       this.options.gravity === 'centroid'
         ? this.params.L * Math.pow(1 / (2 * Math.max(this.options.centroidStrength, 1e-4)), 0.25)
@@ -197,11 +247,66 @@ export class ForceDirectedStrategy implements LayoutStrategy {
         remaining -= used;
       }
     }
+    // 组内布局（分组原则 4）：整体收敛后冻结组外节点，组内成员弛豫；
+    // 若 hidden-group 形状（成员包围盒）变化超过 15%，引发一轮重新整体布局。
+    if (this.store.groups.length > 0 && max > 0) {
+      const before = this.hiddenGroupBoxes();
+      this.refineGroups(Math.max(150, Math.floor(max * 0.1)), opts.onTick);
+      const after = this.hiddenGroupBoxes();
+      const changed = before.some((b, i) => {
+        const a = after[i];
+        return a && (Math.abs(a.w - b.w) > b.w * 0.15 || Math.abs(a.h - b.h) > b.h * 0.15);
+      });
+      if (changed) {
+        this.solver.invalidate();
+        this.runBudget(Math.max(200, Math.floor(max * 0.3)), opts.onTick);
+      }
+    }
+
     return {
       iterations: this.solver.iterations,
       converged: this.solver.converged,
       energy: this.energy,
     };
+  }
+
+  /** hidden-group 的成员包围盒（形状 = 成员组成的形状）。 */
+  private hiddenGroupBoxes(): Array<{ w: number; h: number }> {
+    return this.store.groups
+      .filter((g) => !g.shape)
+      .map((g) => {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const m of g.members) {
+          const idx = this.store.indexOf(m);
+          if (idx < 0) continue;
+          const nd = this.store.nodes[idx];
+          minX = Math.min(minX, nd.x);
+          minY = Math.min(minY, nd.y);
+          maxX = Math.max(maxX, nd.x);
+          maxY = Math.max(maxY, nd.y);
+        }
+        return { w: maxX - minX, h: maxY - minY };
+      });
+  }
+
+  /** 组内精修：冻结全部组外节点（含 subgraph hub），只让组成员弛豫。 */
+  private refineGroups(budget: number, onTick?: () => void): void {
+    const isMember = new Uint8Array(this.store.nodes.length);
+    for (const g of this.store.groups) {
+      for (const m of g.members) {
+        const idx = this.store.indexOf(m);
+        if (idx >= 0) isMember[idx] = 1;
+      }
+    }
+    // subgraph hub 代表组的全局位置：组内精修期间固定
+    for (const hub of this.store.groupHub.values()) isMember[hub] = 0;
+    const frozen: number[] = [];
+    for (let i = 0; i < isMember.length; i++) if (!isMember[i]) frozen.push(i);
+    for (const i of frozen) this.store.nodes[i].fixed = true;
+    this.solver.invalidate();
+    this.runBudget(budget, onTick);
+    for (const i of frozen) this.store.nodes[i].fixed = false;
+    this.solver.invalidate();
   }
 
   /** 在当前阶段消耗最多 budget 次迭代，返回实际使用的迭代数。 */
