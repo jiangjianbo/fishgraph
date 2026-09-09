@@ -178,6 +178,9 @@ const outs = {
   hd: $<HTMLOutputElement>('hdv'),
 };
 const labelCollision = $<HTMLInputElement>('lc');
+const coordsSel = $<HTMLSelectElement>('coords');
+const gsSlider = $<HTMLInputElement>('gs');
+const gsOut = $<HTMLOutputElement>('gsv');
 
 function optionsFromUi(): LayoutOptions {
   return {
@@ -188,6 +191,8 @@ function optionsFromUi(): LayoutOptions {
     edgeTension: Number(sliders.kt.value) / 10,
     crossingShrink: Number(sliders.cs.value) / 100,
     hopRepulsionDecay: Number(sliders.hd.value) / 100,
+    coordinateSystem: coordsSel.value,
+    gridSize: Number(gsSlider.value),
     labelCollision: labelCollision.checked,
     gravity: gravitySel.value as LayoutOptions['gravity'],
     accuracy: accuracySel.value as LayoutOptions['accuracy'],
@@ -203,6 +208,7 @@ function syncOutputs(): void {
   outs.kt.value = (Number(sliders.kt.value) / 10).toFixed(1);
   outs.cs.value = (Number(sliders.cs.value) / 100).toFixed(2);
   outs.hd.value = (Number(sliders.hd.value) / 100).toFixed(2);
+  gsOut.value = gsSlider.value;
 }
 
 // ── 布局实例与动画状态 ────────────────────────────────────
@@ -299,13 +305,14 @@ viewCanvas.addEventListener('wheel', (ev) => {
 });
 
 // 参数滑条：实时换参数继续弛豫
-for (const el of [...Object.values(sliders), labelCollision]) {
+for (const el of [...Object.values(sliders), labelCollision, gsSlider]) {
   el.addEventListener('input', () => {
     syncOutputs();
     layout?.updateOptions(optionsFromUi());
     converged = false;
   });
 }
+coordsSel.addEventListener('change', () => rebuild()); // 坐标系修正是 run 终点行为
 for (const el of [algorithmSel, gravitySel, accuracySel]) {
   el.addEventListener('change', () => {
     layout?.updateOptions(optionsFromUi());
@@ -339,6 +346,29 @@ function drawView(): void {
   g.setTransform(dpr, 0, 0, dpr, 0, 0);
   g.clearRect(0, 0, viewCanvas.clientWidth, viewCanvas.clientHeight);
   if (!layout) return;
+
+  // grid 坐标系：淡色网格背景
+  if (coordsSel.value === 'grid') {
+    const lattice = Number(gsSlider.value) || 120;
+    const [wx0, wy0] = screenToWorld(0, 0);
+    const [wx1, wy1] = screenToWorld(viewCanvas.clientWidth, viewCanvas.clientHeight);
+    const startX = Math.floor(wx0 / lattice) * lattice;
+    const startY = Math.floor(wy0 / lattice) * lattice;
+    g.strokeStyle = '#e2e8f0';
+    g.lineWidth = 1;
+    g.beginPath();
+    for (let x = startX; x <= wx1; x += lattice) {
+      const [sx] = worldToScreen(x, 0);
+      g.moveTo(sx, 0);
+      g.lineTo(sx, viewCanvas.clientHeight);
+    }
+    for (let y = startY; y <= wy1; y += lattice) {
+      const [, sy] = worldToScreen(0, y);
+      g.moveTo(0, sy);
+      g.lineTo(viewCanvas.clientWidth, sy);
+    }
+    g.stroke();
+  }
 
   const nv = layout.nodeViews;
 
@@ -395,8 +425,10 @@ function drawView(): void {
     }
   }
 
-  // 节点
-  for (const nd of nv) {
+  // 节点：subgraph 容器（hub）作为背景层先画，成员与其它节点在其上
+  const hubs = nv.filter((nd) => nd.groupHub);
+  const others = nv.filter((nd) => !nd.groupHub);
+  for (const nd of [...hubs, ...others]) {
     const [sx, sy] = worldToScreen(nd.x, nd.y);
     const sh = nd.shape;
     g.beginPath();
@@ -419,7 +451,12 @@ function drawView(): void {
       g.font = `${Math.max(8, 12 * cam.k)}px system-ui, 'PingFang SC', sans-serif`;
       g.textAlign = 'center';
       g.textBaseline = 'middle';
-      g.fillText(String(nd.label), sx, sy);
+      // subgraph（大矩形）的标签画在矩形顶部内侧，不遮挡内部成员
+      if (sh.kind === 'rect' && sh.w >= 200) {
+        g.fillText(String(nd.label), sx, sy - sh.h / 2 + 10 * cam.k);
+      } else {
+        g.fillText(String(nd.label), sx, sy);
+      }
     }
   }
 }

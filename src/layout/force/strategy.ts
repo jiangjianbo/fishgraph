@@ -11,6 +11,7 @@ import { applyInitPlacement } from './init.js';
 import { deriveParams, type DerivedParams, type ForceContext } from './forces.js';
 import { RelaxationSolver, type SolverOptions } from './solver.js';
 import { buildHopScale } from './hops.js';
+import { createCoordinateSystem, type CoordinateNode, type CoordinateSystem } from '../coordinates.js';
 import { registerStrategy } from '../strategy.js';
 import type { ForceSnapshot, LayoutStrategy, ResolvedLayoutOptions } from '../strategy.js';
 import type { AccuracyMode, LayoutStage, RunOptions, RunResult } from '../../types.js';
@@ -31,11 +32,14 @@ export class ForceDirectedStrategy implements LayoutStrategy {
   private params: DerivedParams;
   private ctx: ForceContext;
   private solver: RelaxationSolver;
+  /** 坐标系（组合根按注册名创建一次；布局完成后用它做坐标修正）。 */
+  private cs: CoordinateSystem;
   readonly energyHistory: number[] = [];
 
   constructor(store: GraphStore, options: ResolvedLayoutOptions) {
     this.store = store;
     this.options = options;
+    this.cs = createCoordinateSystem(options.coordinateSystem);
     this.store.refreshLabelBoxes();
     this.params = deriveParams(options, store.nodes.length);
     // 分量根之间的摆放尺度：与引力模式的真实平衡尺度一致。
@@ -163,6 +167,9 @@ export class ForceDirectedStrategy implements LayoutStrategy {
     if (options.groupCohesion !== this.options.groupCohesion) {
       this.ctx.hiddenGroups = this.buildHiddenGroupConstraints();
     }
+    if (options.coordinateSystem !== this.options.coordinateSystem) {
+      this.cs = createCoordinateSystem(options.coordinateSystem);
+    }
     this.store.refreshLabelBoxes();
     this.store.applyNodeLabelSizes(this.ctx.stage >= 3);
     Object.assign(this.solver.opts, this.solverOptions());
@@ -260,6 +267,25 @@ export class ForceDirectedStrategy implements LayoutStrategy {
       if (changed) {
         this.solver.invalidate();
         this.runBudget(Math.max(200, Math.floor(max * 0.3)), opts.onTick);
+      }
+    }
+
+    // 坐标系修正（布局完成后，以最优布局为基础）：free 恒等，grid 网格化吸附
+    if (this.store.nodes.length > 0) {
+      const nodes: CoordinateNode[] = this.store.nodes.map((nd, ni) => {
+        const hub = this.store.hubOfMember(ni);
+        let region: CoordinateNode['region'];
+        if (hub >= 0) {
+          region = { anchorId: this.store.nodes[hub].id, rIn: this.store.nodes[hub].r * 0.55 };
+        }
+        return { id: nd.id, x: nd.x, y: nd.y, r: nd.r, fixed: nd.fixed, region };
+      });
+      const lattice =
+        this.options.gridSize > 0 ? this.options.gridSize : this.options.naturalLength;
+      this.cs.refine(nodes, { lattice });
+      for (let i = 0; i < nodes.length; i++) {
+        this.store.nodes[i].x = nodes[i].x;
+        this.store.nodes[i].y = nodes[i].y;
       }
     }
 

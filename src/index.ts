@@ -9,6 +9,17 @@ export { estimateLabelBox, type LabelBox } from './label.js';
 export { GraphStore, type GroupRoles, type InternalEdge, type LayoutNode } from './graph/store.js';
 export { detectHiddenGroups, type HiddenGroup } from './graph/groups.js';
 
+// 坐标系（布局完成后的坐标修正策略）
+export {
+  createCoordinateSystem,
+  listCoordinateSystems,
+  registerCoordinateSystem,
+  type CoordinateNode,
+  type CoordinateSystem,
+  type CoordinateSystemFactory,
+  type RefineParams,
+} from './layout/coordinates.js';
+
 // 布局策略接缝
 export {
   registerStrategy,

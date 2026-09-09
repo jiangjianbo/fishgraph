@@ -197,4 +197,9 @@ export interface NodeView {
   shape: ShapeSpec;
   label?: string | null;
   fixed: boolean;
+  /**
+   * subgraph 容器节点（hub）。渲染约定：**作为背景层最先绘制**，
+   * 成员与其它节点绘制在其上 —— 否则容器矩形会盖住内部节点。
+   */
+  groupHub?: boolean;
 }

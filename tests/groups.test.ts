@@ -164,6 +164,12 @@ describe('分组布局', () => {
       seed: 7,
     });
     layout.run({ maxIterations: 8000 });
+    // z-order 约定：hub 标记为容器节点（渲染层据此作为背景层先画）
+    const hubView = layout.nodeViews.find((v) => v.id === 'sub')!;
+    expect(hubView.groupHub).toBe(true);
+    for (const m of ['in1', 'in2']) {
+      expect(layout.nodeViews.find((v) => v.id === m)!.groupHub ?? false).toBe(false);
+    }
     const hub = layout.positions.get('sub')!;
     const hubR = 0.55 * (Math.hypot(400, 300) / 2); // 包围半径 × 0.55（内切近似）
     // 成员在内部区域内（中心距 + 半径 ≤ 内切半径）

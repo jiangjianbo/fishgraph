@@ -137,6 +137,8 @@ const graph = {
 - **subgraph**：生成一个虚拟大节点（hub）参与全局力场（质量随成员数增长，
   外部连线连到 hub），成员被包含墙约束在 hub 内部区域内（成员出界被向心
   拉回；hub 与成员之间无斥力——成员在容器内不算穿透）。
+  **渲染约定**：hub 节点带 `groupHub: true` 标记，绘制时应**作为背景层
+  最先画**（成员与其它节点画在其上），否则容器矩形会盖住内部节点。
 - **入口 / 出口 / 内部节点**：与组外有连线的成员是边界节点（`外→成员` 为
   入口、`成员→外` 为出口），纯内连的是内部节点。查询：`store.groupRoles(groupId)`。
 - **布局流程**：整体弛豫（组束缚全程生效）→ 收敛后**组内精修**（冻结组外
@@ -150,6 +152,26 @@ const graph = {
 3. 隐藏组与节点只有一条连线 → 该节点并入；
 4. 两个对外只有一条连线的隐藏组合并，对外连线少的被吞并；对外多连线（>3）的组不合并；
 5. 星形中心等多连线节点不入组。
+
+## 坐标系（可替换）
+
+求解过程始终在自由坐标上进行；**布局完成后**，以最优布局为基础做一次
+坐标修正（策略对象 `CoordinateSystem.refine`，按注册名选择，核心代码
+零类型分支）：
+
+```ts
+const layout = new ForceLayout(graph, {
+  coordinateSystem: 'grid',  // 'free'（默认，恒等）| 'grid'（网格化）
+  gridSize: 60,              // 网格间距，默认 = naturalLength
+});
+```
+
+- `'grid'`：就近吸附到格点；目标格被占或与已放节点距离过近时，
+  BFS 环形扩搜最近可用格点 —— **吸附后保证任意两节点不重叠**；
+  fixed 节点也吸附（优先注册占用）；subgraph 成员的格点被钳制在
+  其 hub 内部区域内（包含语义保持）。
+- 自定义坐标系（hex/polar 等）用 `registerCoordinateSystem(name, impl)`
+  注册即可介入（接口：`refine(nodes, { lattice })`），核心零改动。
 
 ## 求解器
 
@@ -225,6 +247,8 @@ r.converged;        // 力残差判据
 | `edgeTension` | 0.1 | >0 让长边额外收缩；过大时会把多跳路径压成叠线 |
 | `crossingShrink` | 0.15 | 交叉收缩力：边每交叉一次，引力/张力放大 (1+λ) 倍 |
 | `crossingEnergy` | 0.2 | 交叉能量罚：每个交叉点抬高能量 0.2×(k_a/L)，交叉布局能量更高 |
+| `coordinateSystem` | 'free' | 坐标系（布局完成后的坐标修正）：'grid' 网格化吸附 |
+| `gridSize` | naturalLength | 网格间距（'grid' 时生效），吸附后保证节点不重叠 |
 | `hopRepulsionDecay` | 0.7 | 跳数斥力衰减：相距 h 跳的节点斥力乘 decay^(h−1) |
 | `unrelatedRepulsion` | 0.35 | 无关系节点对（不同分量）的斥力下限系数 |
 | `edgeNodeRepulsion` | 3 | 压线推开力度；大矩形+回环枢纽的图可加到 10–20 |

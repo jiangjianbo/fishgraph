@@ -55,6 +55,10 @@ const DEFAULTS = {
   lineAvoidance: false,
   // 隐藏组聚集强度：hidden-group 成员向组质心的简谐束缚（越大越紧凑）
   groupCohesion: 3,
+  // 坐标系（布局完成后的坐标修正策略）：'free' 恒等；'grid' 网格化吸附
+  coordinateSystem: 'free' as const,
+  // 网格间距；0 = 跟随 naturalLength
+  gridSize: 0,
   // 跳数斥力衰减：相距 h 跳的节点斥力乘 0.5^(h-1)；不同分量的节点对乘 0.1
   // —— 无直接或间接关系的节点几乎互不推挤（防重叠接触弹簧不衰减）。
   hopRepulsionDecay: 0.7,

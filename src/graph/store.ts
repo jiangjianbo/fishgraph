@@ -31,6 +31,8 @@ export interface LayoutNode {
   fixed: boolean;
   /** 用户是否显式给了初始位置。 */
   placed: boolean;
+  /** subgraph 容器节点：渲染时应作为背景层先画（在其上绘制成员与其它节点）。 */
+  groupHub: boolean;
 }
 
 /** group 内成员的角色：与组外有连线的成员是边界（入口/出口），纯内连是内部。 */
@@ -96,6 +98,7 @@ export class GraphStore {
       // 质量随成员数增长：外部视角的"大节点"惯性更大
       mass: spec.members.length + 1,
     });
+    this.nodes[this.nodes.length - 1].groupHub = true; // 容器节点：渲染时作背景层
     this.groupHub.set(spec.id, this.nodes.length - 1);
   }
 
@@ -189,6 +192,7 @@ export class GraphStore {
       label: spec.label ?? null,
       fixed: spec.fixed ?? false,
       placed: spec.x !== undefined && spec.y !== undefined,
+      groupHub: false,
     });
     this.adj.push(new Set());
     return index;
