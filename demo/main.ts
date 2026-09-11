@@ -132,10 +132,63 @@ function groupsGraph(): GraphSpec {
       { source: 'chain-2', target: 'chain-3' },
       { source: 'sub', target: 'ext-1' },
       { source: 'ext-2', target: 'sub' },
+      { source: 'ext-1', target: 'in-b' },
     ],
     groups: [
       { id: 'sub', shape: { kind: 'rect', w: 380, h: 280 }, label: '子图', members: ['in-a', 'in-b', 'in-c'] },
       { id: 'hidden', members: ['chain-1', 'chain-2', 'chain-3'] },
+    ],
+  };
+}
+
+function mermaidSubgraphGraph(): GraphSpec {
+  return {
+    nodes: [
+      { id: 'CORE', label: 'ui-core' },
+      { id: 'EVENT', label: 'ui-event' },
+      { id: 'I18N', label: 'ui-i18n' },
+      { id: 'THEME', label: 'ui-theme' },
+      { id: 'BASE', label: 'ui-button/ui-input/ui-dialog/ui-table/…' },
+      { id: 'BUSINESS', label: 'ui-business-user/ui-business-data/ui-business-permission' },
+      { id: 'PROJECT', label: 'ui-web-project/ui-android-project/ui-desktop-project' },
+      { id: 'PNPM', label: 'pnpm workspace' },
+      { id: 'REG', label: 'Private npm Registry/Verdaccio' },
+      { id: 'WEB', label: 'Web Project' },
+      { id: 'ANDROID', label: 'Android Project' },
+      { id: 'OTHER', label: 'Other Projects' },
+    ],
+    edges: [
+      { source: 'CORE', target: 'BASE' },
+      { source: 'EVENT', target: 'BASE' },
+      { source: 'I18N', target: 'BASE' },
+      { source: 'THEME', target: 'BASE' },
+      { source: 'BASE', target: 'BUSINESS' },
+      { source: 'BUSINESS', target: 'PROJECT' },
+      { source: 'PNPM', target: 'CORE', label: '管理' },
+      { source: 'PNPM', target: 'BASE', label: '管理' },
+      { source: 'PNPM', target: 'BUSINESS', label: '管理' },
+      { source: 'PNPM', target: 'PROJECT', label: '管理' },
+      { source: 'BASE', target: 'REG', label: 'publish' },
+      { source: 'BUSINESS', target: 'REG', label: 'publish' },
+      { source: 'REG', target: 'WEB' },
+      { source: 'REG', target: 'ANDROID' },
+      { source: 'REG', target: 'OTHER' },
+    ],
+    groups: [
+      {
+        id: 'SOURCE',
+        shape: { kind: 'rect', w: 1500, h: 950 },
+        label: '源码层',
+        members: ['CORE', 'EVENT', 'I18N', 'THEME', 'BASE', 'BUSINESS', 'PROJECT'],
+      },
+      { id: 'DEV', shape: { kind: 'rect', w: 340, h: 220 }, label: '开发协作层', members: ['PNPM'] },
+      { id: 'REPO', shape: { kind: 'rect', w: 380, h: 240 }, label: '制品层', members: ['REG'] },
+      {
+        id: 'CONSUMER',
+        shape: { kind: 'rect', w: 760, h: 460 },
+        label: '消费层',
+        members: ['WEB', 'ANDROID', 'OTHER'],
+      },
     ],
   };
 }
@@ -148,6 +201,7 @@ const GRAPHS: Record<string, () => GraphSpec> = {
   random: randomGraph,
   shapes: shapesGraph,
   groups: groupsGraph,
+  mermaidSub: mermaidSubgraphGraph,
 };
 
 // ── UI 元素 ───────────────────────────────────────────────
@@ -372,6 +426,37 @@ function drawView(): void {
 
   const nv = layout.nodeViews;
 
+  // 背景层 0：subgraph 容器（z-order 最低 —— 先于所有线段与节点）
+  const hubs = nv.filter((nd) => nd.groupHub);
+  const others = nv.filter((nd) => !nd.groupHub);
+  for (const nd of hubs) {
+    const [sx, sy] = worldToScreen(nd.x, nd.y);
+    const sh = nd.shape;
+    const w = (sh.kind === 'rect' ? sh.w : sh.kind === 'ellipse' ? sh.rx * 2 : sh.r * 2) * cam.k;
+    const h = (sh.kind === 'rect' ? sh.h : sh.kind === 'ellipse' ? sh.ry * 2 : sh.r * 2) * cam.k;
+    g.beginPath();
+    if (sh.kind === 'circle') {
+      g.arc(sx, sy, sh.r * cam.k, 0, Math.PI * 2);
+    } else if (sh.kind === 'ellipse') {
+      g.ellipse(sx, sy, sh.rx * cam.k, sh.ry * cam.k, 0, 0, Math.PI * 2);
+    } else {
+      g.roundRect(sx - w / 2, sy - h / 2, w, h, Math.min(10, h / 4));
+    }
+    g.fillStyle = '#f1f5f9';
+    g.fill();
+    g.strokeStyle = '#94a3b8';
+    g.lineWidth = 1.5;
+    g.stroke();
+    if (nd.label && cam.k > 0.35) {
+      g.fillStyle = '#475569';
+      g.font = `600 ${Math.max(9, 14 * cam.k)}px system-ui, 'PingFang SC', sans-serif`;
+      g.textAlign = 'left';
+      g.textBaseline = 'middle';
+      g.fillText(String(nd.label), sx - w / 2 + 12 * cam.k, sy - h / 2 + 14 * cam.k);
+    }
+  }
+
+
   // 边：剪到起点/终点轮廓，末端画箭头；中点画白底文字
   for (const e of layout.edgeViews) {
     const a = nv[e.a];
@@ -425,10 +510,8 @@ function drawView(): void {
     }
   }
 
-  // 节点：subgraph 容器（hub）作为背景层先画，成员与其它节点在其上
-  const hubs = nv.filter((nd) => nd.groupHub);
-  const others = nv.filter((nd) => !nd.groupHub);
-  for (const nd of [...hubs, ...others]) {
+  // 节点层：普通节点（subgraph hub 已在背景层绘制）
+  for (const nd of others) {
     const [sx, sy] = worldToScreen(nd.x, nd.y);
     const sh = nd.shape;
     g.beginPath();

@@ -70,6 +70,8 @@ export class ForceDirectedStrategy implements LayoutStrategy {
       edgeCrossCounts: new Array<number>(this.store.edges.length).fill(0),
       crossPenaltyEnergy: 0,
       hopScale: this.buildHopScale(),
+      nodeRole: this.store.nodeRole,
+      nodeGroup: this.store.nodeGroup,
       hubOfMember: this.buildHubMap(),
       hiddenGroups: this.buildHiddenGroupConstraints(),
       subgraphBoxes: this.buildSubgraphConstraints(),
@@ -107,8 +109,10 @@ export class ForceDirectedStrategy implements LayoutStrategy {
   }
 
   /** subgraph 包含墙（成员出界拉回；内切半径近似 = 包围半径 × 0.55）。 */
-  private buildSubgraphConstraints(): Array<{ hub: number; members: number[]; rIn: number; k: number }> {
-    const kin = 12 / (this.options.naturalLength * this.options.naturalLength);
+  private buildSubgraphConstraints(): Array<{ hub: number; members: number[]; pad: number; k: number; rMin: number }> {
+    const L = this.options.naturalLength;
+    const pad = 0.12 * L;
+    const k = 8 / (L * L * L);
     return this.store.groups
       .filter((g) => !!g.shape)
       .map((g) => {
@@ -117,10 +121,10 @@ export class ForceDirectedStrategy implements LayoutStrategy {
         const members = g.members
           .map((m) => this.store.indexOf(m))
           .filter((x) => x >= 0);
-        const hubR = this.store.nodes[hub].r;
-        return { hub, members, rIn: hubR * 0.55, k: kin };
+        const hubR = this.store.nodes[hub].r; // 声明形状的包围半径 → 最小内切
+        return { hub, members, pad, k, rMin: hubR * 0.55 };
       })
-      .filter((x): x is { hub: number; members: number[]; rIn: number; k: number } => x !== null);
+      .filter((x): x is { hub: number; members: number[]; pad: number; k: number; rMin: number } => x !== null);
   }
 
   /** 跳数斥力乘子矩阵（拓扑导出，坐标无关；仅在图结构或系数变化时重建）。 */
@@ -194,7 +198,8 @@ export class ForceDirectedStrategy implements LayoutStrategy {
     this.ctx.edgeCrossCounts = new Array<number>(this.store.edges.length).fill(0);
     this.ctx.crossPenaltyEnergy = 0;
     this.ctx.hopScale = this.buildHopScale();
-    this.ctx.hubOfMember = this.buildHubMap();
+    this.ctx.nodeRole = this.store.nodeRole;
+    this.ctx.nodeGroup = this.store.nodeGroup;
     this.ctx.hiddenGroups = this.buildHiddenGroupConstraints();
     this.ctx.subgraphBoxes = this.buildSubgraphConstraints();
     const spreadD =

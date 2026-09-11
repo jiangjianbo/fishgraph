@@ -35,6 +35,12 @@ export interface LayoutNode {
   groupHub: boolean;
 }
 
+/** 节点角色（由 groups 声明派生，不由用户声明）：
+ *  0 = free（普通节点）；1 = member（容器成员）；2 = hub（subgraph 容器锚点）。 */
+export const ROLE_FREE = 0;
+export const ROLE_MEMBER = 1;
+export const ROLE_HUB = 2;
+
 /** group 内成员的角色：与组外有连线的成员是边界（入口/出口），纯内连是内部。 */
 export interface GroupRoles {
   group: GroupSpec;
@@ -64,8 +70,10 @@ export class GraphStore {
   readonly groups: GroupSpec[] = [];
   /** group.id → hub 节点下标（subgraph 的虚拟大节点）。 */
   readonly groupHub = new Map<NodeId, number>();
-  /** 成员下标 → 所属 group 下标（groups 数组下标）。非成员为 -1。 */
-  readonly groupOf = new Map<number, number>();
+  /** 节点角色（ROLE_FREE/ROLE_MEMBER/ROLE_HUB，增删时 rebuildRoles 重算）。 */
+  nodeRole: Int8Array = new Int8Array(0);
+  /** 成员/hub → 所属 group 下标（groups 数组下标）；free 为 -1。 */
+  nodeGroup: Int32Array = new Int32Array(0);
   private idToIndex = new Map<NodeId, number>();
   private labelFontSize = 12;
   private labelPadding = 4;
@@ -78,7 +86,7 @@ export class GraphStore {
     }
     for (const spec of graph.edges) this.insertEdge(spec);
     for (const spec of graph.groups ?? []) this.groups.push(spec);
-    this.buildGroupMembership();
+    this.rebuildRoles();
   }
 
   /** subgraph：生成虚拟大节点（hub），成员被约束在其内部区域内。 */
@@ -102,19 +110,23 @@ export class GraphStore {
     this.groupHub.set(spec.id, this.nodes.length - 1);
   }
 
-  private buildGroupMembership(): void {
+  /** 重算节点角色与组归属（groups 声明派生；增删节点/组后调用）。 */
+  private rebuildRoles(): void {
+    this.nodeRole = new Int8Array(this.nodes.length); // 默认 free
+    this.nodeGroup = new Int32Array(this.nodes.length).fill(-1);
     this.groups.forEach((spec, gi) => {
       if (spec.shape) {
-        // subgraph：成员 → 组（hub 下标映射见 groupHub）
-        for (const m of spec.members) {
-          const mi = this.idToIndex.get(m);
-          if (mi !== undefined) this.groupOf.set(mi, gi);
+        const hubIdx = this.groupHub.get(spec.id);
+        if (hubIdx !== undefined) {
+          this.nodeRole[hubIdx] = ROLE_HUB;
+          this.nodeGroup[hubIdx] = gi;
         }
-      } else {
-        // hidden-group：成员 → 组（无 hub）
-        for (const m of spec.members) {
-          const mi = this.idToIndex.get(m);
-          if (mi !== undefined) this.groupOf.set(mi, gi);
+      }
+      for (const m of spec.members) {
+        const mi = this.idToIndex.get(m);
+        if (mi !== undefined) {
+          this.nodeRole[mi] = ROLE_MEMBER;
+          this.nodeGroup[mi] = gi;
         }
       }
     });
@@ -122,14 +134,13 @@ export class GraphStore {
 
   /** 下标是否为某 subgraph 的 hub 节点。 */
   isGroupHub(index: number): boolean {
-    for (const hubIdx of this.groupHub.values()) if (hubIdx === index) return true;
-    return false;
+    return this.nodeRole[index] === ROLE_HUB;
   }
 
   /** 下标所属 subgraph 的 hub 下标（非 subgraph 成员返回 -1）。 */
   hubOfMember(index: number): number {
-    const gi = this.groupOf.get(index);
-    if (gi === undefined) return -1;
+    if (this.nodeRole[index] !== ROLE_MEMBER) return -1;
+    const gi = this.nodeGroup[index];
     const spec = this.groups[gi];
     if (!spec?.shape) return -1;
     return this.groupHub.get(spec.id) ?? -1;
@@ -227,6 +238,7 @@ export class GraphStore {
     this.idToIndex.clear();
     this.nodes.forEach((nd, i) => this.idToIndex.set(nd.id, i));
     this.rebuildAdjacency();
+    this.rebuildRoles();
   }
 
   addEdge(spec: EdgeSpec): void {

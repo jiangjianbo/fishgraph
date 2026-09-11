@@ -77,6 +77,8 @@ export interface DerivedParams {
   kin: number;
   /** 隐藏组聚集系数（groupCohesion 选项值）。 */
   groupCohesion: number;
+  /** 跨容器张力传导开关（实验性，默认关）。 */
+  tensionConduction: boolean;
   /** 线间避让开关（opt-in，默认关）。 */
   lineAvoid: boolean;
 }
@@ -99,12 +101,16 @@ export interface ForceContext {
   crossPenaltyEnergy: number;
   /** 跳数斥力乘子矩阵（n²，拓扑导出）；null = 特性停用（σ 恒 1）。 */
   hopScale: Float32Array | null;
-  /** 下标 → 所属 subgraph 的 hub 下标（非 subgraph 成员为 -1）。 */
+  /** 节点角色（0=free 1=member 2=hub，由 groups 声明派生）。 */
+  nodeRole: Int8Array;
+  /** 成员/hub → 所属组下标（free 为 -1）。 */
+  nodeGroup: Int32Array;
+  /** 成员 → 所属 subgraph 的 hub 下标（free/hub 自身为 -1）。 */
   hubOfMember: Int32Array;
   /** hidden-group 聚集束缚：成员下标 + 每成员束缚系数（k_a/L²·cohesion/n）。 */
   hiddenGroups: Array<{ members: number[]; k: number }>;
-  /** subgraph 包含墙：hub 下标 + 成员下标 + 内切半径 + 墙强度。 */
-  subgraphBoxes: Array<{ hub: number; members: number[]; rIn: number; k: number }>;
+  /** subgraph 聚集束缚：hub 下标 + 成员下标 + 束缚系数（hub 作为容器锚点）。 */
+  subgraphBoxes: Array<{ hub: number; members: number[]; k: number }>;
   stage: LayoutStage;
   energy: number;
   /** 力残差：max|F|/forceUnit。收敛判据 —— 所有节点的合力趋近 0。 */
@@ -122,6 +128,7 @@ export function deriveParams(
     crossingEnergy: number;
     lineAvoidance: number | boolean;
     groupCohesion: number;
+    tensionConduction: number | boolean;
   },
   nodeCount: number,
 ): DerivedParams {
@@ -146,8 +153,9 @@ export function deriveParams(
   const kee = 30 * (ka / (L * L));
   const dee = 0.35 * L;
   const lineAvoid = !!opts.lineAvoidance;
-  // subgraph 包含墙：成员出界 1 单位间隙时拉回力约 12 力单位。
-  const kin = 12 * (ka / (L * L));
+  const tensionConduction = !!opts.tensionConduction;
+  // subgraph 容器表面张力：成员出界每 1px 拉回 8·k_a/L³（把成员拢在容器内）。
+  const kin = 8 * (ka / (L * L * L));
   const groupCohesion = Math.max(opts.groupCohesion, 0);
   const kw = ka * Math.max(opts.weakGravityRatio, 1e-6);
   // 橡皮筋刚度 k_b = τ·k_a/L³：F = k_b·g 随线长线性增强（连线越长拉力越大），
@@ -174,6 +182,7 @@ export function deriveParams(
     kin,
     groupCohesion,
     lineAvoid,
+    tensionConduction,
     kw,
     kt,
     ken,
@@ -337,10 +346,8 @@ function applyNodePair(ctx: ForceContext, i: number, j: number, kind: PairKind):
   let scale = ctx.hopScale ? ctx.hopScale[i * ctx.nodes.length + j] : 1;
   // subgraph 的 hub 是"区域"而非实体：hub 与其成员之间无斥力
   // （成员被包含墙约束在 hub 内部区域内，靠近 hub 是期望行为）。
-  if ((ctx.hubOfMember[i] === j && ctx.hubOfMember[i] >= 0) ||
-      (ctx.hubOfMember[j] === i && ctx.hubOfMember[j] >= 0)) {
-    scale = 0;
-  }
+  if (ctx.nodeRole[i] === 2 && ctx.nodeGroup[i] === ctx.nodeGroup[j]) scale = 0;
+  if (ctx.nodeRole[j] === 2 && ctx.nodeGroup[j] === ctx.nodeGroup[i]) scale = 0;
   const rep = repulsionTerm(p.kr, m, s, p.gFloor, p.repR, scale, p.nearK, p.nearR);
   // 弱基础引力（相邻对的连线弹力由边循环按 μ_e 缩放施加）
   const kLong = kind === 'stranger-pairwise' ? p.kw : 0;
@@ -382,6 +389,31 @@ function applyEdgeAttraction(ctx: ForceContext, edgeIndex: number): number {
   na.fy -= att.f * uy;
   nb.fx += att.f * ux;
   nb.fy += att.f * uy;
+  // 跨 subgraph 边的张力传导：半力作用于端点所属的 hub ——
+  // 容器被内部绷紧的连线拉向对方容器（层与层之间有连线则靠近）。
+  // 能量记 ½·att.e（传导半弹簧），与 hub 受力自洽。
+  // 张力传导（有界）：跨容器边（成员↔free 或 成员↔异组成员）的弹力按
+  // min(半力, 封顶) 传导给成员所属的 hub —— 容器朝连接方向响应，而拉力
+  // 有界（不超过 20 力单位），不会把成员拖出容器，也不会发散。
+  // 实验开关（默认关）：简单传导会发散，需要专项设计（hub 间引力+阻尼）
+  if (!ctx.params.tensionConduction) return att.e;
+  const hubA = ctx.hubOfMember[e.a];
+  const hubB = ctx.hubOfMember[e.b];
+  if (hubA >= 0 || hubB >= 0) {
+    const fCap = 60 * ctx.params.forceUnit;
+    const fCond = Math.min(0.5 * att.f, fCap);
+    if (hubA >= 0) {
+      const ha = ctx.nodes[hubA];
+      ha.fx -= fCond * ux;
+      ha.fy -= fCond * uy;
+    }
+    if (hubB >= 0) {
+      const hb = ctx.nodes[hubB];
+      hb.fx += fCond * ux;
+      hb.fy += fCond * uy;
+    }
+    ctx.energy += 0.5 * (fCond / Math.max(att.f, 1e-9)) * att.e;
+  }
   return att.e;
 }
 
@@ -515,6 +547,27 @@ function applyEdgeEdgeInteraction(ctx: ForceContext, ei: number, ej: number): nu
  *  - subgraph：成员出界软墙 —— 成员中心保持在 hub 内部区域内，
  *    g_out = d + member.r − rIn > 0 时向心拉回，E = ½k·g_out²/rIn；
  *    反作用推 hub（容器被成员向外顶），hub 由全局力场定位。 */
+/** 组聚集的质心简谐束缚：成员到锚点的线性弹力（保守、合力零）。
+ *  anchor 为坐标；返回该组势能。 */
+function pullToAnchor(
+  ctx: ForceContext,
+  members: number[],
+  k: number,
+  anchorX: number,
+  anchorY: number,
+): number {
+  let e = 0;
+  for (const idx of members) {
+    const nd = ctx.nodes[idx];
+    const fx = (k * nd.mass) * (anchorX - nd.x);
+    const fy = (k * nd.mass) * (anchorY - nd.y);
+    nd.fx += fx;
+    nd.fy += fy;
+    e += 0.5 * k * nd.mass * ((nd.x - anchorX) ** 2 + (nd.y - anchorY) ** 2);
+  }
+  return e;
+}
+
 function applyGroupForces(ctx: ForceContext): number {
   let energy = 0;
   for (const hg of ctx.hiddenGroups) {
@@ -528,50 +581,29 @@ function applyGroupForces(ctx: ForceContext): number {
     }
     cx /= m;
     cy /= m;
-    for (const idx of hg.members) {
-      const nd = ctx.nodes[idx];
-      const fx = (hg.k * nd.mass) * (cx - nd.x);
-      const fy = (hg.k * nd.mass) * (cy - nd.y);
-      nd.fx += fx;
-      nd.fy += fy;
-      energy += 0.5 * hg.k * nd.mass * ((nd.x - cx) ** 2 + (nd.y - cy) ** 2);
-    }
+    energy += pullToAnchor(ctx, hg.members, hg.k, cx, cy);
   }
   for (const box of ctx.subgraphBoxes) {
+    if (box.members.length === 0) continue;
     const hub = ctx.nodes[box.hub];
+    // 锚点 = hub。hub 与成员间无斥力（成员在容器内是期望状态）。
+    energy += pullToAnchor(ctx, box.members, box.k, hub.x, hub.y);
+    // hub 斥力域自适应：包围全部成员（成员被束缚 → maxD 有界 → 不爆炸）。
+    let maxD = 0;
     for (const idx of box.members) {
       const nd = ctx.nodes[idx];
-      const d = Math.hypot(nd.x - hub.x, nd.y - hub.y) || 1e-9;
-      const gOut = d + nd.r - box.rIn;
-      if (gOut <= 0) continue;
-      const f = (box.k * gOut) / box.rIn;
-      const ux = (hub.x - nd.x) / d;
-      const uy = (hub.y - nd.y) / d;
-      nd.fx += f * ux;
-      nd.fy += f * uy;
-      hub.fx -= f * ux;
-      hub.fy -= f * uy;
-      energy += (0.5 * box.k * gOut * gOut) / box.rIn;
+      maxD = Math.max(maxD, Math.hypot(nd.x - hub.x, nd.y - hub.y) + nd.r);
     }
+    hub.r = Math.max(hub.baseR, maxD + 2);
   }
   return energy;
 }
 
+
 /** 遍历全部边-边候选对（网格给候选，ei<ej 去重）施加线间避让。 */
 function applyEdgeEdgeAvoidance(ctx: ForceContext, grid: SpatialGrid): void {
   const m = ctx.edges.length;
-  if (typeof (globalThis as any).__mode !== 'undefined') {
-    const g7 = globalThis as any;
-    g7.__av = g7.__av || {};
-    g7.__av[g7.__mode] = (g7.__av[g7.__mode] || 0) + 1;
-    if (g7.__mode === 'bh' && g7.__av.bh === 1) {
-      const involved: number[] = [];
-      ctx.edges.forEach((e, k) => { if (e.a === 112 || e.b === 112) involved.push(k); });
-      console.error('BH m=', m, 'edges of 112:', involved.join(','));
-      const aa = ctx.nodes[112];
-      console.error('node112 at', aa.x.toFixed(1), aa.y.toFixed(1));
-    }
-  }
+
   for (let i = 0; i < m; i++) {
     const a = ctx.nodes[ctx.edges[i].a];
     const b = ctx.nodes[ctx.edges[i].b];

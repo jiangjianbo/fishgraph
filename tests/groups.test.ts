@@ -207,3 +207,57 @@ describe('分组布局', () => {
     expect(roles!.internal).toEqual(['mid']);
   });
 });
+
+describe('外部直连容器内成员（角色模型的张力传导）', () => {
+  function build(withEdge: boolean) {
+    // 初始坐标直接进 GraphSpec（placed=true），避免 BFS init 覆盖对照布局
+    return new ForceLayout(
+      {
+        nodes: [
+          { id: 'm1', x: 0, y: -20 },
+          { id: 'f1', x: 0, y: 300, fixed: true },
+          { id: 'filler', x: -500, y: 0, fixed: true },
+        ],
+        edges: withEdge
+          ? [{ source: 'f1', target: 'm1' }, { source: 'sub', target: 'filler' }]
+          : [{ source: 'sub', target: 'filler' }],
+        groups: [
+          { id: 'sub', shape: { kind: 'rect' as const, w: 400, h: 300 }, members: ['m1'] },
+        ],
+      },
+      { naturalLength: 120, accuracy: 'exact', gravity: 'pairwise', seed: 21 },
+    );
+  }
+
+  it('角色分类：member/hub/free 正确派生', () => {
+    const layout = build(true);
+    const role = layout as unknown as { store: { nodeRole: Int8Array } };
+    expect(role.store.nodeRole[0]).toBe(1); // m1: member
+    expect(role.store.nodeRole[2]).toBe(0); // filler: free
+    expect(role.store.nodeRole[3]).toBe(2); // sub: hub
+  });
+
+  it('成员被直连拉向外部侧；hub 朝连接方向偏移；包含保持', () => {
+    // f1 固定在 +y 方向作为参照系
+    const buildPos = (withEdge: boolean) => {
+      const layout = build(withEdge);
+      layout.run({ maxIterations: 6000 });
+      return {
+        m1: layout.positions.get('m1')!,
+        sub: layout.positions.get('sub')!,
+        f1: layout.positions.get('f1')!,
+      };
+    };
+    const on = buildPos(true);
+    const off = buildPos(false);
+    // 成员被拉向外部侧：m1 的 y 位置比无连接对照更靠近 f1
+    expect(on.m1.y).toBeGreaterThan(off.m1.y);
+    // hub 朝连接方向偏移（张力传导，有界）
+    expect(on.sub.y).toBeGreaterThan(off.sub.y);
+    // 包含保持：成员不出容器（rIn+容差）
+    const d = Math.hypot(on.m1.x - on.sub.x, on.m1.y - on.sub.y);
+    expect(d).toBeLessThan(300);
+    // 无重叠
+    expect(Math.hypot(on.m1.x - on.sub.x, on.m1.y - on.sub.y)).toBeGreaterThan(0);
+  });
+});
