@@ -49,7 +49,7 @@ const DEFAULTS = {
   edgeTension: 1,
   // 交叉收缩：边每交叉一次，引力/张力放大 15% —— 交叉越多的线越努力变短。
   crossingShrink: 0.15,
-  // 交叉能量罚：每个交叉点抬高总能量 0.2×(k_a/L)，交叉布局天然能量更高。0 关闭。
+  // 交叉能量罚：每个交叉点抬高总能量 0.05×(k_a/L)，交叉布局天然能量更高。0 关闭。
   crossingEnergy: 0.05,
   // 线间避让斥力（opt-in）：稀疏流程图防交叉的重武器；全连接图/高密度图关闭
   lineAvoidance: false,
@@ -59,7 +59,7 @@ const DEFAULTS = {
   coordinateSystem: 'free' as const,
   // 网格间距；0 = 跟随 naturalLength
   gridSize: 0,
-  // 跳数斥力衰减：相距 h 跳的节点斥力乘 0.5^(h-1)；不同分量的节点对乘 0.1
+  // 跳数斥力衰减：相距 h 跳的节点斥力乘 0.7^(h-1)；跳数>3 与不同分量的节点对乘 0.35
   // —— 无直接或间接关系的节点几乎互不推挤（防重叠接触弹簧不衰减）。
   hopRepulsionDecay: 0.7,
   unrelatedRepulsion: 0.35,

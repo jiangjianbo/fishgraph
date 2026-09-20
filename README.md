@@ -254,9 +254,9 @@ r.converged;        // 力残差判据
 |---|---|---|
 | `algorithm` | 'force-directed' | 布局策略名；运行时用 `layout.setStrategy(name)` 切换 |
 | `naturalLength` | 120 | 一切尺度的锚：平衡边长 = 它，斥力作用域 = 2×它 |
-| `edgeTension` | 0.1 | >0 让长边额外收缩；过大时会把多跳路径压成叠线 |
+| `edgeTension` | 1 | >0 让长边额外收缩；过大时会把多跳路径压成叠线 |
 | `crossingShrink` | 0.15 | 交叉收缩力：边每交叉一次，引力/张力放大 (1+λ) 倍 |
-| `crossingEnergy` | 0.2 | 交叉能量罚：每个交叉点抬高能量 0.2×(k_a/L)，交叉布局能量更高 |
+| `crossingEnergy` | 0.05 | 交叉能量罚：每个交叉点抬高能量 0.05×(k_a/L)，交叉布局能量更高 |
 | `coordinateSystem` | 'free' | 坐标系（布局完成后的坐标修正）：'grid' 网格化吸附 |
 | `gridSize` | naturalLength | 网格间距（'grid' 时生效），吸附后保证节点不重叠 |
 | `hopRepulsionDecay` | 0.7 | 跳数斥力衰减：相距 h 跳的节点斥力乘 decay^(h−1) |

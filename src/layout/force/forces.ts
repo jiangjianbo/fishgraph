@@ -138,8 +138,8 @@ export function deriveParams(
   const repR = 2 * L;
   // 交叉收缩系数：≥0。每交叉一次，该边引力+张力放大 (1+λ) 倍。
   const crossLambda = Math.max(opts.crossingShrink, 0);
-  // 交叉能量罚：能量单位 k_a/L × crossingEnergy。默认 0.2 时单交叉点
-  // 总罚（两条边各记一次）明显大于 μ_e 缩放带来的负弹力能降幅。
+  // 交叉能量罚：能量单位 k_a/L × crossingEnergy。每个交叉点记在两条边上，
+  // 总罚需压过 μ_e 缩放带来的负弹力能降幅，交叉布局才天然能量更高。
   const crossK = Math.max(opts.crossingEnergy, 0) * (ka / L);
   // 校准 kr：无张力时相邻平衡间隙恰为 L —— k_r·(1/L − 1/repR) = k_a。
   const kr = (ka * L * repR) / (repR - L);
@@ -614,11 +614,6 @@ function applyEdgeEdgeAvoidance(ctx: ForceContext, grid: SpatialGrid): void {
       if (item.kind !== 0) return; // 跳过标签 item（BH 网格共用，否则线间斥力翻倍）
       const j = item.edgeIndex;
       if (j <= i) return;
-      if ((i === 112 || j === 112) && typeof (globalThis as any).__eeAcc !== 'undefined') {
-        const g8 = (globalThis as any).__eeAcc[(globalThis as any).__mode] ??
-          ((globalThis as any).__eeAcc[(globalThis as any).__mode] = { n: 0, fx: 0, fy: 0 });
-        g8.n++;
-      }
       ctx.energy += applyEdgeEdgeInteraction(ctx, i, j);
     });
   }
@@ -709,7 +704,6 @@ function applyLabelNodeInteraction(ctx: ForceContext, nodeIdx: number, e: Intern
 
 /** 精确模式：O(n²) 全对力 + 全部避让对。作为参考实现，也是小图的首选。 */
 export function computeForcesExact(ctx: ForceContext): number {
-  if (typeof (globalThis as any).__mode !== 'undefined') (globalThis as any).__mode = 'exact';
   resetForces(ctx);
   const n = ctx.nodes.length;
   const edgesActive = ctx.stage >= 1;
@@ -758,7 +752,6 @@ export function computeForcesExact(ctx: ForceContext): number {
 
 /** Barnes-Hut 模式：四叉树近似节点-节点力，空间网格加速避让候选对。 */
 export function computeForcesBH(ctx: ForceContext): number {
-  if (typeof (globalThis as any).__mode !== 'undefined') (globalThis as any).__mode = 'bh';
   resetForces(ctx);
   const n = ctx.nodes.length;
 

@@ -45,7 +45,8 @@ export interface GraphSpec {
    * （外部连线可直接以 group.id 为端点），成员被约束在其内部区域内；
    * 无 shape 的组是 **hidden-group**：不产生可见实体，仅对成员施加
    * "聚集在一起"的束缚（形状 = 成员包围盒）。
-   * groups 也可不声明，由 detectHiddenGroups 按拓扑自动推断。
+   * groups 可不声明；需要自动分组时，先调用 detectHiddenGroups 按拓扑推断，
+   * 再把结果作为 groups 传入（库内不会自动推断）。
    */
   groups?: GroupSpec[];
 }
@@ -104,7 +105,7 @@ export interface LayoutOptions {
    */
   crossingShrink?: number;
   /**
-   * 交叉能量罚（默认 0.2，单位 k_a/L）：每条边每有一个交叉点，总能量加
+   * 交叉能量罚（默认 0.05，单位 k_a/L）：每条边每有一个交叉点，总能量加
    * crossingEnergy × (k_a/L) —— 交叉点越多的布局含能量越高。该项是分段
    * 常数势垒：不产生力，但通过能量比较影响线搜索的取舍（交叉事件即
    * 能量台阶），与 crossingShrink 的收缩力互补。

@@ -35,7 +35,6 @@ function placeByBfs(
   // 结构中心的节点先放（排列原则 1），放射形态与直觉一致；BFS 建父指针。──
   const parent = new Array<number>(n).fill(-1);
   const order: number[] = [];
-  let components = 0;
   for (let round = 0; round < n; round++) {
     // 未分配分量的任一节点作为该分量的种子
     let seed = -1;
@@ -85,7 +84,6 @@ function placeByBfs(
       }
     }
     for (const q of queue) placed[q] = true;
-    components++;
   }
 
   // ── 2. 自底向上子树规模（order 是 BFS 序，逆序保证孩子先于父）──
