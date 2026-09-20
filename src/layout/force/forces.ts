@@ -31,7 +31,7 @@ import type { AccuracyMode, GravityMode, LayoutStage } from '../../types.js';
 import { closestPointOnSegment, shapeSdf } from '../../geometry.js';
 import { jitterDirection } from '../../rng.js';
 import { countEdgeCrossings } from './crossings.js';
-import type { InternalEdge, LayoutNode } from '../../graph/store.js';
+import type { ClusterConstraint, InternalEdge, LayoutElement, LayoutSubgraphNode } from '../../graph/store.js';
 import { QuadTree, type BHPoint, type QuadCell } from './quadtree.js';
 import { SpatialGrid, type GridItem } from './spatialgrid.js';
 
@@ -84,9 +84,10 @@ export interface DerivedParams {
 }
 
 export interface ForceContext {
-  nodes: LayoutNode[];
+  /** 全量布局元素（物理节点 + subgraph 容器，引擎只面向多态基类）。 */
+  elements: LayoutElement[];
   edges: InternalEdge[];
-  /** adj[i] = 与 i 相邻的节点下标集合。 */
+  /** adj[i] = 与 i 相邻的元素下标集合。 */
   adj: Array<Set<number>>;
   params: DerivedParams;
   gravity: GravityMode;
@@ -101,16 +102,12 @@ export interface ForceContext {
   crossPenaltyEnergy: number;
   /** 跳数斥力乘子矩阵（n²，拓扑导出）；null = 特性停用（σ 恒 1）。 */
   hopScale: Float32Array | null;
-  /** 节点角色（0=free 1=member 2=hub，由 groups 声明派生）。 */
-  nodeRole: Int8Array;
-  /** 成员/hub → 所属组下标（free 为 -1）。 */
-  nodeGroup: Int32Array;
-  /** 成员 → 所属 subgraph 的 hub 下标（free/hub 自身为 -1）。 */
+  /** 成员 → 所属 subgraph 容器的下标（free/容器自身为 -1）。 */
   hubOfMember: Int32Array;
-  /** hidden-group 聚集束缚：成员下标 + 每成员束缚系数（k_a/L²·cohesion/n）。 */
-  hiddenGroups: Array<{ members: number[]; k: number }>;
-  /** subgraph 聚集束缚：hub 下标 + 成员下标 + 束缚系数（hub 作为容器锚点）。 */
-  subgraphBoxes: Array<{ hub: number; members: number[]; k: number }>;
+  /** hidden-group 聚集约束（物化自 GraphStore，k 由策略按聚集强度派生）。 */
+  clusterConstraints: ClusterConstraint[];
+  /** subgraph 容器节点（锚定成员 + 每轮求值末尾按成员几何刷新半径）。 */
+  subgraphNodes: LayoutSubgraphNode[];
   stage: LayoutStage;
   energy: number;
   /** 力残差：max|F|/forceUnit。收敛判据 —— 所有节点的合力趋近 0。 */
@@ -198,7 +195,7 @@ export function deriveParams(
 function resetForces(ctx: ForceContext): void {
   ctx.energy = 0;
   ctx.maxForceUnit = 0;
-  for (const nd of ctx.nodes) {
+  for (const nd of ctx.elements) {
     nd.fx = 0;
     nd.fy = 0;
   }
@@ -207,7 +204,7 @@ function resetForces(ctx: ForceContext): void {
 /** 力累加结束后调用：记录最大合力（力单位），供收敛判据使用。 */
 function finalizeForces(ctx: ForceContext): void {
   let maxF = 0;
-  for (const nd of ctx.nodes) {
+  for (const nd of ctx.elements) {
     const f = Math.hypot(nd.fx, nd.fy);
     if (f > maxF) maxF = f;
   }
@@ -321,10 +318,20 @@ function bondTerm(
   };
 }
 
+/** subgraph 容器与其成员之间的斥力豁免：容器是"区域"而非实体，
+ *  成员位于容器内部是期望状态，不算穿透（防重叠由成员间互斥与锚定力保证）。 */
+function hubExempt(ctx: ForceContext, i: number, j: number): boolean {
+  const ei = ctx.elements[i];
+  if (ei.isSubgraph && (ei as LayoutSubgraphNode).memberSet.has(j)) return true;
+  const ej = ctx.elements[j];
+  if (ej.isSubgraph && (ej as LayoutSubgraphNode).memberSet.has(i)) return true;
+  return false;
+}
+
 /** 一对节点之间的核力式相互作用，返回势能贡献。 */
 function applyNodePair(ctx: ForceContext, i: number, j: number, kind: PairKind): number {
-  const ni = ctx.nodes[i];
-  const nj = ctx.nodes[j];
+  const ni = ctx.elements[i];
+  const nj = ctx.elements[j];
   const p = ctx.params;
   const dx = ni.x - nj.x;
   const dy = ni.y - nj.y;
@@ -343,11 +350,9 @@ function applyNodePair(ctx: ForceContext, i: number, j: number, kind: PairKind):
   const s = d - ni.r - nj.r;
   const m = ni.mass * nj.mass;
   // 跳数斥力衰减：h=1 邻接不衰减，逐跳乘 decay^(h-1)，无关系对乘 floor。
-  let scale = ctx.hopScale ? ctx.hopScale[i * ctx.nodes.length + j] : 1;
-  // subgraph 的 hub 是"区域"而非实体：hub 与其成员之间无斥力
-  // （成员被包含墙约束在 hub 内部区域内，靠近 hub 是期望行为）。
-  if (ctx.nodeRole[i] === 2 && ctx.nodeGroup[i] === ctx.nodeGroup[j]) scale = 0;
-  if (ctx.nodeRole[j] === 2 && ctx.nodeGroup[j] === ctx.nodeGroup[i]) scale = 0;
+  let scale = ctx.hopScale ? ctx.hopScale[i * ctx.elements.length + j] : 1;
+  // subgraph 容器 vs 其成员：无斥力（成员在容器内是期望状态）。
+  if (hubExempt(ctx, i, j)) scale = 0;
   const rep = repulsionTerm(p.kr, m, s, p.gFloor, p.repR, scale, p.nearK, p.nearR);
   // 弱基础引力（相邻对的连线弹力由边循环按 μ_e 缩放施加）
   const kLong = kind === 'stranger-pairwise' ? p.kw : 0;
@@ -373,8 +378,8 @@ function applyNodePair(ctx: ForceContext, i: number, j: number, kind: PairKind):
  *  （力与能量同乘子，分段保守）。 */
 function applyEdgeAttraction(ctx: ForceContext, edgeIndex: number): number {
   const e = ctx.edges[edgeIndex];
-  const na = ctx.nodes[e.a];
-  const nb = ctx.nodes[e.b];
+  const na = ctx.elements[e.sourceIndex];
+  const nb = ctx.elements[e.targetIndex];
   const p = ctx.params;
   const dx = na.x - nb.x;
   const dy = na.y - nb.y;
@@ -389,26 +394,23 @@ function applyEdgeAttraction(ctx: ForceContext, edgeIndex: number): number {
   na.fy -= att.f * uy;
   nb.fx += att.f * ux;
   nb.fy += att.f * uy;
-  // 跨 subgraph 边的张力传导：半力作用于端点所属的 hub ——
-  // 容器被内部绷紧的连线拉向对方容器（层与层之间有连线则靠近）。
-  // 能量记 ½·att.e（传导半弹簧），与 hub 受力自洽。
   // 张力传导（有界）：跨容器边（成员↔free 或 成员↔异组成员）的弹力按
-  // min(半力, 封顶) 传导给成员所属的 hub —— 容器朝连接方向响应，而拉力
+  // min(半力, 封顶) 传导给成员所属的容器 —— 容器朝连接方向响应，而拉力
   // 有界（不超过 20 力单位），不会把成员拖出容器，也不会发散。
-  // 实验开关（默认关）：简单传导会发散，需要专项设计（hub 间引力+阻尼）
+  // 实验开关（默认关）：简单传导会发散，需要专项设计（容器间引力+阻尼）
   if (!ctx.params.tensionConduction) return att.e;
-  const hubA = ctx.hubOfMember[e.a];
-  const hubB = ctx.hubOfMember[e.b];
+  const hubA = ctx.hubOfMember[e.sourceIndex];
+  const hubB = ctx.hubOfMember[e.targetIndex];
   if (hubA >= 0 || hubB >= 0) {
     const fCap = 60 * ctx.params.forceUnit;
     const fCond = Math.min(0.5 * att.f, fCap);
     if (hubA >= 0) {
-      const ha = ctx.nodes[hubA];
+      const ha = ctx.elements[hubA];
       ha.fx -= fCond * ux;
       ha.fy -= fCond * uy;
     }
     if (hubB >= 0) {
-      const hb = ctx.nodes[hubB];
+      const hb = ctx.elements[hubB];
       hb.fx += fCond * ux;
       hb.fy += fCond * uy;
     }
@@ -432,7 +434,7 @@ function refreshCrossingTerms(ctx: ForceContext): void {
     ctx.crossPenaltyEnergy = 0;
     return;
   }
-  const counts = countEdgeCrossings(ctx.nodes, ctx.edges, EDGE_CROSSING_TEST_BUDGET);
+  const counts = countEdgeCrossings(ctx.elements, ctx.edges, EDGE_CROSSING_TEST_BUDGET);
   if (counts === null) {
     mul.fill(1);
     ctx.edgeCrossCounts.fill(0);
@@ -456,7 +458,7 @@ function refreshCrossingTerms(ctx: ForceContext): void {
  * 力与能量同为一个泛函的精确梯度。
  */
 function applyCellInteraction(ctx: ForceContext, i: number, cell: QuadCell): number {
-  const ni = ctx.nodes[i];
+  const ni = ctx.elements[i];
   const p = ctx.params;
   const dx = ni.x - cell.comX;
   const dy = ni.y - cell.comY;
@@ -469,7 +471,7 @@ function applyCellInteraction(ctx: ForceContext, i: number, cell: QuadCell): num
   // repIndex<0 为空块兜底（不缩放）
   const repIdx = cell.repIndex;
   const scale =
-    ctx.hopScale && repIdx >= 0 ? ctx.hopScale[i * ctx.nodes.length + repIdx] : 1;
+    ctx.hopScale && repIdx >= 0 ? ctx.hopScale[i * ctx.elements.length + repIdx] : 1;
   const rep = repulsionTerm(p.kr, m, s, p.gFloor, p.repR, scale, p.nearK, p.nearR);
   const kLong = ctx.gravity === 'pairwise' ? p.kw : 0;
   const att = attractionTerm(kLong, m, s, p.gFloor);
@@ -493,16 +495,16 @@ function applyCellInteraction(ctx: ForceContext, i: number, cell: QuadCell): num
 function applyEdgeEdgeInteraction(ctx: ForceContext, ei: number, ej: number): number {
   const e1 = ctx.edges[ei];
   const e2 = ctx.edges[ej];
-  if (e1.a === e2.a || e1.a === e2.b || e1.b === e2.a || e1.b === e2.b) return 0;
-  const n = ctx.nodes;
+  if (e1.sourceIndex === e2.sourceIndex || e1.sourceIndex === e2.targetIndex || e1.targetIndex === e2.sourceIndex || e1.targetIndex === e2.targetIndex) return 0;
+  const n = ctx.elements;
   const dee = ctx.params.dee;
   let energy = 0;
   // side1：e1 的采样点 vs e2 线段；side2 反向。共用内联实现。
   for (let side = 0; side < 2; side++) {
-    const pa = side === 0 ? n[e1.a] : n[e2.a];
-    const pb = side === 0 ? n[e1.b] : n[e2.b];
-    const qa = side === 0 ? n[e2.a] : n[e1.a];
-    const qb = side === 0 ? n[e2.b] : n[e1.b];
+    const pa = side === 0 ? n[e1.sourceIndex] : n[e2.sourceIndex];
+    const pb = side === 0 ? n[e1.targetIndex] : n[e2.targetIndex];
+    const qa = side === 0 ? n[e2.sourceIndex] : n[e1.sourceIndex];
+    const qb = side === 0 ? n[e2.targetIndex] : n[e1.targetIndex];
     const len = Math.hypot(pb.x - pa.x, pb.y - pa.y);
     const samples = Math.min(6, Math.max(1, Math.ceil(len / dee)));
     for (let k = 0; k < samples; k++) {
@@ -542,23 +544,23 @@ function applyEdgeEdgeInteraction(ctx: ForceContext, ei: number, ej: number): nu
 }
 
 /** 组束缚力（精确与 BH 共用，O(成员数)）：
- *  - hidden-group：成员到组质心的简谐束缚（平行轴定理下等价于组内全对
- *    弹簧，保守、总合力零）—— "隐藏组内的节点倾向于聚集在一起"；
- *  - subgraph：成员出界软墙 —— 成员中心保持在 hub 内部区域内，
- *    g_out = d + member.r − rIn > 0 时向心拉回，E = ½k·g_out²/rIn；
- *    反作用推 hub（容器被成员向外顶），hub 由全局力场定位。 */
-/** 组聚集的质心简谐束缚：成员到锚点的线性弹力（保守、合力零）。
- *  anchor 为坐标；返回该组势能。 */
+ *  - ClusterConstraint（hidden-group）：成员到组质心的简谐束缚（向心力，
+ *    保守、总合力零）—— "隐藏组内的节点倾向于聚集在一起"（力钩子在
+ *    ClusterConstraint.applyForces 内实现）；
+ *  - LayoutSubgraphNode：成员锚定弹簧 —— 成员被拉向容器中心，
+ *    容器由全局力场定位；求值末尾容器执行 updateBoundsFromChildren()
+ *    按成员几何刷新自身半径（最小面积填充）。 */
+/** 成员到锚点的线性弹力（保守、合力零）。返回该组势能。 */
 function pullToAnchor(
-  ctx: ForceContext,
-  members: number[],
+  elements: readonly LayoutElement[],
+  memberIndices: readonly number[],
   k: number,
   anchorX: number,
   anchorY: number,
 ): number {
   let e = 0;
-  for (const idx of members) {
-    const nd = ctx.nodes[idx];
+  for (const idx of memberIndices) {
+    const nd = elements[idx];
     const fx = (k * nd.mass) * (anchorX - nd.x);
     const fy = (k * nd.mass) * (anchorY - nd.y);
     nd.fx += fx;
@@ -570,31 +572,16 @@ function pullToAnchor(
 
 function applyGroupForces(ctx: ForceContext): number {
   let energy = 0;
-  for (const hg of ctx.hiddenGroups) {
-    const m = hg.members.length;
-    if (m === 0) continue;
-    let cx = 0;
-    let cy = 0;
-    for (const idx of hg.members) {
-      cx += ctx.nodes[idx].x;
-      cy += ctx.nodes[idx].y;
-    }
-    cx /= m;
-    cy /= m;
-    energy += pullToAnchor(ctx, hg.members, hg.k, cx, cy);
+  // hidden-group：辅助向心引力（约束钩子自己算力与能量）
+  for (const c of ctx.clusterConstraints) {
+    energy += c.applyForces(ctx.elements);
   }
-  for (const box of ctx.subgraphBoxes) {
-    if (box.members.length === 0) continue;
-    const hub = ctx.nodes[box.hub];
-    // 锚点 = hub。hub 与成员间无斥力（成员在容器内是期望状态）。
-    energy += pullToAnchor(ctx, box.members, box.k, hub.x, hub.y);
-    // hub 斥力域自适应：包围全部成员（成员被束缚 → maxD 有界 → 不爆炸）。
-    let maxD = 0;
-    for (const idx of box.members) {
-      const nd = ctx.nodes[idx];
-      maxD = Math.max(maxD, Math.hypot(nd.x - hub.x, nd.y - hub.y) + nd.r);
-    }
-    hub.r = Math.max(hub.baseR, maxD + 2);
+  // subgraph：成员锚定到容器 + 容器半径按成员几何自适应
+  for (const sg of ctx.subgraphNodes) {
+    if (sg.memberIndices.length === 0) continue;
+    // 锚点 = 容器自身。容器与成员间无斥力（成员在容器内是期望状态）。
+    energy += pullToAnchor(ctx.elements, sg.memberIndices, ctx.params.kin, sg.x, sg.y);
+    sg.updateBoundsFromChildren(ctx.elements);
   }
   return energy;
 }
@@ -605,8 +592,8 @@ function applyEdgeEdgeAvoidance(ctx: ForceContext, grid: SpatialGrid): void {
   const m = ctx.edges.length;
 
   for (let i = 0; i < m; i++) {
-    const a = ctx.nodes[ctx.edges[i].a];
-    const b = ctx.nodes[ctx.edges[i].b];
+    const a = ctx.elements[ctx.edges[i].sourceIndex];
+    const b = ctx.elements[ctx.edges[i].targetIndex];
     const mx = (a.x + b.x) / 2;
     const my = (a.y + b.y) / 2;
     const r = Math.hypot(b.x - a.x, b.y - a.y) / 2 + ctx.params.dee;
@@ -627,9 +614,9 @@ function applyEdgeEdgeAvoidance(ctx: ForceContext, grid: SpatialGrid): void {
  * 力 = ken·(ρ−h)/ρ，能量 ½·ken·(ρ−h)²/ρ（C¹ 连续）。
  */
 function applyEdgeNodeInteraction(ctx: ForceContext, nodeIdx: number, e: InternalEdge): number {
-  const c = ctx.nodes[nodeIdx];
-  const a = ctx.nodes[e.a];
-  const b = ctx.nodes[e.b];
+  const c = ctx.elements[nodeIdx];
+  const a = ctx.elements[e.sourceIndex];
+  const b = ctx.elements[e.targetIndex];
   const p = ctx.params;
   const q = closestPointOnSegment(c.x, c.y, a.x, a.y, b.x, b.y);
   const dx = c.x - q.x;
@@ -646,7 +633,7 @@ function applyEdgeNodeInteraction(ctx: ForceContext, nodeIdx: number, e: Interna
     const ey = b.y - a.y;
     const el = Math.hypot(ex, ey);
     if (el < 1e-9) {
-      const dir = jitterDirection(nodeIdx, e.a * 100003 + e.b);
+      const dir = jitterDirection(nodeIdx, e.sourceIndex * 100003 + e.targetIndex);
       ux = dir.x;
       uy = dir.y;
     } else {
@@ -680,9 +667,9 @@ function applyEdgeNodeInteraction(ctx: ForceContext, nodeIdx: number, e: Interna
  */
 function applyLabelNodeInteraction(ctx: ForceContext, nodeIdx: number, e: InternalEdge): number {
   if (e.label === null) return 0;
-  const c = ctx.nodes[nodeIdx];
-  const a = ctx.nodes[e.a];
-  const b = ctx.nodes[e.b];
+  const c = ctx.elements[nodeIdx];
+  const a = ctx.elements[e.sourceIndex];
+  const b = ctx.elements[e.targetIndex];
   const p = ctx.params;
   const midX = (a.x + b.x) / 2;
   const midY = (a.y + b.y) / 2;
@@ -705,7 +692,7 @@ function applyLabelNodeInteraction(ctx: ForceContext, nodeIdx: number, e: Intern
 /** 精确模式：O(n²) 全对力 + 全部避让对。作为参考实现，也是小图的首选。 */
 export function computeForcesExact(ctx: ForceContext): number {
   resetForces(ctx);
-  const n = ctx.nodes.length;
+  const n = ctx.elements.length;
   const edgesActive = ctx.stage >= 1;
   for (let i = 0; i < n; i++) {
     for (let j = i + 1; j < n; j++) {
@@ -724,8 +711,8 @@ export function computeForcesExact(ctx: ForceContext): number {
     if (ctx.params.lineAvoid && ctx.edges.length > 1) {
       const grid = new SpatialGrid(Math.max(ctx.params.dee * 2, 1));
       ctx.edges.forEach((e, i) => {
-        const a = ctx.nodes[e.a];
-        const b = ctx.nodes[e.b];
+        const a = ctx.elements[e.sourceIndex];
+        const b = ctx.elements[e.targetIndex];
         grid.insert(
           Math.min(a.x, b.x), Math.min(a.y, b.y),
           Math.max(a.x, b.x), Math.max(a.y, b.y),
@@ -741,7 +728,7 @@ export function computeForcesExact(ctx: ForceContext): number {
       for (const e of ctx.edges) {
         // 边的避让不作用于自己的端点（线属于这两个节点）；
         // 标签避让对端点同样生效（文字会把两端撑开）。
-        if (e.a !== c && e.b !== c) ctx.energy += applyEdgeNodeInteraction(ctx, c, e);
+        if (e.sourceIndex !== c && e.targetIndex !== c) ctx.energy += applyEdgeNodeInteraction(ctx, c, e);
         if (ctx.labelCollision) ctx.energy += applyLabelNodeInteraction(ctx, c, e);
       }
     }
@@ -753,10 +740,10 @@ export function computeForcesExact(ctx: ForceContext): number {
 /** Barnes-Hut 模式：四叉树近似节点-节点力，空间网格加速避让候选对。 */
 export function computeForcesBH(ctx: ForceContext): number {
   resetForces(ctx);
-  const n = ctx.nodes.length;
+  const n = ctx.elements.length;
 
   // 用当前坐标构建四叉树（节点-节点力）与空间网格（避让候选对）。
-  const points: BHPoint[] = ctx.nodes.map((nd, index) => ({
+  const points: BHPoint[] = ctx.elements.map((nd, index) => ({
     index,
     x: nd.x,
     y: nd.y,
@@ -782,7 +769,7 @@ export function computeForcesBH(ctx: ForceContext): number {
   );
   // 远块聚合交互的反作用力按均摊常力摊派给块内成员。
   tree.distributeReactions((index, fx, fy) => {
-    const nd = ctx.nodes[index];
+    const nd = ctx.elements[index];
     nd.fx += fx;
     nd.fy += fy;
   });
@@ -798,14 +785,14 @@ export function computeForcesBH(ctx: ForceContext): number {
 
   // 3. 避让：网格给出候选（边/标签 × 节点），内部再按影响半径过滤
   let rmax = 0;
-  for (const nd of ctx.nodes) if (nd.r > rmax) rmax = nd.r;
+  for (const nd of ctx.elements) if (nd.r > rmax) rmax = nd.r;
   const edgeItems: GridItem[] = ctx.edges.map((_, ei) => ({ kind: 0 as const, edgeIndex: ei, stamp: 0 }));
   const labelItems: GridItem[] = ctx.labelCollision
     ? ctx.edges.map((_, ei) => ({ kind: 1 as const, edgeIndex: ei, stamp: 0 }))
     : [];
   ctx.edges.forEach((e, ei) => {
-    const a = ctx.nodes[e.a];
-    const b = ctx.nodes[e.b];
+    const a = ctx.elements[e.sourceIndex];
+    const b = ctx.elements[e.targetIndex];
     grid.insert(
       Math.min(a.x, b.x), Math.min(a.y, b.y),
       Math.max(a.x, b.x), Math.max(a.y, b.y),
@@ -815,8 +802,8 @@ export function computeForcesBH(ctx: ForceContext): number {
   if (ctx.labelCollision) {
     ctx.edges.forEach((e, ei) => {
       if (e.label === null) return;
-      const a = ctx.nodes[e.a];
-      const b = ctx.nodes[e.b];
+      const a = ctx.elements[e.sourceIndex];
+      const b = ctx.elements[e.targetIndex];
       const mx = (a.x + b.x) / 2;
       const my = (a.y + b.y) / 2;
       grid.insert(
@@ -834,11 +821,11 @@ export function computeForcesBH(ctx: ForceContext): number {
   const queryR = ctx.params.obstacleR + rmax;
   if (ctx.stage >= 2) {
     for (let c = 0; c < n; c++) {
-      const nd = ctx.nodes[c];
+      const nd = ctx.elements[c];
       grid.query(nd.x, nd.y, queryR, (item) => {
         const e = ctx.edges[item.edgeIndex];
         if (item.kind === 0) {
-          if (e.a !== c && e.b !== c) ctx.energy += applyEdgeNodeInteraction(ctx, c, e);
+          if (e.sourceIndex !== c && e.targetIndex !== c) ctx.energy += applyEdgeNodeInteraction(ctx, c, e);
         } else if (e.label !== null) {
           ctx.energy += applyLabelNodeInteraction(ctx, c, e);
         }

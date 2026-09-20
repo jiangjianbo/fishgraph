@@ -11,9 +11,10 @@
  * "无交叉"（乘子全 1）—— 特性在大图上自动停用而不是拖垮求解器。
  */
 
+/** 交叉计数的边视图（InternalEdge 结构兼容：端点为节点下标）。 */
 export interface CrossSeg {
-  a: number;
-  b: number;
+  sourceIndex: number;
+  targetIndex: number;
 }
 export interface CrossPoint {
   x: number;
@@ -50,8 +51,8 @@ export function countEdgeCrossings(
   const y0 = new Float64Array(m);
   const y1 = new Float64Array(m);
   for (let i = 0; i < m; i++) {
-    const A = pts[edges[i].a];
-    const B = pts[edges[i].b];
+    const A = pts[edges[i].sourceIndex];
+    const B = pts[edges[i].targetIndex];
     x0[i] = Math.min(A.x, B.x);
     x1[i] = Math.max(A.x, B.x);
     y0[i] = Math.min(A.y, B.y);
@@ -74,13 +75,13 @@ export function countEdgeCrossings(
       if (budget-- <= 0) return null;
       const ej = edges[j];
       // 共享端点的邻接边不算交叉
-      if (ei.a === ej.a || ei.a === ej.b || ei.b === ej.a || ei.b === ej.b) continue;
+      if (ei.sourceIndex === ej.sourceIndex || ei.sourceIndex === ej.targetIndex || ei.targetIndex === ej.sourceIndex || ei.targetIndex === ej.targetIndex) continue;
       // 包围盒 y 预筛
       if (y1[j] < y0[i] || y1[i] < y0[j]) continue;
-      const A = pts[ei.a];
-      const B = pts[ei.b];
-      const C = pts[ej.a];
-      const D = pts[ej.b];
+      const A = pts[ei.sourceIndex];
+      const B = pts[ei.targetIndex];
+      const C = pts[ej.sourceIndex];
+      const D = pts[ej.targetIndex];
       if (segmentsProperlyIntersect(A.x, A.y, B.x, B.y, C.x, C.y, D.x, D.y)) {
         counts[i]++;
         counts[j]++;

@@ -24,11 +24,11 @@ describe('边交叉计数', () => {
 
   it('X 交叉计为 1；共享端点不算；分离不算', () => {
     // (0-1) 与 (2-3) 严格交叉
-    expect(countEdgeCrossings(pts, [{ a: 0, b: 1 }, { a: 2, b: 3 }])).toEqual([1, 1]);
+    expect(countEdgeCrossings(pts, [{ sourceIndex: 0, targetIndex: 1 }, { sourceIndex: 2, targetIndex: 3 }])).toEqual([1, 1]);
     // 共享端点 (0-1) 与 (1-4)：邻接边不算交叉
-    expect(countEdgeCrossings(pts, [{ a: 0, b: 1 }, { a: 1, b: 4 }])).toEqual([0, 0]);
+    expect(countEdgeCrossings(pts, [{ sourceIndex: 0, targetIndex: 1 }, { sourceIndex: 1, targetIndex: 4 }])).toEqual([0, 0]);
     // 分离的 (0-2) 与 (1-4)
-    expect(countEdgeCrossings(pts, [{ a: 0, b: 2 }, { a: 1, b: 4 }])).toEqual([0, 0]);
+    expect(countEdgeCrossings(pts, [{ sourceIndex: 0, targetIndex: 2 }, { sourceIndex: 1, targetIndex: 4 }])).toEqual([0, 0]);
   });
 
   it('严格相交：端点搭接与共线不算', () => {
@@ -41,7 +41,7 @@ describe('边交叉计数', () => {
   });
 
   it('超出预算返回 null（调用方回退为无交叉）', () => {
-    expect(countEdgeCrossings(pts, [{ a: 0, b: 1 }, { a: 2, b: 3 }], 0)).toBeNull();
+    expect(countEdgeCrossings(pts, [{ sourceIndex: 0, targetIndex: 1 }, { sourceIndex: 2, targetIndex: 3 }], 0)).toBeNull();
   });
 });
 
@@ -73,7 +73,7 @@ describe('交叉收缩力：线间避让斥力与能量罚', () => {
   }
   function crossingsOf(layout: ForceLayout): number {
     const views = layout.nodeViews as any[];
-    const edges = (layout.edgeViews as any[]).map((e) => ({ a: e.a, b: e.b }));
+    const edges = (layout.edgeViews as any[]).map((e) => ({ sourceIndex: e.sourceIndex, targetIndex: e.targetIndex }));
     return countEdgeCrossings(views, edges)!.reduce((s, x) => s + x, 0);
   }
 

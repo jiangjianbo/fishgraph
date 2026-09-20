@@ -67,7 +67,7 @@ describe('grid 坐标系（布局后网格化）', () => {
     const graph: GraphSpec = {
       nodes: [{ id: 'in1' }, { id: 'in2' }, { id: 'ext' }],
       edges: [{ source: 'in1', target: 'in2' }, { source: 'sub', target: 'ext' }],
-      groups: [
+      subgraphs: [
         { id: 'sub', shape: { kind: 'rect', w: 400, h: 300 }, members: ['in1', 'in2'] },
       ],
     };

@@ -61,14 +61,14 @@ describe('验收：树 21 节点无交叉嵌入（用户提供）', () => {
 
     // 全树零交叉：树可平面，任何交叉都意味着叶子挂错了侧
     const views = layout.nodeViews;
-    const edges = (layout.edgeViews as ReadonlyArray<{ a: number; b: number }>).map((e) => ({
-      a: e.a,
-      b: e.b,
+    const edges = layout.edgeViews.map((e) => ({
+      sourceIndex: e.sourceIndex,
+      targetIndex: e.targetIndex,
     }));
     const names = views.map((v) => String(v.id));
     const counts = countEdgeCrossings(views, edges);
     const crossed = edges
-      .map((e, i) => (counts![i] > 0 ? `${names[e.a]}-${names[e.b]}×${counts![i]}` : null))
+      .map((e, i) => (counts![i] > 0 ? `${names[e.sourceIndex]}-${names[e.targetIndex]}×${counts![i]}` : null))
       .filter(Boolean);
     expect(crossed, `交叉的边：${crossed.join(', ')}`).toEqual([]);
     expect(counts!.reduce((s, x) => s + x, 0)).toBe(0);

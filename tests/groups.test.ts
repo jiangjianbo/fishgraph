@@ -114,7 +114,7 @@ describe('分组布局', () => {
         { source: 3, target: 4 },
         { source: 4, target: 5 },
       ],
-      groups: [{ id: 'h1', members: [0, 1, 2, 3, 4, 5] }],
+      hiddenGroups: [{ id: 'h1', members: [0, 1, 2, 3, 4, 5] }],
     };
     const layout = new ForceLayout(graph, {
       naturalLength: 120,
@@ -149,7 +149,7 @@ describe('分组布局', () => {
         { source: 'sub', target: 'out1' },
         { source: 'out2', target: 'sub' },
       ],
-      groups: [
+      subgraphs: [
         {
           id: 'sub',
           shape: { kind: 'rect', w: 400, h: 300 },
@@ -164,11 +164,10 @@ describe('分组布局', () => {
       seed: 7,
     });
     layout.run({ maxIterations: 8000 });
-    // z-order 约定：hub 标记为容器节点（渲染层据此作为背景层先画）
-    const hubView = layout.nodeViews.find((v) => v.id === 'sub')!;
-    expect(hubView.groupHub).toBe(true);
+    // z-order 约定：subgraph 物化为独立容器节点（渲染层据此作为背景层先画）
+    expect(layout.subgraphViews.some((v) => v.id === 'sub')).toBe(true);
     for (const m of ['in1', 'in2']) {
-      expect(layout.nodeViews.find((v) => v.id === m)!.groupHub ?? false).toBe(false);
+      expect(layout.subgraphViews.some((v) => v.id === m)).toBe(false);
     }
     const hub = layout.positions.get('sub')!;
     const hubR = 0.55 * (Math.hypot(400, 300) / 2); // 包围半径 × 0.55（内切近似）
@@ -197,7 +196,7 @@ describe('分组布局', () => {
         { source: 'mid', target: 'out1' },
         { source: 'out1', target: 'ext2' },
       ],
-      groups: [{ id: 'g', members: ['in1', 'mid', 'out1'] }],
+      hiddenGroups: [{ id: 'g', members: ['in1', 'mid', 'out1'] }],
     };
     const layout = new ForceLayout(graph, { accuracy: 'exact', seed: 1 });
     const roles = (layout as unknown as { store: { groupRoles(id: string): { entry: string[]; exit: string[]; internal: string[] } | null } }).store.groupRoles('g');
@@ -221,7 +220,7 @@ describe('外部直连容器内成员（角色模型的张力传导）', () => {
         edges: withEdge
           ? [{ source: 'f1', target: 'm1' }, { source: 'sub', target: 'filler' }]
           : [{ source: 'sub', target: 'filler' }],
-        groups: [
+        subgraphs: [
           { id: 'sub', shape: { kind: 'rect' as const, w: 400, h: 300 }, members: ['m1'] },
         ],
       },
@@ -231,10 +230,16 @@ describe('外部直连容器内成员（角色模型的张力传导）', () => {
 
   it('角色分类：member/hub/free 正确派生', () => {
     const layout = build(true);
-    const role = layout as unknown as { store: { nodeRole: Int8Array } };
-    expect(role.store.nodeRole[0]).toBe(1); // m1: member
-    expect(role.store.nodeRole[2]).toBe(0); // filler: free
-    expect(role.store.nodeRole[3]).toBe(2); // sub: hub
+    // 物化顺序：nodes → subgraphs → hiddenGroups → edges，sub 在物理下标 3
+    const store = (layout as unknown as {
+      store: {
+        elements: { isSubgraph: boolean }[];
+        hubOfMember(index: number): number;
+      };
+    }).store;
+    expect(store.hubOfMember(0)).toBe(3); // m1: member → 容器 sub（下标 3）
+    expect(store.hubOfMember(2)).toBe(-1); // filler: free
+    expect(store.elements[3].isSubgraph).toBe(true); // sub: hub（容器节点）
   });
 
   it('成员被直连拉向外部侧；hub 朝连接方向偏移；包含保持', () => {

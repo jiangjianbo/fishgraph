@@ -112,9 +112,9 @@ E = ½·k_ee·(d_ee − h)²/d_ee    F = k_ee·(d_ee − h)/d_ee    k_ee = 30·k
 两端（反作用按垂足重心分给对方两端）—— **力 = −∇E 严格成立**（机器精度
 验证）。这是原则 8 的力学支撑：交叉不仅费能量，还费力 —— 交叉会直接被挤开。
 
-## 分组：group / hidden-group / subgraph
+## 分组：subgraph / hidden-group
 
-图可以声明分组（`GraphSpec.groups`），布局遵循"**先整体、后组内、形状变化再整体**"的流程：
+图可以声明两类分组（`GraphSpec.subgraphs` / `GraphSpec.hiddenGroups`），布局遵循"**先整体、后组内、形状变化再整体**"的流程：
 
 ```ts
 const graph = {
@@ -123,33 +123,39 @@ const graph = {
     { source: 'in1', target: 'in2' },
     { source: 'sub', target: 'out1' },   // 外部边直接连 subgraph 的 id
   ],
-  groups: [
-    // 有 shape → subgraph：外部看是一个大节点，成员约束在其内部区域内
+  subgraphs: [
+    // 有固定边界（shape 必填）→ 物化成容器大节点：
+    // 外部看是一个大节点，成员约束在其内部区域内
     { id: 'sub', shape: { kind: 'rect', w: 400, h: 300 }, members: ['in1', 'in2'] },
-    // 无 shape → hidden-group：无实体，仅"成员聚集在一起"的束缚
+  ],
+  hiddenGroups: [
+    // 无边界 → 无实体，仅"成员聚集在一起"的束缚
     { id: 'h1', members: ['in1', 'x1', 'x2'] },
   ],
 };
 ```
 
-- **hidden-group**：对成员施加"到组质心的简谐束缚"（强度 `groupCohesion`，
-  按成员数归一，保守、总合力零），组内节点倾向于聚集；组的形状 = 成员包围盒。
-- **subgraph**：生成一个虚拟大节点（hub）参与全局力场（质量随成员数增长，
-  外部连线连到 hub），成员被包含墙约束在 hub 内部区域内（成员出界被向心
-  拉回；hub 与成员之间无斥力——成员在容器内不算穿透）。
-  **渲染约定**：hub 节点带 `groupHub: true` 标记，绘制时应**作为背景层
-  最先画**（成员与其它节点画在其上），否则容器矩形会盖住内部节点。
+- **hidden-group**（`HiddenGroupSpec`）：布局期物化为 `ClusterConstraint`，对成员
+  施加"到组质心的简谐束缚"（强度 `attractionStrength`，缺省用全局 `groupCohesion`，
+  按成员数归一，保守、总合力零），组内节点倾向于聚集；不参与碰撞，形状 = 成员包围盒。
+- **subgraph**（`SubgraphSpec`）：物化为 `LayoutSubgraphNode` 容器节点（Compound
+  Node），是真正的物理实体，与普通节点一起参与全局力场（质量随成员数增长，外部
+  连线连到容器 id），每轮迭代末按成员几何 + `padding` 重算包围半径；成员被包含墙
+  约束在容器内部区域内（成员出界被向心拉回；容器与成员之间无斥力——成员在容器内
+  不算穿透）。
+  **渲染约定**：容器在 `layout.subgraphViews` 中（不再是 `nodeViews` 的一部分），
+  绘制时应**作为背景层最先画**（成员与其它节点画在其上），否则容器矩形会盖住内部节点。
 - **入口 / 出口 / 内部节点**：与组外有连线的成员是边界节点（`外→成员` 为
   入口、`成员→外` 为出口），纯内连的是内部节点。查询：`store.groupRoles(groupId)`。
 - **布局流程**：整体弛豫（组束缚全程生效）→ 收敛后**组内精修**（冻结组外
-  节点与 subgraph hub，仅组内成员弛豫）→ 若 hidden-group 的包围盒变化
+  节点与 subgraph 容器，仅组内成员弛豫）→ 若 hidden-group 的包围盒变化
   超过 15%，引发一轮重新整体布局（比例与阈值可调，算法待议条款）。
 - **边的端点语义**（由两端角色自然决定，EdgeSpec 零改动）：
 
 | 连接方式 | 力学语义 |
 |---|---|
-| 外部 ↔ 容器（组 id） | 容器整体连接：外部被推离容器边缘，hub 被边拉向外部 |
-| 外部 ↔ 成员（直连） | 成员被单独拉向外部侧（组内布局局部重组），张力按有界比例传导给 hub（容器朝连接方向响应，封顶防发散） |
+| 外部 ↔ 容器（组 id） | 容器整体连接：外部被推离容器边缘，容器被边拉向外部 |
+| 外部 ↔ 成员（直连） | 成员被单独拉向外部侧（组内布局局部重组），张力按有界比例传导给容器（容器朝连接方向响应，封顶防发散） |
 | 成员 ↔ 成员 | 容器内连接，正常键合 |
 
   张力传导当前为实验开关（`tensionConduction`，默认关）——简单传导与
@@ -179,7 +185,7 @@ const layout = new ForceLayout(graph, {
 - `'grid'`：就近吸附到格点；目标格被占或与已放节点距离过近时，
   BFS 环形扩搜最近可用格点 —— **吸附后保证任意两节点不重叠**；
   fixed 节点也吸附（优先注册占用）；subgraph 成员的格点被钳制在
-  其 hub 内部区域内（包含语义保持）。
+  其容器内部区域内（包含语义保持）。
 - 自定义坐标系（hex/polar 等）用 `registerCoordinateSystem(name, impl)`
   注册即可介入（接口：`refine(nodes, { lattice })`），核心零改动。
 

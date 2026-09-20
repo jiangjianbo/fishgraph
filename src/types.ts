@@ -1,6 +1,10 @@
 /** 图谱输入与布局输出的公共类型。 */
 
-export type NodeId = string | number;
+/** 元素 id：物理节点与 subgraph 容器共用同一 id 域（外部边可直接以容器 id 为端点）。 */
+export type ElementId = string | number;
+
+/** 向后兼容别名（历史口径：节点 id）。 */
+export type NodeId = ElementId;
 
 export interface Vec2 {
   x: number;
@@ -16,11 +20,16 @@ export type ShapeSpec =
   | { kind: 'ellipse'; rx: number; ry: number }
   | { kind: 'rect'; w: number; h: number };
 
-export interface NodeSpec {
-  id: NodeId;
-  shape?: ShapeSpec;
-  /** 节点文字。布局阶段 3 会让节点有效半径变大以容纳文字。 */
+/** 元素声明公共接口：物理节点与 subgraph 容器共享 id 与文字。 */
+export interface ElementSpec {
+  id: ElementId;
+  /** 文字。布局阶段 3 会让节点有效半径变大以容纳文字。 */
   label?: string;
+}
+
+export interface NodeSpec extends ElementSpec {
+  /** 缺省为默认圆（r=10）。 */
+  shape?: ShapeSpec;
   /** 参与引力的质量，默认 1。 */
   mass?: number;
   /** 可选的初始位置（两维都给才生效）。 */
@@ -30,9 +39,43 @@ export interface NodeSpec {
   fixed?: boolean;
 }
 
+/**
+ * 分组声明的公共部分（抽象）：subgraph 与 hidden-group 的统一成员语义。
+ * 用户不直接使用本类型 —— 按"有无固定边界"二选一：
+ * 有边界用 {@link SubgraphSpec}，仅聚类用 {@link HiddenGroupSpec}。
+ */
+export interface GroupSpec extends ElementSpec {
+  /** 组内成员（元素 id）。 */
+  members: ElementId[];
+}
+
+/**
+ * subgraph：有固定边界/物理实体的分组。布局时物化为一个"巨大号的节点"
+ * （容器参与碰撞与排斥），成员被约束在其内部区域内；外部连线可直接以
+ * group.id 为端点。
+ */
+export interface SubgraphSpec extends GroupSpec {
+  /** 容器形状（必填：声明形状即声明了它是物理实体）。 */
+  shape: ShapeSpec;
+  /** 成员包裹后外扩的内边距（px，缺省 2）。 */
+  padding?: number;
+}
+
+/**
+ * hidden-group：无边界、不可见的分组。布局时不产生任何实体，
+ * 仅对成员施加"尽量聚集"的向心引力束缚（物化为 ClusterConstraint）。
+ */
+export interface HiddenGroupSpec extends GroupSpec {
+  /**
+   * 聚集强度（成员到组质心的简谐束缚，越大组内越紧凑）。
+   * 缺省用全局 LayoutOptions.groupCohesion。
+   */
+  attractionStrength?: number;
+}
+
 export interface EdgeSpec {
-  source: NodeId;
-  target: NodeId;
+  source: ElementId;
+  target: ElementId;
   /** 附加在边中点的文字。 */
   label?: string;
 }
@@ -41,23 +84,17 @@ export interface GraphSpec {
   nodes: NodeSpec[];
   edges: EdgeSpec[];
   /**
-   * 分组声明。有 shape 的组是 **subgraph**：布局时生成一个虚拟大节点
-   * （外部连线可直接以 group.id 为端点），成员被约束在其内部区域内；
-   * 无 shape 的组是 **hidden-group**：不产生可见实体，仅对成员施加
-   * "聚集在一起"的束缚（形状 = 成员包围盒）。
-   * groups 可不声明；需要自动分组时，先调用 detectHiddenGroups 按拓扑推断，
-   * 再把结果作为 groups 传入（库内不会自动推断）。
+   * subgraph 声明（有固定边界的物理容器）。GraphStore 工厂会把每个声明
+   * 物化为一个 LayoutSubgraphNode（参与碰撞/排斥的大节点）。
    */
-  groups?: GroupSpec[];
-}
-
-export interface GroupSpec {
-  id: NodeId;
-  /** 声明形状 → subgraph；省略 → hidden-group。 */
-  shape?: ShapeSpec;
-  label?: string;
-  /** 组内成员（节点 id）。 */
-  members: NodeId[];
+  subgraphs?: SubgraphSpec[];
+  /**
+   * hidden-group 声明（无边界、仅聚类）。GraphStore 工厂会把每个声明
+   * 物化为一个 ClusterConstraint（力导向迭代时的辅助向心引力）。
+   * 可不声明；需要自动分组时，先调用 detectHiddenGroups 按拓扑推断，
+   * 再把结果作为 hiddenGroups 传入（库内不会自动推断）。
+   */
+  hiddenGroups?: HiddenGroupSpec[];
 }
 
 export type GravityMode = 'pairwise' | 'centroid';
@@ -118,8 +155,8 @@ export interface LayoutOptions {
    */
   lineAvoidance?: boolean;
   /**
-   * 隐藏组聚集强度（默认 3）：hidden-group 的成员到组质心的简谐束缚强度
-   * （相对力单位 k_a/L²、按成员数归一）。越大组内越紧凑。
+   * hidden-group 聚集强度全局默认值（默认 3）：HiddenGroupSpec.attractionStrength
+   * 未声明时生效。成员到组质心的简谐束缚（相对力单位 k_a/L²、按成员数归一）。
    */
   groupCohesion?: number;
   /**
@@ -196,7 +233,7 @@ export interface RunResult {
 
 /** 布局完成后的节点视图（坐标为只读快照引用）。 */
 export interface NodeView {
-  id: NodeId;
+  id: ElementId;
   x: number;
   y: number;
   /** 有效包围半径（阶段 3 含节点文字）。 */
@@ -204,9 +241,22 @@ export interface NodeView {
   shape: ShapeSpec;
   label?: string | null;
   fixed: boolean;
-  /**
-   * subgraph 容器节点（hub）。渲染约定：**作为背景层最先绘制**，
-   * 成员与其它节点绘制在其上 —— 否则容器矩形会盖住内部节点。
-   */
-  groupHub?: boolean;
+}
+
+/**
+ * 布局完成后的 subgraph 容器视图。渲染约定：**作为背景层最先绘制**，
+ * 成员与其它节点绘制在其上 —— 否则容器矩形会盖住内部节点。
+ */
+export interface SubgraphView {
+  id: ElementId;
+  x: number;
+  y: number;
+  /** 有效包围半径（包裹全部成员 + padding 后自适应）。 */
+  r: number;
+  shape: ShapeSpec;
+  label?: string | null;
+  /** 成员包裹内边距。 */
+  padding: number;
+  /** 成员元素 id（结构上允许嵌套 subgraph 容器 id）。 */
+  children: ElementId[];
 }

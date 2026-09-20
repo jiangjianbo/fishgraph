@@ -5,8 +5,17 @@ import './layout/circle/strategy.js';
 export { ForceLayout } from './layout.js';
 export { estimateLabelBox, type LabelBox } from './label.js';
 
-// 节点/边管理（稳定底座）
-export { GraphStore, type GroupRoles, type InternalEdge, type LayoutNode } from './graph/store.js';
+// 图数据底座（GraphSpec → GraphStore 工厂物化）
+export {
+  ClusterConstraint,
+  GraphStore,
+  LayoutElement,
+  LayoutNode,
+  LayoutSubgraphNode,
+  type ElementInit,
+  type GroupRoles,
+  type InternalEdge,
+} from './graph/store.js';
 export { detectHiddenGroups, type HiddenGroup } from './graph/groups.js';
 
 // 坐标系（布局完成后的坐标修正策略）
@@ -34,9 +43,12 @@ export {
 export type {
   AccuracyMode,
   EdgeSpec,
+  ElementId,
+  ElementSpec,
   GraphSpec,
   GroupSpec,
   GravityMode,
+  HiddenGroupSpec,
   InitMode,
   LayoutOptions,
   LayoutStage,
@@ -46,5 +58,7 @@ export type {
   RunOptions,
   RunResult,
   ShapeSpec,
+  SubgraphSpec,
+  SubgraphView,
   Vec2,
 } from './types.js';

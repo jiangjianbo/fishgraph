@@ -76,12 +76,14 @@ src/
 
 - **`GraphStore`（`src/graph/store.ts`）**：「图数据的持有与变更」，与布局算法
   完全分离的**稳定底座**。职责：校验并构建节点/边（id 唯一、端点存在、自环剔除）、
-  邻接表、固定状态、文字包围盒度量、subgraph hub 虚拟节点的生成与**角色派生**
-  （free / member / hub）、增删改查与拖拽写入。**不含任何力学**。
+  邻接表、固定状态、文字包围盒度量、分组的**物化**——subgraph 生成
+  `LayoutSubgraphNode` 容器节点、hidden-group 生成 `ClusterConstraint`
+  （free / member / hub 的角色由物化结构本身表达，不再维护平行的角色数组），
+  以及增删改查与拖拽写入。**不含任何力学**。
 - **`detectHiddenGroups`（`src/graph/groups.ts`）**：无声明时按拓扑自动推断
   隐藏组（链成组、环成组、挂接叶并入、组间吞并）的独立纯函数。它**不在
   `GraphStore` 的构建路径上**——推断结果由调用方（如 demo 或上层应用）决定
-  是否作为 `groups` 声明传入；库内部只在用户显式声明 `groups` 时才使用分组。
+  是否作为 `hiddenGroups` 声明传入；库内部只在用户显式声明分组时才使用分组。
 - **`label.ts` / `geometry.ts` / `rng.ts`**：无状态的支撑工具——文字度量与
   最小面积回绕、形状 SDF 与投影、确定性随机。被底座与算法层共同复用。
 
@@ -98,7 +100,7 @@ src/
   求解过程完全不感知坐标系，布局完成后由策略以「当前最优布局」为基础调用
   `refine()` 做一次坐标修正。接口极小：一个 `refine(nodes, params)`。
   `CoordinateNode.region` 是它与分组模型的**唯一耦合点**：subgraph 成员吸附
-  时必须被钳制在 hub 锚点附近，因此坐标系接口需要「锚定区域」概念（见 §7 影响点 5）。
+  时必须被钳制在容器锚点附近，因此坐标系接口需要「锚定区域」概念（见 §7 影响点 5）。
 
 ### 3.4 算法实现层
 
@@ -135,16 +137,33 @@ classDiagram
         <<输入规格 types.ts>>
         +nodes: NodeSpec[]
         +edges: EdgeSpec[]
-        +groups: GroupSpec[]
+        +subgraphs: SubgraphSpec[]
+        +hiddenGroups: HiddenGroupSpec[]
+    }
+    class ElementSpec {
+        <<抽象 元素身份>>
+        +id: ElementId
+        +label: string
     }
     class NodeSpec {
         <<输入节点>>
-        +id: NodeId
         +shape: ShapeSpec
-        +label: string
         +mass: number
         +x y: 可选初始位置
         +fixed: boolean
+    }
+    class GroupSpec {
+        <<抽象 分组>>
+        +members: ElementId[]
+    }
+    class SubgraphSpec {
+        <<有固定边界的物理分组>>
+        +shape: ShapeSpec
+        +padding: number
+    }
+    class HiddenGroupSpec {
+        <<无边界的聚类约束>>
+        +attractionStrength: number
     }
     class EdgeSpec {
         <<输入连线>>
@@ -152,42 +171,50 @@ classDiagram
         +target: NodeId
         +label: string
     }
-    class GroupSpec {
-        <<按 shape 有无二分>>
-        +id: NodeId
-        +shape: ShapeSpec
-        +members: NodeId[]
-    }
     class ShapeSpec {
         <<circle ellipse rect>>
     }
 
     class GraphStore {
         <<数据底座 graph/store.ts>>
+        +elements: LayoutElement[]
         +nodes: LayoutNode[]
+        +subgraphNodes: LayoutSubgraphNode[]
+        +clusterConstraints: ClusterConstraint[]
         +edges: InternalEdge[]
         +adj: 邻接表
-        +groups: GroupSpec[]
-        +groupHub: 组id到hub下标
-        +nodeRole: 角色数组
-        +nodeGroup: 组归属数组
+        +getPhysicalNodes() getSubgraphs()
     }
-    class LayoutNode {
-        <<内部节点>>
+    class LayoutElement {
+        <<抽象 物理元素>>
+        +id: ElementId
         +x y: 坐标
         +fx fy: 合力累加
         +r: 有效包围半径
-        +baseR: 形状包围半径
+        +fixed: boolean
+        +getBoundRadius()
+    }
+    class LayoutNode {
+        <<普通节点>>
         +mass: number
         +shape: ShapeSpec
-        +label: string
-        +fixed: boolean
         +placed: boolean
-        +groupHub: boolean
+    }
+    class LayoutSubgraphNode {
+        <<容器节点 Compound Node>>
+        +children: ElementId[]
+        +padding: number
+        +updateBoundsFromChildren()
+    }
+    class ClusterConstraint {
+        <<hidden-group 的物理化身>>
+        +memberIndices: number[]
+        +strength: number
+        +applyForces(elements)
     }
     class InternalEdge {
         <<物理边 自环已剔除>>
-        +a b: 节点下标
+        +sourceIndex targetIndex: 节点下标
         +label: string
         +labelHw labelHh: 文字盒半宽高
     }
@@ -214,28 +241,43 @@ classDiagram
     class NodeView {
         <<输出视图 types.ts>>
         +id x y r shape
-        +label fixed groupHub
+        +label fixed
+    }
+    class SubgraphView {
+        <<容器输出视图 types.ts>>
+        +id x y r shape
+        +label padding children
     }
 
     GraphSpec *-- "1..*" NodeSpec
     GraphSpec *-- "0..*" EdgeSpec
-    GraphSpec *-- "0..*" GroupSpec
-    GroupSpec --> ShapeSpec : 有 shape 为 subgraph 无则 hidden
+    GraphSpec *-- "0..*" SubgraphSpec
+    GraphSpec *-- "0..*" HiddenGroupSpec
+    ElementSpec <|-- NodeSpec
+    ElementSpec <|-- GroupSpec
+    GroupSpec <|-- SubgraphSpec
+    GroupSpec <|-- HiddenGroupSpec
     GraphSpec ..> GraphStore : 构建时校验并物化
-    GraphStore *-- LayoutNode
+    GraphStore *-- "0..*" LayoutElement : elements 混排
+    LayoutElement <|-- LayoutNode
+    LayoutElement <|-- LayoutSubgraphNode
+    GraphStore *-- "0..*" ClusterConstraint
     GraphStore *-- InternalEdge
+    SubgraphSpec ..> LayoutSubgraphNode : 物化为物理实体
+    HiddenGroupSpec ..> ClusterConstraint : 物化为力学钩子
     LayoutStrategy --> GraphStore : 读图、写坐标
     LayoutStrategy ..> CoordinateSystem : 布局完成后调用 refine
     CoordinateSystem --> CoordinateNode : 就地修正
     GraphStore ..> NodeView : 只读引用
+    GraphStore ..> SubgraphView : 只读引用
 ```
 
 结构所有权与写入方（「谁拥有、谁能写」是数据契约的核心）：
 
 | 结构 | 定义处 | 所有权与写入方 |
 |---|---|---|
-| `GraphSpec` / `NodeSpec` / `EdgeSpec` / `GroupSpec` / `ShapeSpec`（`NodeId = string \| number`） | `types.ts` | 用户输入，构建后库不再修改 |
-| `LayoutNode` / `InternalEdge` | `graph/store.ts` | 底座拥有；算法按约定写坐标 x/y 与派生量（如 hub 的有效半径），不得自建第二份图数据 |
+| `GraphSpec` / `NodeSpec` / `EdgeSpec` / `GroupSpec` / `SubgraphSpec` / `HiddenGroupSpec` / `ShapeSpec`（`ElementId = string \| number`） | `types.ts` | 用户输入，构建后库不再修改 |
+| `LayoutNode` / `LayoutSubgraphNode` / `ClusterConstraint` / `InternalEdge` | `graph/store.ts` | 底座拥有；算法按约定写坐标 x/y 与派生量（如容器的有效半径），不得自建第二份图数据 |
 | `CoordinateNode` | `layout/coordinates.ts` | 策略在布局完成后构造的一次性修正视图，`refine` 就地修改，结果由策略写回 store |
 | `NodeView` | `types.ts` | store 的只读投影（实时引用），消费方只读 |
 
@@ -259,26 +301,29 @@ classDiagram
 （不虚占空间）。节点文字不改变形状，但会让有效包围半径 `r` 在弛豫末期变大
 （力导向的阶段 3）。
 
-**轴 2 · 分组角色（`nodeRole`，底座派生，用户不可直接声明）**
+**轴 2 · 元素角色（底座物化，用户不可直接声明）**
 
-| 角色 | 值 | 来源 | 语义 |
-|---|---|---|---|
-| free | 0 | 默认 | 普通节点 |
-| member | 1 | 出现在某个 `GroupSpec.members` | 容器成员，受所属组约束 |
-| hub | 2 | 带 shape 的 `GroupSpec` 由底座物化 | subgraph 容器锚点：**虚拟大节点**（质量 = 成员数 + 1，半径随成员自适应），外部连线可以 group.id 为端点；渲染约定为背景层 |
+| 角色 | 判定 | 语义 |
+|---|---|---|
+| free | 默认 | 普通节点 |
+| member | 出现在某个 `GroupSpec.members`（subgraphs 或 hiddenGroups） | 组成员，`store.hubOfMember(i)` 给出所属容器的物理下标 |
+| hub | `SubgraphSpec` 由底座物化为 `LayoutSubgraphNode`（`isSubgraph = true`） | subgraph 容器：**参与物理碰撞的大节点**（质量 = 成员数 + 1，半径按成员几何 + padding 自适应），外部连线以 group.id 为端点；渲染层从 `subgraphViews` 作为背景层读取 |
+
+hidden-group 没有 hub：它物化为 `ClusterConstraint`（成员下标 + 质心简谐
+束缚）——只施力、不入图、不参与碰撞。
 
 member 还可按连线细分（`GroupRoles`）：**entry / exit**（与组外有连线的
 组边界）与 **internal**（纯内连）——供跨容器交互查询（如力导向的张力传导）。
 
-**轴 3 · 分组声明二分（`GroupSpec.shape` 有无）**
+**轴 3 · 分组声明的二分（类型层面强制，运行时无 shape 分支）**
 
-| 声明 | 种类 | 物化结果 |
+| 声明数组 | 种类 | 物化结果 |
 |---|---|---|
-| 有 `shape` | **subgraph** | hub 虚拟节点入图；成员被约束在容器内部区域 |
-| 无 `shape` | **hidden-group** | 不产生可见实体，仅对成员施加聚集束缚（形状 = 成员包围盒） |
+| `subgraphs`（`shape` 必填） | **subgraph** | `LayoutSubgraphNode` 容器节点入图参与碰撞；成员被约束在容器内部区域 |
+| `hiddenGroups` | **hidden-group** | `ClusterConstraint`：不产生可见实体，仅对成员施加向质心的聚集束缚（形状 = 成员包围盒） |
 
-`groups` 可以不声明：需要自动分组时，调用方先跑 `detectHiddenGroups`
-（链成组、环成组、挂接叶并入、组间吞并四条规则），再把结果作为声明传入。
+两个数组都可以不声明：需要自动分组时，调用方先跑 `detectHiddenGroups`
+（链成组、环成组、挂接叶并入、组间吞并四条规则），再把结果传入 `hiddenGroups`。
 
 **轴 4 · 放置与动力学（`LayoutNode` 标志位）**
 
@@ -300,8 +345,8 @@ member 还可按连线细分（`GroupRoles`）：**entry / exit**（与组外有
 
 | 允许 | 禁止 |
 |---|---|
-| 读底座全部数据：nodes / edges / adj / groups / 角色数组 / groupHub | 自建第二份图数据当事实源——结构变化以 `rebuild()` 重新同步 |
-| 写节点坐标（x/y）与明确归属策略的派生量（如 hub 有效半径） | 增删节点/边、改邻接——图拓扑变更只属于 `GraphStore` 与门面 |
+| 读底座全部数据：elements / edges / adj / subgraphNodes / clusterConstraints | 自建第二份图数据当事实源——结构变化以 `rebuild()` 重新同步 |
+| 写节点坐标（x/y）与明确归属策略的派生量（如容器有效半径） | 增删节点/边、改邻接——图拓扑变更只属于 `GraphStore` 与门面 |
 | 只取所需选项（`LayoutOptions` 是公共超集，circle 仅用 naturalLength / seed） | 把示例图的实例数据写进 `src/`（`architecture.test.ts` 强制扫描） |
 | 能量类算法自行定义力与能量 | 违反「力 = −∇E」硬约束（决策 4）——回溯线搜索会整体失效 |
 
@@ -313,11 +358,12 @@ member 还可按连线细分（`GroupRoles`）：**entry / exit**（与组外有
 ### 5.1 构建流
 
 ```text
-GraphSpec ──GraphStore 构造──▶ 节点/边/邻接 + 校验
+GraphSpec ──GraphStore 构造（物化）──▶ 节点/边/邻接 + 校验
    │
-   ├─ groups 带 shape ──▶ 生成 hub 虚拟节点（质量 = 成员数 + 1）
-   │                      此后外部连线可以 group.id 为端点，映射到 hub
-   └─ 全部构建完成后 ──▶ rebuildRoles()：派生 nodeRole / nodeGroup 角色数组
+   ├─ subgraphs ─────▶ 物化为 LayoutSubgraphNode 容器节点（质量 = 成员数 + 1）
+   │                   此后外部连线以 group.id 为端点，映射到容器
+   ├─ hiddenGroups ──▶ 物化为 ClusterConstraint（质心简谐束缚，不入图）
+   └─ 全部构建完成后 ──▶ rebuildGroupIndices()：派生成员物理下标 / memberSet
 
 new ForceLayout(graph, options)
    └─ createStrategy(algorithm, store, options)
@@ -327,10 +373,12 @@ new ForceLayout(graph, options)
                         → new RelaxationSolver（弛豫求解器）
 ```
 
-设计意图：**hub 是底座概念，不是算法概念**。`GraphStore` 把「subgraph 容器」
-物化为一个普通节点 + 角色标记，力导向策略据此做「hub 与成员间斥力豁免 +
+设计意图：**分组物化是底座概念，不是算法概念**。`GraphStore` 把 subgraph
+物化为与普通节点同构的 `LayoutSubgraphNode`（多态基类 `LayoutElement`，
+`getBoundRadius()` 恒可用），把 hidden-group 物化为只带 `applyForces()`
+钩子的 `ClusterConstraint`。力导向策略据此做「容器与成员间斥力豁免 +
 包含墙」，坐标系据此构造「锚定区域」；一个不认识分组的算法（如 circle）
-可以把 hub 当普通节点处理，照样工作。
+可以把容器当普通节点处理，照样工作。
 
 ### 5.2 求解流
 
@@ -364,9 +412,11 @@ run(maxIterations, staged, onTick)
 
 策略把坐标写回 `GraphStore`，消费方只读视图：
 
-- `nodeViews`：`LayoutNode[]` 的只读引用，**实时反映最新位置**（非拷贝），
-  供渲染层每帧读取；`groupHub: true` 的节点有渲染约定——作为背景层最先绘制，
-  否则容器矩形会盖住内部成员（约定记录在 `NodeView` 类型注释中，布局不负责绘制）。
+- `nodeViews`：物理节点（`LayoutNode[]`）的只读引用，**实时反映最新位置**
+  （非拷贝），供渲染层每帧读取。
+- `subgraphViews`：subgraph 容器的只读引用，有渲染约定——**作为背景层最先
+  绘制**，否则容器矩形会盖住内部成员（约定记录在 `SubgraphView` 类型注释中，
+  布局不负责绘制）。
 - `edgeViews`：物理边列表（自环已在构建时剔除），含边文字包围盒半宽/半高
   与回绕后的行文本（渲染可直接使用）。
 - `positions` / `energy` / `energyHistory` / `stage` / `converged`：
@@ -411,14 +461,17 @@ index 里一行 import，**不修改任何既有模块**。坐标系接缝同构
 因此「力 = −∇E」不属于某个算法的内部设计，而属于架构：任何新算法若采用
 能量下降式求解，必须遵守同一约束。
 
-### 决策 5：分组（group）是底座派生的一等概念
+### 决策 5：分组在声明层与底座层都有明确二分
 
-`GroupSpec` 按「有无 shape」二分：有 shape 是 **subgraph**（生成 hub 虚拟
-节点，成员被约束在容器内），无 shape 是 **hidden-group**（不可见实体，
-仅施加聚集束缚）。底座负责把声明物化为「hub 节点 + 角色数组（free/member/hub）
-+ 成员→组映射」；**如何解释角色是各算法自己的事**——力导向实现斥力豁免、
-包含墙、组内精修，circle 则完全忽略角色。角色派生只被 `rebuildRoles()`
-一处维护，增删节点后自动重算。
+声明层（`types.ts`）：`SubgraphSpec`（shape 必填，有固定边界的物理分组）与
+`HiddenGroupSpec`（无边界的聚类约束）都继承抽象 `GroupSpec`，由 `GraphSpec`
+的两个数组分开承载——运行时不再出现「if 有无 shape」的分支。
+底座层（`graph/store.ts`）：subgraph 物化为 `LayoutSubgraphNode`（Compound
+Node，参与物理碰撞，迭代末 `updateBoundsFromChildren()` 按成员几何 + padding
+重算半径），hidden-group 物化为 `ClusterConstraint`（`applyForces()` 质心
+束缚钩子，不入图）。**如何消费物化结果是各算法自己的事**——力导向实现斥力
+豁免、包含墙、组内精修，circle 把容器当普通节点、完全忽略分组语义。
+成员归属派生只被 `rebuildGroupIndices()` 一处维护，增删节点后自动重算。
 
 ### 决策 6：确定性可复现
 
@@ -457,9 +510,9 @@ index 里一行 import，**不修改任何既有模块**。坐标系接缝同构
 | 2 | 力导向的能量单调性要被测试验证（精确 vs Barnes-Hut 对比） | 需要「重算力场但不推进布局」的调试通道，且不是所有算法都有 | `forceSnapshot()` 声明为**可选**接口方法；circle 不实现，门面对不支持的策略抛错 |
 | 3 | 力导向的收敛是「弛豫到平衡」，circle 是「构造即完成」 | 接口的能量/迭代/收敛语义必须允许平凡实现 | `energy` 约定「无能量概念的策略返回 0」，`energyHistory` 允许空数组 |
 | 4 | 力导向的交叉收缩、跳数衰减、Barnes-Hut 都要求力与能量严格同源 | 「力 = −∇E」必须成为跨模块硬约束并写进各模块契约 | 决策 4；四叉树双树遍历、交叉分段保守、软墙不钳深都是它的落实 |
-| 5 | grid 坐标系必须保证 subgraph 成员吸附后仍在容器内 | 坐标系接口需要「锚定区域」概念；区域中心应跟随 hub **吸附后的新位置** | `CoordinateNode.region { anchorId, rIn }`；构造 region 是调用方（策略）的职责，坐标系只按接口消费 |
+| 5 | grid 坐标系必须保证 subgraph 成员吸附后仍在容器内 | 坐标系接口需要「锚定区域」概念；区域中心应跟随容器**吸附后的新位置** | `CoordinateNode.region { anchorId, rIn }`；构造 region 是调用方（策略）的职责，坐标系只按接口消费 |
 | 6 | 坐标修正必须发生在「布局完成之后」，且换坐标系不需要动算法 | 修正做成布局末端的单向管线挂点，注册名选择 | 策略末尾调用 `cs.refine()`；`coordinateSystem` 是与 `algorithm` 平级的独立选项，二者正交组合 |
-| 7 | 力导向的组内精修要「冻结组外、只弛豫组内」 | 底座必须提供「哪些节点属于哪个组」的权威查询，算法不能自己维护第二份分组数据 | `GraphStore.nodeRole/nodeGroup/groupHub` + `groupRoles()`（入口/出口/内部角色） |
+| 7 | 力导向的组内精修要「冻结组外、只弛豫组内」 | 底座必须提供「哪些节点属于哪个组」的权威查询，算法不能自己维护第二份分组数据 | `GraphStore.subgraphNodes` / `clusterConstraints` / `hubOfMember()` + `groupRoles()`（入口/出口/内部角色） |
 | 8 | 力导向的斥力/弹力平衡间隙全部以「表面间隙」和 `naturalLength` 为标定锚 | 公共参数语义必须与算法共享：`naturalLength` 是**表面间距**而非中心距，作用域、网格间距、初值尺度都从它派生 | `LayoutOptions.naturalLength` 的语义写进类型注释，成为跨算法公共标尺（circle 的环半径也按它取量级） |
 | 9 | circle 要「显式定位的节点不动」（`placed` 标记）；力导向的 BFS 初值也把它当锚点 | 「用户显式给了初始位置」必须是底座数据而不是算法猜测 | `GraphStore` 构建时记录 `LayoutNode.placed`，所有初始化逻辑统一尊重它 |
 | 10 | 力导向的重特性需要在大图上自动停用（决策 7） | 特性开关与预算回退发生在**策略内部**，门面与接口不感知 | 参数语义（如 `hopRepulsionDecay` 设 1 关闭）写进公共选项；降级细节留在算法文档 |

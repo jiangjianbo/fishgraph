@@ -56,8 +56,8 @@ export class RelaxationSolver {
     public opts: SolverOptions,
   ) {
     this.stepSize = opts.initStep;
-    this.saveX = new Float64Array(ctx.nodes.length);
-    this.saveY = new Float64Array(ctx.nodes.length);
+    this.saveX = new Float64Array(ctx.elements.length);
+    this.saveY = new Float64Array(ctx.elements.length);
   }
 
   /** 外部状态（位置/参数）被改动后调用，强制重新计算力场。 */
@@ -88,7 +88,7 @@ export class RelaxationSolver {
    */
   step(): boolean {
     if (this.converged) return false;
-    if (this.ctx.nodes.length === 0) {
+    if (this.ctx.elements.length === 0) {
       this.converged = true;
       return false;
     }
@@ -99,7 +99,7 @@ export class RelaxationSolver {
       return false;
     }
 
-    const { nodes, params } = this.ctx;
+    const { elements: nodes, params } = this.ctx;
     const s = this.stepSize;
     const invUnit = 1 / params.forceUnit;
     const sx = this.saveX;

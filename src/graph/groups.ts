@@ -15,11 +15,10 @@
  * 高度节点（星形中心等）不属于任何隐藏组。
  */
 
-import type { GraphSpec, NodeId } from '../types.js';
+import type { GraphSpec, HiddenGroupSpec } from '../types.js';
 
-export interface HiddenGroup {
-  members: NodeId[];
-}
+/** 向后兼容别名：推断结果即 hiddenGroups 声明（可直接传入 GraphSpec）。 */
+export type HiddenGroup = HiddenGroupSpec;
 
 /** 无向邻接表（自环忽略）。 */
 function buildAdjacency(graph: GraphSpec): Array<Set<number>> {
@@ -95,10 +94,11 @@ function edgeBiconnectedComponents(
 }
 
 /**
- * 推断隐藏组。返回成员为节点 id 的组列表（已按规则 4 完成吞并合并）。
+ * 推断隐藏组。返回 hiddenGroups 声明（自动生成 id：hidden-1、hidden-2…，
+ * 可直接传入 GraphSpec.hiddenGroups；已按规则 4 完成吞并合并）。
  * 同一节点只属于一个隐藏组；度 > 2 且不在环上的节点不入组。
  */
-export function detectHiddenGroups(graph: GraphSpec): HiddenGroup[] {
+export function detectHiddenGroups(graph: GraphSpec): HiddenGroupSpec[] {
   const adj = buildAdjacency(graph);
   const n = adj.length;
   const assigned = new Uint8Array(n); // 已入组标记
@@ -199,5 +199,5 @@ export function detectHiddenGroups(graph: GraphSpec): HiddenGroup[] {
     }
   }
 
-  return groups.map((g) => ({ members: g.idx.map((i) => graph.nodes[i].id) }));
+  return groups.map((g, i) => ({ id: `hidden-${i + 1}`, members: g.idx.map((j) => graph.nodes[j].id) }));
 }

@@ -41,7 +41,7 @@ export class ForceDirectedStrategy implements LayoutStrategy {
     this.options = options;
     this.cs = createCoordinateSystem(options.coordinateSystem);
     this.store.refreshLabelBoxes();
-    this.params = deriveParams(options, store.nodes.length);
+    this.params = deriveParams(options, store.elements.length);
     // 分量根之间的摆放尺度：与引力模式的真实平衡尺度一致。
     // pairwise：弱引力与截断斥力的平衡间隙 g = 1/(k_w/k_r + 1/R)（饱和于斥力作用域）；
     // centroid：调和束缚下的 blob 尺度。
@@ -50,7 +50,7 @@ export class ForceDirectedStrategy implements LayoutStrategy {
         ? this.params.L * Math.pow(1 / (2 * Math.max(options.centroidStrength, 1e-4)), 0.25)
         : 1 / (this.params.kw / this.params.kr + 1 / this.params.repR);
     applyInitPlacement(
-      this.store.nodes,
+      this.store.elements,
       this.store.adj,
       options.init,
       this.params.L,
@@ -58,7 +58,7 @@ export class ForceDirectedStrategy implements LayoutStrategy {
       spreadD,
     );
     this.ctx = {
-      nodes: this.store.nodes,
+      elements: this.store.elements,
       edges: this.store.edges,
       adj: this.store.adj,
       params: this.params,
@@ -70,61 +70,35 @@ export class ForceDirectedStrategy implements LayoutStrategy {
       edgeCrossCounts: new Array<number>(this.store.edges.length).fill(0),
       crossPenaltyEnergy: 0,
       hopScale: this.buildHopScale(),
-      nodeRole: this.store.nodeRole,
-      nodeGroup: this.store.nodeGroup,
       hubOfMember: this.buildHubMap(),
-      hiddenGroups: this.buildHiddenGroupConstraints(),
-      subgraphBoxes: this.buildSubgraphConstraints(),
+      clusterConstraints: this.store.clusterConstraints,
+      subgraphNodes: this.store.subgraphNodes,
       stage: 3,
       energy: 0,
       maxForceUnit: 0,
     };
+    this.refreshClusterK();
     this.solver = new RelaxationSolver(this.ctx, this.solverOptions());
   }
 
   // ── 生命周期 ────────────────────────────────────────────
 
-  /** 下标 → 所属 subgraph hub 下标。 */
+  /** 下标 → 所属 subgraph 容器下标。 */
   private buildHubMap(): Int32Array {
-    const map = new Int32Array(this.store.nodes.length).fill(-1);
-    for (let i = 0; i < this.store.nodes.length; i++) {
-      const h = this.store.hubOfMember(i);
-      map[i] = h;
+    const map = new Int32Array(this.store.elements.length).fill(-1);
+    for (let i = 0; i < this.store.elements.length; i++) {
+      map[i] = this.store.hubOfMember(i);
     }
     return map;
   }
 
-  /** hidden-group 聚集束缚（成员数归一，groupCohesion 可调）。 */
-  private buildHiddenGroupConstraints(): Array<{ members: number[]; k: number }> {
-    const L = this.options.naturalLength;
-    return this.store.groups
-      .filter((g) => !g.shape)
-      .map((g) => {
-        const members = g.members
-          .map((m) => this.store.indexOf(m))
-          .filter((x) => x >= 0);
-        return { members, k: (this.options.groupCohesion * 1) / (L * L * Math.max(members.length, 1)) };
-      })
-      .filter((g) => g.members.length >= 2);
-  }
-
-  /** subgraph 包含墙（成员出界拉回；内切半径近似 = 包围半径 × 0.55）。 */
-  private buildSubgraphConstraints(): Array<{ hub: number; members: number[]; pad: number; k: number; rMin: number }> {
-    const L = this.options.naturalLength;
-    const pad = 0.12 * L;
-    const k = 8 / (L * L * L);
-    return this.store.groups
-      .filter((g) => !!g.shape)
-      .map((g) => {
-        const hub = this.store.groupHub.get(g.id) ?? -1;
-        if (hub < 0) return null;
-        const members = g.members
-          .map((m) => this.store.indexOf(m))
-          .filter((x) => x >= 0);
-        const hubR = this.store.nodes[hub].r; // 声明形状的包围半径 → 最小内切
-        return { hub, members, pad, k, rMin: hubR * 0.55 };
-      })
-      .filter((x): x is { hub: number; members: number[]; pad: number; k: number; rMin: number } => x !== null);
+  /** 聚集约束的每成员束缚系数：k = 强度/(L²·n)（k_a/L² 尺度、按成员数归一）。 */
+  private refreshClusterK(): void {
+    const L2 = this.options.naturalLength * this.options.naturalLength;
+    for (const c of this.store.clusterConstraints) {
+      const strength = c.strength ?? this.options.groupCohesion;
+      c.k = strength / (L2 * Math.max(c.memberIndices.length, 1));
+    }
   }
 
   /** 跳数斥力乘子矩阵（拓扑导出，坐标无关；仅在图结构或系数变化时重建）。 */
@@ -153,8 +127,14 @@ export class ForceDirectedStrategy implements LayoutStrategy {
 
   /** 更新布局参数（保留当前坐标继续弛豫，适合 demo 实时调参）。 */
   refresh(options: ResolvedLayoutOptions): void {
+    // 先比较再赋值：检测拓扑派生量与坐标系的系数是否变化（变化才重建）
+    const hopChanged =
+      options.hopRepulsionDecay !== this.options.hopRepulsionDecay ||
+      options.unrelatedRepulsion !== this.options.unrelatedRepulsion;
+    const cohesionChanged = options.groupCohesion !== this.options.groupCohesion;
+    const csChanged = options.coordinateSystem !== this.options.coordinateSystem;
     this.options = options;
-    const newParams = deriveParams(options, this.store.nodes.length);
+    const newParams = deriveParams(options, this.store.elements.length);
     // 原地更新，保证 ctx.params 引用稳定
     Object.assign(this.params, newParams);
     this.ctx.gravity = options.gravity;
@@ -162,16 +142,13 @@ export class ForceDirectedStrategy implements LayoutStrategy {
     this.ctx.theta = options.theta;
     this.ctx.labelCollision = options.labelCollision;
     // 跳数系数变化时重建乘子矩阵（拓扑没变，仅系数变）
-    if (
-      options.hopRepulsionDecay !== this.options.hopRepulsionDecay ||
-      options.unrelatedRepulsion !== this.options.unrelatedRepulsion
-    ) {
+    if (hopChanged) {
       this.ctx.hopScale = this.buildHopScale();
     }
-    if (options.groupCohesion !== this.options.groupCohesion) {
-      this.ctx.hiddenGroups = this.buildHiddenGroupConstraints();
+    if (cohesionChanged) {
+      this.refreshClusterK();
     }
-    if (options.coordinateSystem !== this.options.coordinateSystem) {
+    if (csChanged) {
       this.cs = createCoordinateSystem(options.coordinateSystem);
     }
     this.store.refreshLabelBoxes();
@@ -187,27 +164,27 @@ export class ForceDirectedStrategy implements LayoutStrategy {
 
   /** 图结构变化（增删节点/边）：重建内部状态，并为未显式定位的节点重新初始化。 */
   rebuild(): void {
-    this.params = deriveParams(this.options, this.store.nodes.length);
+    this.params = deriveParams(this.options, this.store.elements.length);
     Object.assign(this.ctx.params, this.params);
     this.store.refreshLabelBoxes();
     this.store.applyNodeLabelSizes(this.ctx.stage >= 3);
-    this.ctx.nodes = this.store.nodes;
+    this.ctx.elements = this.store.elements;
     this.ctx.edges = this.store.edges;
     this.ctx.adj = this.store.adj;
     this.ctx.edgeKaMul = new Array<number>(this.store.edges.length).fill(1);
     this.ctx.edgeCrossCounts = new Array<number>(this.store.edges.length).fill(0);
     this.ctx.crossPenaltyEnergy = 0;
     this.ctx.hopScale = this.buildHopScale();
-    this.ctx.nodeRole = this.store.nodeRole;
-    this.ctx.nodeGroup = this.store.nodeGroup;
-    this.ctx.hiddenGroups = this.buildHiddenGroupConstraints();
-    this.ctx.subgraphBoxes = this.buildSubgraphConstraints();
+    this.ctx.hubOfMember = this.buildHubMap();
+    this.ctx.clusterConstraints = this.store.clusterConstraints;
+    this.ctx.subgraphNodes = this.store.subgraphNodes;
+    this.refreshClusterK();
     const spreadD =
       this.options.gravity === 'centroid'
         ? this.params.L * Math.pow(1 / (2 * Math.max(this.options.centroidStrength, 1e-4)), 0.25)
         : 1 / (this.params.kw / this.params.kr + 1 / this.params.repR);
     applyInitPlacement(
-      this.store.nodes,
+      this.store.elements,
       this.store.adj,
       this.options.init,
       this.params.L,
@@ -261,7 +238,7 @@ export class ForceDirectedStrategy implements LayoutStrategy {
     }
     // 组内布局（分组原则 4）：整体收敛后冻结组外节点，组内成员弛豫；
     // 若 hidden-group 形状（成员包围盒）变化超过 15%，引发一轮重新整体布局。
-    if (this.store.groups.length > 0 && max > 0) {
+    if (this.store.subgraphs.length + this.store.hiddenGroups.length > 0 && max > 0) {
       const before = this.hiddenGroupBoxes();
       this.refineGroups(Math.max(150, Math.floor(max * 0.1)), opts.onTick);
       const after = this.hiddenGroupBoxes();
@@ -276,21 +253,22 @@ export class ForceDirectedStrategy implements LayoutStrategy {
     }
 
     // 坐标系修正（布局完成后，以最优布局为基础）：free 恒等，grid 网格化吸附
-    if (this.store.nodes.length > 0) {
-      const nodes: CoordinateNode[] = this.store.nodes.map((nd, ni) => {
+    if (this.store.elements.length > 0) {
+      const nodes: CoordinateNode[] = this.store.elements.map((el, ni) => {
         const hub = this.store.hubOfMember(ni);
         let region: CoordinateNode['region'];
         if (hub >= 0) {
-          region = { anchorId: this.store.nodes[hub].id, rIn: this.store.nodes[hub].r * 0.55 };
+          const anchor = this.store.elements[hub];
+          region = { anchorId: anchor.id, rIn: anchor.r * 0.55 };
         }
-        return { id: nd.id, x: nd.x, y: nd.y, r: nd.r, fixed: nd.fixed, region };
+        return { id: el.id, x: el.x, y: el.y, r: el.r, fixed: el.fixed, region };
       });
       const lattice =
         this.options.gridSize > 0 ? this.options.gridSize : this.options.naturalLength;
       this.cs.refine(nodes, { lattice });
       for (let i = 0; i < nodes.length; i++) {
-        this.store.nodes[i].x = nodes[i].x;
-        this.store.nodes[i].y = nodes[i].y;
+        this.store.elements[i].x = nodes[i].x;
+        this.store.elements[i].y = nodes[i].y;
       }
     }
 
@@ -303,40 +281,37 @@ export class ForceDirectedStrategy implements LayoutStrategy {
 
   /** hidden-group 的成员包围盒（形状 = 成员组成的形状）。 */
   private hiddenGroupBoxes(): Array<{ w: number; h: number }> {
-    return this.store.groups
-      .filter((g) => !g.shape)
-      .map((g) => {
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        for (const m of g.members) {
-          const idx = this.store.indexOf(m);
-          if (idx < 0) continue;
-          const nd = this.store.nodes[idx];
-          minX = Math.min(minX, nd.x);
-          minY = Math.min(minY, nd.y);
-          maxX = Math.max(maxX, nd.x);
-          maxY = Math.max(maxY, nd.y);
-        }
-        return { w: maxX - minX, h: maxY - minY };
-      });
+    return this.store.clusterConstraints.map((c) => {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const idx of c.memberIndices) {
+        const nd = this.store.elements[idx];
+        minX = Math.min(minX, nd.x);
+        minY = Math.min(minY, nd.y);
+        maxX = Math.max(maxX, nd.x);
+        maxY = Math.max(maxY, nd.y);
+      }
+      return { w: maxX - minX, h: maxY - minY };
+    });
   }
 
-  /** 组内精修：冻结全部组外节点（含 subgraph hub），只让组成员弛豫。 */
+  /** 组内精修：冻结全部组外节点（含 subgraph 容器），只让组成员弛豫。 */
   private refineGroups(budget: number, onTick?: () => void): void {
-    const isMember = new Uint8Array(this.store.nodes.length);
-    for (const g of this.store.groups) {
-      for (const m of g.members) {
-        const idx = this.store.indexOf(m);
-        if (idx >= 0) isMember[idx] = 1;
-      }
+    const isMember = new Uint8Array(this.store.elements.length);
+    for (const sg of this.store.subgraphNodes) {
+      for (const idx of sg.memberIndices) isMember[idx] = 1;
     }
-    // subgraph hub 代表组的全局位置：组内精修期间固定
-    for (const hub of this.store.groupHub.values()) isMember[hub] = 0;
+    for (const c of this.store.clusterConstraints) {
+      for (const idx of c.memberIndices) isMember[idx] = 1;
+    }
+    // subgraph 容器代表组的全局位置：组内精修期间固定
+    // （嵌套时子容器会被外层标记为成员，此处强制保持冻结）。
+    for (const sg of this.store.subgraphNodes) isMember[this.store.indexOf(sg.id)] = 0;
     const frozen: number[] = [];
     for (let i = 0; i < isMember.length; i++) if (!isMember[i]) frozen.push(i);
-    for (const i of frozen) this.store.nodes[i].fixed = true;
+    for (const i of frozen) this.store.elements[i].fixed = true;
     this.solver.invalidate();
     this.runBudget(budget, onTick);
-    for (const i of frozen) this.store.nodes[i].fixed = false;
+    for (const i of frozen) this.store.elements[i].fixed = false;
     this.solver.invalidate();
   }
 
@@ -381,11 +356,11 @@ export class ForceDirectedStrategy implements LayoutStrategy {
     this.ctx.accuracy = accuracy;
     this.solver.invalidate();
     const energy = this.solver.energy;
-    const fx = new Float64Array(this.ctx.nodes.length);
-    const fy = new Float64Array(this.ctx.nodes.length);
-    for (let i = 0; i < this.ctx.nodes.length; i++) {
-      fx[i] = this.ctx.nodes[i].fx;
-      fy[i] = this.ctx.nodes[i].fy;
+    const fx = new Float64Array(this.ctx.elements.length);
+    const fy = new Float64Array(this.ctx.elements.length);
+    for (let i = 0; i < this.ctx.elements.length; i++) {
+      fx[i] = this.ctx.elements[i].fx;
+      fy[i] = this.ctx.elements[i].fy;
     }
     this.ctx.accuracy = prev;
     this.solver.invalidate();

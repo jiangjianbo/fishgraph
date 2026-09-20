@@ -304,7 +304,7 @@ describe('Barnes-Hut 与精确解一致性', () => {
     const gStar = equilibriumGap(100, 1) + 20; // ≈ 112.7
     const nodes = layout.nodeViews;
     const lengths = layout.edgeViews
-      .map((e) => Math.hypot(nodes[e.a].x - nodes[e.b].x, nodes[e.a].y - nodes[e.b].y))
+      .map((e) => Math.hypot(nodes[e.sourceIndex].x - nodes[e.targetIndex].x, nodes[e.sourceIndex].y - nodes[e.targetIndex].y))
       .sort((a, b) => a - b);
     const median = lengths[Math.floor(lengths.length / 2)];
     expect(median).toBeGreaterThan(gStar * 0.45);
@@ -331,7 +331,7 @@ describe('规模：节点数量从少到多', () => {
       expect(minSurfaceGap(layout)).toBeGreaterThan(0.1);
       const nodes = layout.nodeViews;
       const lengths = layout.edgeViews
-        .map((e) => Math.hypot(nodes[e.a].x - nodes[e.b].x, nodes[e.a].y - nodes[e.b].y))
+        .map((e) => Math.hypot(nodes[e.sourceIndex].x - nodes[e.targetIndex].x, nodes[e.sourceIndex].y - nodes[e.targetIndex].y))
         .sort((a, b) => a - b);
       const median = lengths[Math.floor(lengths.length / 2)];
       expect(median).toBeGreaterThan(equilibriumGap(100, 1) * 0.45);

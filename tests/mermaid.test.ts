@@ -119,8 +119,8 @@ function renderSvg(layout: ForceLayout, file: string): void {
   type DrawnEdge = { e: (typeof ev)[number]; x0: number; y0: number; x1: number; y1: number };
   const drawn: DrawnEdge[] = [];
   for (const e of ev) {
-    const a = nv[e.a];
-    const b = nv[e.b];
+    const a = nv[e.sourceIndex];
+    const b = nv[e.targetIndex];
     const dx = b.x - a.x;
     const dy = b.y - a.y;
     const d = Math.hypot(dx, dy) || 1;

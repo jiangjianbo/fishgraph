@@ -134,8 +134,10 @@ function groupsGraph(): GraphSpec {
       { source: 'ext-2', target: 'sub' },
       { source: 'ext-1', target: 'in-b' },
     ],
-    groups: [
+    subgraphs: [
       { id: 'sub', shape: { kind: 'rect', w: 380, h: 280 }, label: '子图', members: ['in-a', 'in-b', 'in-c'] },
+    ],
+    hiddenGroups: [
       { id: 'hidden', members: ['chain-1', 'chain-2', 'chain-3'] },
     ],
   };
@@ -174,7 +176,7 @@ function mermaidSubgraphGraph(): GraphSpec {
       { source: 'REG', target: 'ANDROID' },
       { source: 'REG', target: 'OTHER' },
     ],
-    groups: [
+    subgraphs: [
       {
         id: 'SOURCE',
         shape: { kind: 'rect', w: 1500, h: 950 },
@@ -427,8 +429,7 @@ function drawView(): void {
   const nv = layout.nodeViews;
 
   // 背景层 0：subgraph 容器（z-order 最低 —— 先于所有线段与节点）
-  const hubs = nv.filter((nd) => nd.groupHub);
-  const others = nv.filter((nd) => !nd.groupHub);
+  const hubs = layout.subgraphViews;
   for (const nd of hubs) {
     const [sx, sy] = worldToScreen(nd.x, nd.y);
     const sh = nd.shape;
@@ -459,8 +460,8 @@ function drawView(): void {
 
   // 边：剪到起点/终点轮廓，末端画箭头；中点画白底文字
   for (const e of layout.edgeViews) {
-    const a = nv[e.a];
-    const b = nv[e.b];
+    const a = nv[e.sourceIndex];
+    const b = nv[e.targetIndex];
     const dx = b.x - a.x;
     const dy = b.y - a.y;
     const d = Math.hypot(dx, dy) || 1;
@@ -510,8 +511,8 @@ function drawView(): void {
     }
   }
 
-  // 节点层：普通节点（subgraph hub 已在背景层绘制）
-  for (const nd of others) {
+  // 节点层：普通节点（subgraph 容器已在背景层绘制）
+  for (const nd of nv) {
     const [sx, sy] = worldToScreen(nd.x, nd.y);
     const sh = nd.shape;
     g.beginPath();

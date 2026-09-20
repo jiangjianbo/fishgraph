@@ -16,7 +16,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { ForceLayout } from '../src/index.js';
-import type { GraphSpec, NodeId } from '../src/types.js';
+import type { GraphSpec } from '../src/types.js';
 
 function buildGraph(): GraphSpec {
   return {
@@ -51,7 +51,7 @@ function buildGraph(): GraphSpec {
       { source: 'REG', target: 'ANDROID' },
       { source: 'REG', target: 'OTHER' },
     ],
-    groups: [
+    subgraphs: [
       {
         id: 'SOURCE',
         shape: { kind: 'rect', w: 1500, h: 950 },
@@ -100,26 +100,12 @@ describe('mermaid 架构图：subgraph 分组布局', () => {
       expect(Number.isFinite(v.x)).toBe(true);
       expect(Number.isFinite(v.y)).toBe(true);
     }
-    // subgraph hub 与其成员之间无斥力（成员在容器内是期望状态）→ 跳过
-    const memberOf = new Map<NodeId, Set<NodeId>>();
-    for (const g of buildGraph().groups!) {
-      for (const m of g.members) {
-        if (!memberOf.has(m)) memberOf.set(m, new Set());
-        memberOf.get(m)!.add(g.id);
-      }
-    }
-    const exempted = (a: NodeId, b: NodeId): boolean => {
-      const va = views.find((v) => v.id === a)!;
-      const vb = views.find((v) => v.id === b)!;
-      if (va.groupHub && memberOf.get(String(b))?.has(String(a))) return true;
-      if (vb.groupHub && memberOf.get(String(a))?.has(String(b))) return true;
-      return false;
-    };
+    // nodeViews 只含物理节点（成员/自由节点）；容器在 subgraphViews，
+    // 成员-容器间的重叠是期望状态（成员被包含），故仅检查普通节点对
     for (let i = 0; i < views.length; i++) {
       for (let j = i + 1; j < views.length; j++) {
         const ia = String(views[i].id);
         const ib = String(views[j].id);
-        if (exempted(ia, ib)) continue;
         const d = Math.hypot(views[i].x - views[j].x, views[i].y - views[j].y);
         expect(d, `${ia} 与 ${ib} 重叠`).toBeGreaterThanOrEqual(views[i].r + views[j].r);
       }
@@ -128,14 +114,13 @@ describe('mermaid 架构图：subgraph 分组布局', () => {
 
   it('包含性：成员中心+半径落在所属 subgraph 内切半径内（容差内）', () => {
     const graph = buildGraph();
-    for (const g of graph.groups!) {
-      const hub = layout.positions.get(String(g.id))!;
-      const hubView = layout.nodeViews.find((v) => v.id === g.id)!;
+    for (const g of graph.subgraphs ?? []) {
+      const hubView = layout.subgraphViews.find((v) => v.id === g.id)!;
       const rIn = hubView.r * 0.55;
       for (const m of g.members) {
         const p = layout.positions.get(String(m))!;
         const mr = layout.nodeViews.find((v) => v.id === m)!.r;
-        const d = Math.hypot(p.x - hub.x, p.y - hub.y);
+        const d = Math.hypot(p.x - hubView.x, p.y - hubView.y);
         expect(
           d + mr,
           `${m} 未被包含在 ${g.id} 内（d=${d.toFixed(0)} + r=${mr.toFixed(0)} > rIn=${rIn.toFixed(0)}）`,
@@ -146,12 +131,12 @@ describe('mermaid 架构图：subgraph 分组布局', () => {
 
   it('归属凝聚：成员距自己 hub 显著近于任何外部 hub', () => {
     const graph = buildGraph();
-    for (const g of graph.groups!) {
+    for (const g of graph.subgraphs ?? []) {
       const own = layout.positions.get(String(g.id))!;
       for (const m of g.members) {
         const p = layout.positions.get(String(m))!;
         const dOwn = Math.hypot(p.x - own.x, p.y - own.y);
-        for (const other of graph.groups!) {
+        for (const other of graph.subgraphs ?? []) {
           if (other.id === g.id) continue;
           const fo = layout.positions.get(String(other.id))!;
           const dForeign = Math.hypot(p.x - fo.x, p.y - fo.y);
@@ -165,7 +150,7 @@ describe('mermaid 架构图：subgraph 分组布局', () => {
   });
 
   it('拓扑保持：同 subgraph 内的连线间隙有限', () => {
-    const groups = buildGraph().groups!;
+    const groups = buildGraph().subgraphs ?? [];
     for (const e of buildGraph().edges) {
       const a = String(e.source);
       const b = String(e.target);
@@ -179,8 +164,8 @@ describe('mermaid 架构图：subgraph 分组布局', () => {
   });
 
   it('容器不重叠：subgraph 矩形（不嵌套时）两两不相交', () => {
-    const hubs = buildGraph()
-      .groups!.filter((g) => g.shape && g.shape.kind === 'rect')
+    const hubs = (buildGraph().subgraphs ?? [])
+      .filter((g) => g.shape.kind === 'rect')
       .map((g) => {
         const p = layout.positions.get(g.id)!;
         const shape = g.shape as { kind: 'rect'; w: number; h: number };
@@ -198,7 +183,7 @@ describe('mermaid 架构图：subgraph 分组布局', () => {
   });
 
   it('已知边界：跨容器连线间隙有界（张力传导待专项设计）', () => {
-    const groups = buildGraph().groups!;
+    const groups = buildGraph().subgraphs ?? [];
     for (const e of buildGraph().edges) {
       const a = String(e.source);
       const b = String(e.target);
@@ -240,7 +225,6 @@ function renderSvg(layout: ForceLayout): string {
   const graph = buildGraph();
   const views = layout.nodeViews;
   const pos = new Map(views.map((v) => [String(v.id), v]));
-  const hubView = (id: NodeId) => pos.get(String(id))!;
 
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const v of views) {
@@ -257,13 +241,14 @@ function renderSvg(layout: ForceLayout): string {
     `<rect x="${(minX - pad).toFixed(1)}" y="${(minY - pad).toFixed(1)}" width="${(maxX - minX + pad * 2).toFixed(0)}" height="${(maxY - minY + pad * 2).toFixed(0)}" fill="#ffffff"/>`,
   );
 
-  // 背景层：subgraph 矩形
-  for (const g of graph.groups!) {
-    const hv = hubView(g.id);
-    const [w, h] = [g.shape!.kind === 'rect' ? (g.shape as any).w : 300, g.shape!.kind === 'rect' ? (g.shape as any).h : 200];
+  // 背景层：subgraph 容器（来自 subgraphViews）
+  for (const g of layout.subgraphViews) {
+    const sh = g.shape;
+    const w = sh.kind === 'rect' ? sh.w : sh.kind === 'ellipse' ? sh.rx * 2 : sh.r * 2;
+    const h = sh.kind === 'rect' ? sh.h : sh.kind === 'ellipse' ? sh.ry * 2 : sh.r * 2;
     parts.push(
-      `<rect x="${(hv.x - w / 2).toFixed(1)}" y="${(hv.y - h / 2).toFixed(1)}" width="${w}" height="${h}" rx="10" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.5"/>`,
-      `<text x="${(hv.x - w / 2 + 12).toFixed(1)}" y="${(hv.y - h / 2 + 20).toFixed(1)}" font-size="14" fill="#475569" font-weight="600">${esc(g.label ?? '')}</text>`,
+      `<rect x="${(g.x - w / 2).toFixed(1)}" y="${(g.y - h / 2).toFixed(1)}" width="${w}" height="${h}" rx="10" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.5"/>`,
+      `<text x="${(g.x - w / 2 + 12).toFixed(1)}" y="${(g.y - h / 2 + 20).toFixed(1)}" font-size="14" fill="#475569" font-weight="600">${esc(g.label ?? '')}</text>`,
     );
   }
 

@@ -6,7 +6,7 @@
  * 增量顺序天然打破对称，产出的初始结构与图拓扑同构，收敛快且稳定。
  */
 
-import type { LayoutNode } from '../../graph/store.js';
+import type { LayoutElement } from '../../graph/store.js';
 import { mulberry32 } from '../../rng.js';
 import type { InitMode } from '../../types.js';
 
@@ -20,7 +20,7 @@ import type { InitMode } from '../../types.js';
  * 与能量单调下降，初值无交叉则弛豫全程无交叉。
  * （跳数斥力衰减后远程斥力不再能自动拉开交叉，初值平面性成为关键。） */
 function placeByBfs(
-  nodes: LayoutNode[],
+  nodes: LayoutElement[],
   adjacency: Array<Set<number>>,
   L: number,
   strangerD: number,
@@ -160,7 +160,7 @@ function placeByBfs(
  * 好的初值能显著减少收敛迭代数；'bfs'（度数优先增量放置）对各类拓扑都最稳健。
  */
 export function applyInitPlacement(
-  nodes: LayoutNode[],
+  nodes: LayoutElement[],
   adjacency: Array<Set<number>>,
   mode: InitMode,
   L: number,

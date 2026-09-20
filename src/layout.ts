@@ -30,13 +30,14 @@ import {
 import type {
   AccuracyMode,
   EdgeSpec,
+  ElementId,
   GraphSpec,
   LayoutOptions,
-  NodeId,
   NodeSpec,
   NodeView,
   RunOptions,
   RunResult,
+  SubgraphView,
 } from './types.js';
 
 const DEFAULTS = {
@@ -126,7 +127,7 @@ export class ForceLayout {
     this.strategy.rebuild();
   }
 
-  removeNode(id: NodeId): void {
+  removeNode(id: ElementId): void {
     this.store.removeNode(id);
     this.strategy.rebuild();
   }
@@ -137,23 +138,23 @@ export class ForceLayout {
     this.strategy.rebuild();
   }
 
-  removeEdge(source: NodeId, target: NodeId): void {
+  removeEdge(source: ElementId, target: ElementId): void {
     this.store.removeEdge(source, target);
     this.strategy.rebuild();
   }
 
   /** 固定节点（可同时移动它）。固定节点不受力移动，但仍对其他节点施力。 */
-  fix(id: NodeId, x?: number, y?: number): void {
+  fix(id: ElementId, x?: number, y?: number): void {
     this.store.fix(id, x, y);
     this.strategy.invalidate();
   }
 
-  unfix(id: NodeId): void {
+  unfix(id: ElementId): void {
     this.store.unfix(id);
     this.strategy.invalidate();
   }
 
-  setNodePosition(id: NodeId, x: number, y: number): void {
+  setNodePosition(id: ElementId, x: number, y: number): void {
     this.store.setNodePosition(id, x, y);
     this.strategy.invalidate();
   }
@@ -180,12 +181,23 @@ export class ForceLayout {
     return this.store.nodeViews;
   }
 
-  /** 物理边列表（a/b 为 nodeViews 下标；自环已剔除）。 */
-  get edgeViews(): readonly Readonly<{ a: number; b: number; label: string | null; labelHw: number; labelHh: number }>[] {
+  /** subgraph 容器视图（渲染约定：背景层最先绘制，成员绘制在其上）。 */
+  get subgraphViews(): readonly SubgraphView[] {
+    return this.store.subgraphViews;
+  }
+
+  /** 物理边列表（sourceIndex/targetIndex 为 nodeViews 所在 elements 数组下标；自环已剔除）。 */
+  get edgeViews(): readonly Readonly<{
+    sourceIndex: number;
+    targetIndex: number;
+    label: string | null;
+    labelHw: number;
+    labelHh: number;
+  }>[] {
     return this.store.edgeViews;
   }
 
-  get positions(): Map<NodeId, { x: number; y: number }> {
+  get positions(): Map<ElementId, { x: number; y: number }> {
     return this.store.positions;
   }
 

@@ -69,8 +69,8 @@ export class CircleLayoutStrategy implements LayoutStrategy {
 
   /** 连通分量 → 正多边形环；分量中心沿大环排开。 */
   private place(): void {
-    const { nodes, adj } = this.store;
-    const n = nodes.length;
+    const { elements, adj } = this.store;
+    const n = elements.length;
     if (n === 0) return;
     const L = this.options.naturalLength;
     // 连通分量（BFS）
@@ -103,7 +103,7 @@ export class CircleLayoutStrategy implements LayoutStrategy {
       const radius = (L * Math.max(2, Math.sqrt(members.length))) / 2;
       members.forEach((idx, k) => {
         const a = (k / members.length) * Math.PI * 2 - Math.PI / 2;
-        const nd = nodes[idx];
+        const nd = elements[idx];
         if (nd.placed) return; // 显式定位的节点不动
         nd.x = cx + Math.cos(a) * radius;
         nd.y = cy + Math.sin(a) * radius;
