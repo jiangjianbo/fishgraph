@@ -110,9 +110,11 @@ export type LayoutStage = 0 | 1 | 2 | 3;
 export interface LayoutOptions {
   /**
    * 布局算法（策略名）。默认 'force-directed'（纯力导向，不含分组力学）。
-   * 内置：'force-directed' | 'force-group' | 'circle'；可用 registerStrategy
-   * 注册自定义策略。声明了 subgraphs/hiddenGroups 的图请选 'force-group'
-   * （在力导向基础上叠加分组力学与组内精修）。
+   * 内置：'force-directed' | 'force-group' | 'force-undirected' | 'circle'；
+   * 可用 registerStrategy 注册自定义策略。声明了 subgraphs/hiddenGroups 的图
+   * 请选 'force-group'（在力导向基础上叠加分组力学与组内精修）；
+   * 追求均匀分布、结构对称、无交叉的紧凑布局请选 'force-undirected'
+   * （质点网格粗布局 → 膨胀压实 → 短弛豫微调，见 doc/布局核心原则.md）。
    * 运行时切换用 layout.setStrategy(name)（保留图数据，重新初始化位置）。
    */
   algorithm?: string;

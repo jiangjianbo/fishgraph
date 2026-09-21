@@ -217,6 +217,27 @@ const layout = new ForceLayout(graph, {
 2000 节点压力测试在秒级完成。`accuracy: 'exact'` 为 O(n²) 参考实现，
 两者结果一致性有测试保证。
 
+## 力导向无向图（force-undirected）
+
+`algorithm: 'force-undirected'`——按 `doc/布局核心原则.md` 无向图流水线组织的
+替代算法：**质点网格粗布局 → 膨胀压实 → 短弛豫微调**。
+
+```ts
+const layout = new ForceLayout(graph, { algorithm: 'force-undirected' });
+```
+
+- **质点粗布局**：所有节点先视为 1×1 质点布置在整数格上，按「度数优先的
+  连通生长」逐个放置——每个节点贴着已放置邻居评分择优（张力项 + 环周长
+  奖励），邻居总是相邻，环/树结构在离散阶段就消灭长边穿透；候选点被完全
+  占满时整体插一行/列挤出新空间，放置 100% 不死锁。
+- **膨胀压实**：删除全部空行空列，按真实包围半径拉伸相邻行列间距——
+  **无重叠由构造保证**，不依赖弛豫兜底。
+- **短弛豫微调**：粗布局坐标作为初值，复用力导向的完整力学引擎与收敛判据
+  自适应收尾（实测几十至两千余步，远小于从随机初值起步的 force-directed）。
+- 不消费分组语义（subgraph 容器按普通大节点参与布局，hiddenGroups 被忽略）；
+  分组支持等 force-group 重写后再议。设计细节见
+  [doc/layout-force-undirected.md](doc/layout-force-undirected.md)。
+
 ## 架构（策略模式）
 
 布局算法随时在变，节点管理与界面展示是稳定的 —— 三者严格分离：
@@ -229,6 +250,8 @@ src/
                           （registerStrategy / createStrategy / listStrategies）。
   layout/force/           力导向算法（独立子目录）：力学内核 forces.ts、
                           Barnes-Hut、空间网格、求解器、初始摆放、strategy.ts 组装。
+  layout/force-undirected/ 力导向无向图：质点网格粗布局 coarse.ts + 流水线
+                          strategy.ts（微调复用 force/ 的求解器与力场）。
   layout/circle/          环形布局（独立子目录）：最小策略示例。
   layout.ts               ForceLayout 门面：装配 store + 当前策略，公共 API 委派。
 ```
@@ -239,8 +262,8 @@ src/
   图数据保留，位置由新策略重新初始化。
 - **新增布局算法** = 新建一个子目录实现 `LayoutStrategy`（5 个必选成员 +
   若干只读状态），调用 `registerStrategy(name, factory)` 即接入，测试与界面无需改动。
-- 多个算法共享的公共部分（如通用求解器）未来可抽独立子目录；当前只有
-  一个力学算法，暂不抽取。
+- 多个算法共享的公共部分（如通用求解器）未来可抽独立子目录；当前
+  force-undirected 直接复用 `layout/force/` 导出的求解器与力场，暂不抽取。
 
 ## API
 

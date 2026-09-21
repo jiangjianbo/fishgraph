@@ -11,7 +11,7 @@ fishgraph 是一个**图布局算法库**：输入图规格（`GraphSpec`：节�
 
 两个根本定位决定了架构形态：
 
-1. **算法会持续增加**。布局算法是变化最频繁的部分（目前已有力导向、力导向+分组、圆形三种，坐标修正策略也有 free、grid 两种），因此「算法可替换」必须是第一接缝。
+1. **算法会持续增加**。布局算法是变化最频繁的部分（目前已有力导向、力导向+分组、力导向无向图、圆形四种，坐标修正策略也有 free、grid 两种），因此「算法可替换」必须是第一接缝。
 2. **物理模型要求严格自洽**。所有力都从同一个能量泛函求梯度得到（力 = −∇E），求解器靠「能量单调下降」保证收敛。这不是单个算法的内部细节，而是横切所有力学实现的**架构级约束**——任何一处力与能量不一致，线搜索就会失效。
 
 ## 2. 总体结构
@@ -23,7 +23,7 @@ graph TD
     API["公共 API 层<br/>index.ts（导出 + 内置策略自注册）<br/>layout.ts（ForceLayout 门面）"]
     SEAM["扩展接缝层<br/>layout/strategy.ts（布局策略注册表）<br/>layout/coordinates.ts（坐标系注册表）"]
     BASE["数据底座层<br/>graph/store.ts（GraphStore）<br/>graph/groups.ts（隐藏组推断）<br/>label.ts / geometry.ts / rng.ts"]
-    ALGO["算法实现层<br/>layout/force/*（纯力导向）<br/>layout/force-group/*（力导向+分组，继承 force）<br/>layout/circle/*（圆形）"]
+    ALGO["算法实现层<br/>layout/force/*（纯力导向）<br/>layout/force-group/*（力导向+分组，继承 force）<br/>layout/force-undirected/*（力导向无向图）<br/>layout/circle/*（圆形）"]
 
     API --> SEAM
     API --> BASE
@@ -55,6 +55,9 @@ src/
 │   ├── force-group/          # 力导向+分组策略（继承 ForceDirectedStrategy，组语义经扩展缝注入）
 │   │   ├── strategy.ts       #   组内精修、聚集系数派生、容器内 region 钳制
 │   │   └── groupForces.ts    #   group 力学：聚集束缚、成员锚定、斥力豁免、张力传导（实验）
+│   ├── force-undirected/     # 力导向无向图策略（独立实现，复用 force 引擎），见 doc/layout-force-undirected.md
+│   │   ├── coarse.ts         #   质点网格粗布局 + 膨胀压实（无重叠由构造保证）
+│   │   └── strategy.ts       #   流水线编排：粗布局初值 + RelaxationSolver 短弛豫微调
 │   └── circle/
 │       └── strategy.ts       # 圆形策略（接缝验证用的最小算法），见 doc/layout-circle.md
 ├── geometry.ts               # 向量、点到线段投影、形状 SDF、包围半径
@@ -73,7 +76,7 @@ src/
   `rebuild()` 回调（见 §5.3）。
 - **`src/index.ts`**：公共 API 的唯一出口。通过副作用 import 触发内置策略与
   坐标系的自注册——消费方 `import { ForceLayout } from 'fishgraph'` 之后，
-  `'force-directed'`、`'force-group'`、`'circle'`、`'free'`、`'grid'` 即全部可用。
+  `'force-directed'`、`'force-group'`、`'force-undirected'`、`'circle'`、`'free'`、`'grid'` 即全部可用。
 
 ### 3.2 数据底座层
 
@@ -108,12 +111,13 @@ src/
 ### 3.4 算法实现层
 
 每个算法一个独立子目录，实现 `LayoutStrategy` 并在模块加载时自注册。
-当前内置三种，详细设计见独立文档：
+当前内置四种，详细设计见独立文档：
 
 | 算法 | 注册名 | 目录 | 设计文档 |
 |---|---|---|---|
 | 力导向（默认，纯力导向，无分组语义） | `'force-directed'` | `src/layout/force/` | [layout-force-directed.md](./layout-force-directed.md) |
 | 力导向+分组（继承 force，组语义经扩展缝注入） | `'force-group'` | `src/layout/force-group/` | [layout-force-directed.md](./layout-force-directed.md) §8 |
+| 力导向无向图（质点网格粗布局 + 短弛豫微调） | `'force-undirected'` | `src/layout/force-undirected/` | [layout-force-undirected.md](./layout-force-undirected.md) |
 | 圆环 | `'circle'` | `src/layout/circle/` | [layout-circle.md](./layout-circle.md) |
 
 算法内部还可以再有自己的子结构（力导向的 solver/forces/init/加速结构），
@@ -575,6 +579,7 @@ vitest 全量测试（`npm test`），测试与架构的对应关系：
 ## 10. 相关文档
 
 - [layout-force-directed.md](./layout-force-directed.md) —— 力导向布局设计说明（默认算法：物理模型、求解器、初值、加速结构、组约束）
+- [layout-force-undirected.md](./layout-force-undirected.md) —— 力导向无向图设计说明（质点网格粗布局 → 膨胀压实 → 短弛豫微调）
 - [layout-circle.md](./layout-circle.md) —— 圆形布局设计说明（接缝验证用的最小算法）
 - `README.md` —— 排列原则与物理模型速查（用户视角）
 - `../demo/demo.drawio`（`doc/demo.drawio`）—— 示例图的 drawio 源文件
