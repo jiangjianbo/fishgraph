@@ -331,7 +331,7 @@ r.converged;        // 力残差判据
 | `gravity` | centroid | 多个不相关分量想保持紧凑用 centroid；想让分量自由分形用 pairwise |
 | `labelCollision` | true | 关掉后边文字不再参与力学 |
 | `accuracy` | barnes-hut | n < ~300 或要逐位复现用 exact |
-| `edgeAngleAlignment` | 0.1 | 连线方向对齐：水平/垂直能量最低、±45° 稍高、其余更高，温和鼓励排列感；0 关闭 |
+| `edgeAngleAlignment` | 0 | 连线方向对齐开关（opt-in，默认关）：>0 时水平/垂直能量最低、±45° 稍高、其余更高，温和鼓励排列感，推荐 0.1；0 关闭 |
 | `direction` | 'TB' | 流动方向（仅 force-directed 消费）：'TB' 自上而下 / 'LR' 自左向右 |
 
 ## 测试

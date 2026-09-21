@@ -94,7 +94,8 @@ describe('连线方向对齐（edgeAngleAlignment）', () => {
       return worst;
     };
     const chainN = 6;
-    const on = new ForceLayout(chain(chainN), { accuracy: 'exact', seed: 11 });
+    // 默认已关闭（opt-in）：开启侧显式传 0.1，与关闭侧形成对照
+    const on = new ForceLayout(chain(chainN), { accuracy: 'exact', seed: 11, edgeAngleAlignment: 0.1 });
     const off = new ForceLayout(chain(chainN), { accuracy: 'exact', seed: 11, edgeAngleAlignment: 0 });
     on.run({ maxIterations: 4000 });
     off.run({ maxIterations: 4000 });

@@ -104,8 +104,8 @@ score = 张力项 − RING_BONUS × 环周长项
 `edgeKaMul`/`edgeCrossCounts` 常规初始化。迁移只移动文件与 import，
 引擎行为零改动。
 
-**连线方向对齐力项**（`applyEdgeAngleAlignment`，可选，
-`edgeAngleAlignment` 默认 0.1，0 关闭）：鼓励排列感的保守场——
+**连线方向对齐力项**（`applyEdgeAngleAlignment`，可选力项，
+`edgeAngleAlignment` 开关默认 0 = 关闭，设置正值开启、推荐 0.1）：鼓励排列感的保守场——
 
 - 能量 `E(θ) = kAng·[(1−cos4θ) + (1−cos8θ)]`，θ 为边的倾角：
   水平/垂直（0°/90°）= 0 最低，±45° = 2 稍高，22.5°/67.5° 附近 = 3 更高；
