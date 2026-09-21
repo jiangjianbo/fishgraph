@@ -260,6 +260,7 @@ layout.run();
 - 第一期边界：连线文字不占格（虚拟文本节点待后续）；subgraph 容器按声明
   形状参与；无连续模式短弛豫；平行线等距分布待做。空间原语抽象见
   `src/layout/space/`（`SpaceContext`：GridSpaceContext / ContinuousSpaceContext）。
+  设计细节见 [doc/layout-grid-undirected.md](doc/layout-grid-undirected.md)。
 
 ## 力导向有向图（force-directed）
 

@@ -25,6 +25,13 @@
 
 ## 2. 阶段 2：质点网格粗布局（coarse.ts）
 
+> 拆分说明：本阶段已从压实映射中抽出为独立函数 `coarseGridPlacement`
+> （返回 `{ grid, posOf, cell, order }`，**只放置、不压实、不写回坐标**），
+> `coarsePlacement` = 它 + §3 的压实映射。抽出的目的：grid-first 策略
+> `grid-undirected` 复用同一质点放置产物、走自己的膨胀/压实/走线流水线
+> （见 [layout-grid-undirected.md](./layout-grid-undirected.md)）。
+> 本算法行为零变化，回归由既有 87 用例保障。
+
 所有节点一律视为 **1×1 无面积质点**：碰撞检查退化为格子占用查询，
 布置在整数格上。
 

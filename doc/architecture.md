@@ -11,7 +11,7 @@ fishgraph 是一个**图布局算法库**：输入图规格（`GraphSpec`：节�
 
 两个根本定位决定了架构形态：
 
-1. **算法会持续增加**。布局算法是变化最频繁的部分（目前已有力导向无向图、力导向有向图、圆形三种，坐标修正策略也有 free、grid 两种），因此「算法可替换」必须是第一接缝。
+1. **算法会持续增加**。布局算法是变化最频繁的部分（目前已有力导向无向图、力导向有向图、网格无向图、圆形四种，坐标修正策略也有 free、grid 两种），因此「算法可替换」必须是第一接缝。
 2. **物理模型要求严格自洽**。所有力都从同一个能量泛函求梯度得到（力 = −∇E），求解器靠「能量单调下降」保证收敛。这不是单个算法的内部细节，而是横切所有力学实现的**架构级约束**——任何一处力与能量不一致，线搜索就会失效。
 
 ## 2. 总体结构
@@ -21,9 +21,9 @@ fishgraph 是一个**图布局算法库**：输入图规格（`GraphSpec`：节�
 ```mermaid
 graph TD
     API["公共 API 层<br/>index.ts（导出 + 内置策略自注册）<br/>layout.ts（ForceLayout 门面）"]
-    SEAM["扩展接缝层<br/>layout/strategy.ts（布局策略注册表）<br/>layout/coordinates.ts（坐标系注册表）"]
+    SEAM["扩展接缝层<br/>layout/strategy.ts（布局策略注册表）<br/>layout/coordinates.ts（坐标系注册表）<br/>layout/space/（空间上下文：SpaceContext 原语）"]
     BASE["数据底座层<br/>graph/store.ts（GraphStore）<br/>graph/groups.ts（隐藏组推断）<br/>label.ts / geometry.ts / rng.ts"]
-    ALGO["算法实现层<br/>layout/force-undirected/*（力导向无向图，默认+基础）<br/>layout/force-directed/*（力导向有向图，继承 force-undirected）<br/>layout/circle/*（圆形）"]
+    ALGO["算法实现层<br/>layout/force-undirected/*（力导向无向图，默认+基础）<br/>layout/force-directed/*（力导向有向图，继承 force-undirected）<br/>layout/grid-undirected/*（网格无向图，grid-first）<br/>layout/circle/*（圆形）"]
 
     API --> SEAM
     API --> BASE
@@ -43,6 +43,14 @@ src/
 ├── layout/
 │   ├── strategy.ts           # LayoutStrategy 接口 + 注册表（接缝）
 │   ├── coordinates.ts        # CoordinateSystem 接口 + 注册表 + free/grid 内置（接缝）
+│   ├── space/                # 泛型化空间上下文（SpaceContext 原语接缝），见 doc/layout-grid-undirected.md §7
+│   │   ├── types.ts          #   Point/Bounds/Box/SpaceContext 五原语接口
+│   │   ├── grid-context.ts   #   GridSpaceContext：曼哈顿度量、格 AABB 占用、插行列扩容
+│   │   ├── grid-route.ts     #   A* 正交寻路（拐点惩罚、确定性、null 显式失败）
+│   │   └── continuous-context.ts # ContinuousSpaceContext：欧氏度量、连续 AABB、直线降级
+│   ├── grid-undirected/      # 网格无向图策略（grid-first 纯网格流水线），见 doc/layout-grid-undirected.md
+│   │   ├── expansion.ts      #   ExpansionGrid：AABB 占用网格（膨胀推挤 + 通道约束压实）
+│   │   └── strategy.ts       #   流水线编排：质点放置复用 → 膨胀 → 压实 → A* 走线
 │   ├── force-directed/       # 力导向有向图策略（继承 ForceUndirectedStrategy，派生接缝注入有向语义），见 doc/layout-force-directed.md
 │   │   ├── levels.ts         #   解环（三色 DFS 识别反馈边）+ 最长路径层级
 │   │   ├── directedCoarse.ts #   有向放置美学：层级行锚点/层级罚/方向罚/插列 + 层内 barycenter 排序
@@ -74,7 +82,8 @@ src/
   `rebuild()` 回调（见 §5.3）。
 - **`src/index.ts`**：公共 API 的唯一出口。通过副作用 import 触发内置策略与
   坐标系的自注册——消费方 `import { ForceLayout } from 'fishgraph'` 之后，
-  `'force-undirected'`、`'force-directed'`、`'circle'`、`'free'`、`'grid'` 即全部可用。
+  `'force-undirected'`、`'force-directed'`、`'grid-undirected'`、`'circle'`、
+  `'free'`、`'grid'` 即全部可用。
 
 ### 3.2 数据底座层
 
@@ -93,9 +102,7 @@ src/
 
 ### 3.3 扩展接缝层
 
-两条互相独立的注册表接缝，形态一致：**接口 + 工厂注册表 + 按名创建 +内置实现自注册**。
-
-- **`LayoutStrategy`（`src/layout/strategy.ts`）**：布局算法接缝。策略约定
+前两条是注册表接缝，形态一致：**接口 + 工厂注册表 + 按名创建 + 内置实现自注册**。- **`LayoutStrategy`（`src/layout/strategy.ts`）**：布局算法接缝。策略约定
   「只通过 GraphStore 读图、写坐标，不拥有图数据」，通过 `step()/run()` 推进、
   `refresh()/invalidate()/rebuild()` 响应变化。接口携带力学语义的**可选**观测
   （`energy`、`energyHistory`、`stage`、可选方法 `forceSnapshot`）——无能量概念
@@ -105,16 +112,25 @@ src/
   `refine()` 做一次坐标修正。接口极小：一个 `refine(nodes, params)`。
   `CoordinateNode.region` 是它与分组模型的**唯一耦合点**：subgraph 成员吸附
   时必须被钳制在容器锚点附近，因此坐标系接口需要「锚定区域」概念（见 §7 影响点 5）。
+- **`SpaceContext`（`src/layout/space/`，非注册表）**：空间运算原语接缝，
+  服务「同一套算法逻辑适配离散网格 / 连续平面」的泛型化目标。五个原语：
+  `distance`（度量）、`isOverlapped`（碰撞）、`getNeighbors`（邻域步进）、
+  `expandSpaceIfNeeded`（动态空间开辟）、`routeEdge`（走线寻路）。内置
+  `GridSpaceContext`（曼哈顿 + 格 AABB + 插行列扩容 + A\* 正交寻路）与
+  `ContinuousSpaceContext`（欧氏 + 连续 AABB + 直线降级）两个直接实例化
+  （非注册表按名创建——当前消费方 grid-undirected 直接构造，实例多了再收编）。
+  坐标系接缝做「布局后的坐标修正」，本接缝做「布局中的空间运算」——维度不同，互不替代。
 
 ### 3.4 算法实现层
 
 每个算法一个独立子目录，实现 `LayoutStrategy` 并在模块加载时自注册。
-当前内置三种，详细设计见独立文档：
+当前内置四种，详细设计见独立文档：
 
 | 算法 | 注册名 | 目录 | 设计文档 |
 |---|---|---|---|
 | 力导向无向图（**默认算法、基础算法**：质点网格粗布局 + 短弛豫微调，共享力学引擎所在地） | `'force-undirected'` | `src/layout/force-undirected/` | [layout-force-undirected.md](./layout-force-undirected.md) |
 | 力导向有向图（继承 force-undirected，解环层级 + 软层级引导 + 流动势能，支持 TB/LR） | `'force-directed'` | `src/layout/force-directed/` | [layout-force-directed.md](./layout-force-directed.md) |
+| 网格无向图（grid-first 纯网格流水线：质点放置复用 → AABB 膨胀 → 通道压实 → A\* 走线） | `'grid-undirected'` | `src/layout/grid-undirected/` | [layout-grid-undirected.md](./layout-grid-undirected.md) |
 | 圆环 | `'circle'` | `src/layout/circle/` | [layout-circle.md](./layout-circle.md) |
 
 > 力导向+分组（`'force-group'`）已随旧 `force/` 一并移除，待按新的
@@ -397,8 +413,11 @@ run(maxIterations, onTick)
    │
    ├─ [force-undirected] 粗布局初值（质点网格）→ 全量力场弛豫（stage 3）
    ├─ [force-directed] 同上 + 流动势能（extraForces 缝）与有向粗布局
+   ├─ [grid-undirected] 构造期已完成整条网格流水线（放置→膨胀→压实→走线），
+   │                    run() 即返回收敛（无迭代力学）
    ├─ [force-group]（待重写）组内精修：冻结组外节点弛豫
    ├─ 坐标系修正：构造 CoordinateNode[] → cs.refine() → 坐标写回 store
+   │            （grid-undirected 不消费：网格解本身就是格点）
    └─ 返回 RunResult { iterations, converged, energy }
 
 任意时刻：step() 单步推进（demo 动画帧驱动）
@@ -423,12 +442,14 @@ run(maxIterations, onTick)
 策略把坐标写回 `GraphStore`，消费方只读视图：
 
 - `nodeViews`：物理节点（`LayoutNode[]`）的只读引用，**实时反映最新位置**
-  （非拷贝），供渲染层每帧读取。
+  （非拷贝），供渲染层每帧读取。`grid-undirected` 额外提供 `w/h`
+  （物化 AABB 物理尺寸，中心 + 半宽高 = 包围盒）；连续布局不产生（用 `r` 包围圆）。
 - `subgraphViews`：subgraph 容器的只读引用，有渲染约定——**作为背景层最先
   绘制**，否则容器矩形会盖住内部成员（约定记录在 `SubgraphView` 类型注释中，
   布局不负责绘制）。
 - `edgeViews`：物理边列表（自环已在构建时剔除），含边文字包围盒半宽/半高
-  与回绕后的行文本（渲染可直接使用）。
+  与回绕后的行文本（渲染可直接使用）；`grid-undirected` 额外提供
+  `waypoints`（A\* 正交走线拐点，首尾为两端节点中心物理坐标）。
 - `positions` / `energy` / `energyHistory` / `stage` / `converged`：
   数值结果与调试观测。
 
@@ -576,11 +597,14 @@ vitest 全量测试（`npm test`），测试与架构的对应关系：
 | `groups.test.ts` | 决策 5：隐藏组推断规则、subgraph 包含性、角色分类 |
 | `mermaid*.test.ts` | 真实样本（mermaid 流程图/架构图）端到端：收敛、包含性、容器不重叠 |
 | `coordinates.test.ts` | 坐标系接缝：grid 吸附确定性、不重叠、成员留在包含区、自定义注册 |
+| `space-context.test.ts` | 空间上下文接缝：两实现的原语行为（度量/碰撞/邻域/扩容/A\*）与接口一致性 |
+| `grid-undirected.test.ts` | 网格流水线：成行成列、无重叠、通道空隙、膨胀推挤、走线正交避障、确定性 |
 
 ## 10. 相关文档
 
 - [layout-force-directed.md](./layout-force-directed.md) —— 力导向布局设计说明（默认算法：物理模型、求解器、初值、加速结构、组约束）
 - [layout-force-undirected.md](./layout-force-undirected.md) —— 力导向无向图设计说明（质点网格粗布局 → 膨胀压实 → 短弛豫微调）
+- [layout-grid-undirected.md](./layout-grid-undirected.md) —— 网格无向图设计说明（grid-first 纯网格流水线 + SpaceContext 泛型化空间上下文）
 - [layout-circle.md](./layout-circle.md) —— 圆形布局设计说明（接缝验证用的最小算法）
 - `README.md` —— 排列原则与物理模型速查（用户视角）
 - `../demo/demo.drawio`（`doc/demo.drawio`）—— 示例图的 drawio 源文件
