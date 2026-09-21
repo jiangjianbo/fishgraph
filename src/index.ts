@@ -41,6 +41,14 @@ export {
   type StrategyFactory,
 } from './layout/strategy.js';
 
+// 空间上下文（泛型化布局算法的空间原语接缝：离散网格 / 连续平面）
+export {
+  ContinuousSpaceContext,
+} from './layout/space/continuous-context.js';
+export { GridSpaceContext } from './layout/space/grid-context.js';
+export { gridRouteAStar, type GridRouteOptions } from './layout/space/grid-route.js';
+export type { Bounds, Box, Point, SpaceContext } from './layout/space/types.js';
+
 export type {
   AccuracyMode,
   EdgeSpec,
