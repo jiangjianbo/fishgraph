@@ -4,6 +4,9 @@
  * 纯粹的"算法"角色：不拥有图数据，只通过 GraphStore 读写坐标；
  * 内部组装 参数派生 → 初始摆放 → 分阶段弛豫求解器。
  * 物理模型与公式见 README；这里只做调度与生命周期管理。
+ * 力学引擎件（参数派生/求解器/力场/跳数矩阵）自基础算法
+ * force-undirected（../force-undirected/）导入；本目录只保留本策略
+ * 专属的调度（strategy.ts）与初始摆放（init.ts）。
  *
  * 纯粹性约定：本类不含任何 group（subgraph / hidden-group）语义 ——
  * 分组力学与组内精修由派生策略 force-group（src/layout/force-group/）
@@ -16,9 +19,9 @@
 
 import type { GraphStore } from '../../graph/store.js';
 import { applyInitPlacement } from './init.js';
-import { deriveParams, type DerivedParams, type ForceContext } from './forces.js';
-import { RelaxationSolver, type SolverOptions } from './solver.js';
-import { buildHopScale } from './hops.js';
+import { deriveParams, type DerivedParams, type ForceContext } from '../force-undirected/forces.js';
+import { RelaxationSolver, type SolverOptions } from '../force-undirected/solver.js';
+import { buildHopScale } from '../force-undirected/hops.js';
 import { createCoordinateSystem, type CoordinateNode, type CoordinateSystem } from '../coordinates.js';
 import { registerStrategy } from '../strategy.js';
 import type { ForceSnapshot, LayoutStrategy, ResolvedLayoutOptions } from '../strategy.js';

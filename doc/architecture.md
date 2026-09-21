@@ -45,19 +45,19 @@ src/
 │   ├── coordinates.ts        # CoordinateSystem 接口 + 注册表 + free/grid 内置（接缝）
 │   ├── force/                # 纯力导向策略（默认算法，无分组语义），设计见 doc/layout-force-directed.md
 │   │   ├── strategy.ts       #   调度与生命周期：分阶段弛豫、派生扩展缝、坐标系修正
-│   │   ├── solver.ts         #   RelaxationSolver：信任域 + 回溯线搜索
+│   │   └── init.ts           #   初始摆放：BFS 平面扇形 / circle / grid / random
+│   ├── force-group/          # 力导向+分组策略（继承 ForceDirectedStrategy，组语义经扩展缝注入）
+│   │   ├── strategy.ts       #   组内精修、聚集系数派生、容器内 region 钳制
+│   │   └── groupForces.ts    #   group 力学：聚集束缚、成员锚定、斥力豁免、张力传导（实验）
+│   ├── force-undirected/     # 力导向无向图策略（基础算法，共享力学引擎所在地），见 doc/layout-force-undirected.md
+│   │   ├── coarse.ts         #   质点网格粗布局 + 膨胀压实（无重叠由构造保证）
+│   │   ├── strategy.ts       #   流水线编排：粗布局初值 + 短弛豫微调
 │   │   ├── forces.ts         #   力场计算（物理核心）：精确 O(n²) 与 Barnes-Hut 两路
-│   │   ├── init.ts           #   初始摆放：BFS 平面扇形 / circle / grid / random
+│   │   ├── solver.ts         #   RelaxationSolver：信任域 + 回溯线搜索
 │   │   ├── hops.ts           #   跳数斥力衰减矩阵（拓扑导出，3000 节点上限）
 │   │   ├── crossings.ts      #   边交叉计数（扫描线 + 预算回退）
 │   │   ├── quadtree.ts       #   Barnes-Hut 四叉树（双树遍历，保保守性）
 │   │   └── spatialgrid.ts    #   均匀空间网格（避让候选对加速）
-│   ├── force-group/          # 力导向+分组策略（继承 ForceDirectedStrategy，组语义经扩展缝注入）
-│   │   ├── strategy.ts       #   组内精修、聚集系数派生、容器内 region 钳制
-│   │   └── groupForces.ts    #   group 力学：聚集束缚、成员锚定、斥力豁免、张力传导（实验）
-│   ├── force-undirected/     # 力导向无向图策略（独立实现，复用 force 引擎），见 doc/layout-force-undirected.md
-│   │   ├── coarse.ts         #   质点网格粗布局 + 膨胀压实（无重叠由构造保证）
-│   │   └── strategy.ts       #   流水线编排：粗布局初值 + RelaxationSolver 短弛豫微调
 │   └── circle/
 │       └── strategy.ts       # 圆形策略（接缝验证用的最小算法），见 doc/layout-circle.md
 ├── geometry.ts               # 向量、点到线段投影、形状 SDF、包围半径
@@ -117,12 +117,14 @@ src/
 |---|---|---|---|
 | 力导向（默认，纯力导向，无分组语义） | `'force-directed'` | `src/layout/force/` | [layout-force-directed.md](./layout-force-directed.md) |
 | 力导向+分组（继承 force，组语义经扩展缝注入） | `'force-group'` | `src/layout/force-group/` | [layout-force-directed.md](./layout-force-directed.md) §8 |
-| 力导向无向图（质点网格粗布局 + 短弛豫微调） | `'force-undirected'` | `src/layout/force-undirected/` | [layout-force-undirected.md](./layout-force-undirected.md) |
+| 力导向无向图（**基础算法**：质点网格粗布局 + 短弛豫微调，共享力学引擎所在地） | `'force-undirected'` | `src/layout/force-undirected/` | [layout-force-undirected.md](./layout-force-undirected.md) |
 | 圆环 | `'circle'` | `src/layout/circle/` | [layout-circle.md](./layout-circle.md) |
 
-算法内部还可以再有自己的子结构（力导向的 solver/forces/init/加速结构），
-只要不泄漏到接缝之外。坐标系同理：`free`、`grid` 内置于 `layout/coordinates.ts`
-（当前仅各一个函数，未拆子目录；增多后再拆）。
+算法内部还可以再有自己的子结构，只要不泄漏到接缝之外。共享力学引擎
+（参数派生、求解器、力场、跳数矩阵、交叉计数、BH 四叉树、空间网格）
+位于基础算法 `force-undirected/` 内，`force/` 策略与其派生
+`force-group/` 从那里导入；坐标系同理：`free`、`grid` 内置于
+`layout/coordinates.ts`（当前仅各一个函数，未拆子目录；增多后再拆）。
 
 ## 4. 公共数据结构与节点种类
 

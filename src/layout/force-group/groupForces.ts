@@ -13,7 +13,7 @@
  *    容器（hub）。已知问题：简单传导与容器互斥/弱引力平衡后仍可能振荡，
  *    需要专项的引力+阻尼设计。
  *
- * 这些力通过 ForceContext.extensions 注入基础力场（见 force/forces.ts），
+ * 这些力通过 ForceContext.extensions 注入基础力场（见 force-undirected/forces.ts），
  * 全部由势能求导或与能量记账一致，保证与求解器的能量单调下降兼容。
  */
 

@@ -15,7 +15,7 @@
  * 布局流程遵循"先整体、后组内、形状变化再整体"（见 README 分组章节）。
  */
 
-import type { ForceContext } from '../force/forces.js';
+import type { ForceContext } from '../force-undirected/forces.js';
 import { ForceDirectedStrategy } from '../force/strategy.js';
 import type { CoordinateNode } from '../coordinates.js';
 import { registerStrategy, type ResolvedLayoutOptions } from '../strategy.js';

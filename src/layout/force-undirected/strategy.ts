@@ -1,13 +1,14 @@
 /**
- * ForceUndirectedStrategy —— 力导向无向图布局策略。
+ * ForceUndirectedStrategy —— 力导向无向图布局策略（基础算法）。
  *
  * 按 doc/布局核心原则.md 的无向图流水线组织：
  *   [质点网格粗布局] → [膨胀压实] → [连续坐标微调]
  * 前两阶段由 coarse.ts 完成（拓扑骨架的离散布置，无重叠由构造保证）；
- * 微调阶段复用纯力导向的完整力学引擎（RelaxationSolver + 力场全栈：
- * 橡皮筋、跳数衰减斥力、避让软墙、交叉罚），由现有收敛判据自适应
- * 决定步数 —— 粗布局已近乎成品，弛豫只需消除网格折线感并到达力学
- * 平衡，因此迭代预算的安全网远小于 force-directed。
+ * 微调阶段使用本目录的力学引擎（RelaxationSolver + 力场全栈：橡皮筋、
+ * 跳数衰减斥力、避让软墙、交叉罚——自原 force/ 迁入，作为基础算法的
+ * 共享引擎），由现有收敛判据自适应决定步数 —— 粗布局已近乎成品，弛豫
+ * 只需消除网格折线感并到达力学平衡，因此迭代预算的安全网远小于
+ * force-directed。
  *
  * 算法不消费 subgraphs/hiddenGroups 声明（分组语义归 force-group）；
  * subgraph 容器作为普通大节点参与布局。
@@ -18,9 +19,9 @@ import {
   deriveParams,
   type DerivedParams,
   type ForceContext,
-} from '../force/forces.js';
-import { RelaxationSolver, type SolverOptions } from '../force/solver.js';
-import { buildHopScale } from '../force/hops.js';
+} from './forces.js';
+import { RelaxationSolver, type SolverOptions } from './solver.js';
+import { buildHopScale } from './hops.js';
 import { createCoordinateSystem, type CoordinateNode, type CoordinateSystem } from '../coordinates.js';
 import { registerStrategy } from '../strategy.js';
 import type { ForceSnapshot, LayoutStrategy, ResolvedLayoutOptions } from '../strategy.js';

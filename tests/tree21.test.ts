@@ -15,7 +15,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { ForceLayout } from '../src/index.js';
-import { countEdgeCrossings } from '../src/layout/force/crossings.js';
+import { countEdgeCrossings } from '../src/layout/force-undirected/crossings.js';
 
 function treeGraph() {
   const nodes: Array<{ id: string; label: string }> = [{ id: 'root', label: 'root' }];

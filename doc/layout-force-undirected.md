@@ -1,10 +1,15 @@
 # 布局设计说明：力导向无向图（force-undirected）
 
-> 注册名 `'force-undirected'`，实现于 `src/layout/force-undirected/`
-> （`coarse.ts` 粗布局 + `strategy.ts` 流水线编排，约 500 行）。
+> 注册名 `'force-undirected'`，实现于 `src/layout/force-undirected/`，
+> 是**基础算法**：除本算法的 `coarse.ts`（粗布局）与 `strategy.ts`
+> （流水线编排）外，共享力学引擎件也在此目录——`forces.ts`（力场）、
+> `solver.ts`（弛豫求解器）、`hops.ts`（跳数矩阵）、`crossings.ts`
+> （交叉计数）、`quadtree.ts`（BH 四叉树）、`spatialgrid.ts`（空间网格，
+> 均自原 `force/` 迁入）。`force-directed` 策略与其派生 `force-group`
+> 从本目录导入这些引擎件。
 > 实现 `doc/布局核心原则.md` 无向图流水线的后三个阶段：
 > **质点网格粗布局 → 膨胀压实 → 连续坐标微调**（第一阶段的「长尾卷起/图粗化」
-> 暂不实现）。与 `force-directed`、`force-group` 完全独立，互不影响。
+> 暂不实现）。
 
 ## 1. 设计动机
 
@@ -72,22 +77,26 @@ score = 张力项 − RING_BONUS × 环周长项
    原点（有 `placed` 节点时改为对齐 placed 均值，且 placed 节点
    不移动——其占格在放置开始前已从连续坐标反算）。
 
-## 4. 阶段 4：连续坐标微调（复用 force 引擎）
+## 4. 阶段 4：连续坐标微调（共享力学引擎）
 
-粗布局的全部产物就是一组连续坐标初值。微调阶段**完全复用纯力导向
-的力学引擎**，新算法不重新实现任何力学：
+粗布局的全部产物就是一组连续坐标初值。微调阶段直接使用本目录的
+力学引擎（自原 `force/` 迁入的基础引擎件），新算法不重新实现任何力学：
 
-| 复用件 | 来源 | 用途 |
+| 引擎件 | 位置 | 用途 |
 |---|---|---|
-| `RelaxationSolver` | `force/solver.ts` | 信任域 + 回溯线搜索弛豫 |
-| `computeForcesExact / BH` | `force/forces.ts` | 力场全栈（橡皮筋、跳数衰减斥力、避让、交叉罚、文字） |
-| `deriveParams` | `force/forces.ts` | 从 `LayoutOptions` 派生物理参数 |
-| `buildHopScale` | `force/hops.ts` | 跳数斥力衰减矩阵 |
+| `RelaxationSolver` | 本目录 `solver.ts` | 信任域 + 回溯线搜索弛豫 |
+| `computeForcesExact / BH` | 本目录 `forces.ts` | 力场全栈（橡皮筋、跳数衰减斥力、避让、交叉罚、文字） |
+| `deriveParams` | 本目录 `forces.ts` | 从 `LayoutOptions` 派生物理参数 |
+| `buildHopScale` | 本目录 `hops.ts` | 跳数斥力衰减矩阵 |
 | `createCoordinateSystem` | `layout/coordinates.ts` | 布局后坐标系修正（free/grid） |
+
+`force-directed` 策略（`force/strategy.ts`）与派生的 `force-group`
+同样从本目录导入引擎件——引擎归基础算法所有，策略只是消费者。
 
 策略自组装 `ForceContext`：`stage` 恒为 3（全量力场，分阶段弛豫的
 职责已由粗布局承担）、`extensions` 为空（不消费组约束）、
-`edgeKaMul`/`edgeCrossCounts` 常规初始化。**`force/` 目录零改动**。
+`edgeKaMul`/`edgeCrossCounts` 常规初始化。迁移只移动文件与 import，
+引擎行为零改动。
 
 迭代预算的安全网 `DEFAULT_MAX_ITERATIONS = 4000`（正常路径由收敛判据
 自适应提前停）。实测收敛步数：

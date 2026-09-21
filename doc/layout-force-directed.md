@@ -1,6 +1,8 @@
 # 布局设计说明：力导向布局（force-directed）
 
-> 默认布局算法，注册名 `'force-directed'`，实现于 `src/layout/force/`。
+> 默认布局算法，注册名 `'force-directed'`，策略实现于 `src/layout/force/`
+> （调度 + 初始摆放）；力学引擎件（solver/forces/hops/crossings/quadtree/
+> spatialgrid）位于基础算法 `src/layout/force-undirected/`，由本策略导入。
 > **纯粹性约定**：本算法不含任何 group（subgraph / hidden-group）语义；
 > 分组力学由其派生策略 **force-group**（注册名 `'force-group'`，实现于
 > `src/layout/force-group/`，继承本算法）通过扩展点注入，见 §8。
@@ -54,13 +56,16 @@
 - **满足 README 的排列原则**（度数高者居中、短程强斥力、交叉受罚、环均匀……）
   ——§1 的十条规则即其浓缩。
 
-模块分工（策略内部的三段式）：
+模块分工（策略 + 基础算法引擎件）：
 
 ```text
+src/layout/force/
 strategy.ts   调度与生命周期：参数派生 → 初值 → 分阶段弛豫 → 派生精修缝 → 坐标修正
+init.ts       初始摆放：bfs（平面扇形，默认）/ circle / grid / random
+
+src/layout/force-undirected/（基础算法，共享力学引擎件所在地）
 solver.ts     RelaxationSolver：信任域 + 回溯线搜索的单步弛豫
 forces.ts     力场计算（物理核心）：精确 O(n²) 与 Barnes-Hut 两路共享力项
-init.ts       初始摆放：bfs（平面扇形，默认）/ circle / grid / random
 hops.ts       跳数斥力衰减矩阵（拓扑导出）
 crossings.ts  边交叉计数（扫描线 + 预算回退）
 quadtree.ts   Barnes-Hut 四叉树（双树遍历）

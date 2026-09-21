@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { ForceLayout } from '../src/index.js';
-import { buildHopScale } from '../src/layout/force/hops.js';
+import { buildHopScale } from '../src/layout/force-undirected/hops.js';
 
 function minSurfaceGap(layout: ForceLayout): number {
   const nodes = layout.nodeViews;

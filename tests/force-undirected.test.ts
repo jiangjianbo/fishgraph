@@ -14,7 +14,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ForceLayout } from '../src/index.js';
-import { countEdgeCrossings } from '../src/layout/force/crossings.js';
+import { countEdgeCrossings } from '../src/layout/force-undirected/crossings.js';
 import { MERMAID_GRAPH } from './mermaid.graph.js';
 import type { GraphSpec, NodeId } from '../src/types.js';
 
