@@ -1,5 +1,6 @@
 // 内置策略在加载时自注册（副作用 import）。
 import './layout/force/strategy.js';
+import './layout/force-group/strategy.js';
 import './layout/circle/strategy.js';
 
 export { ForceLayout } from './layout.js';

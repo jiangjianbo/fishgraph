@@ -275,7 +275,13 @@ let paused = false;
 let iterations = 0;
 
 function rebuild(): void {
-  layout = new ForceLayout(GRAPHS[graphSel.value](), optionsFromUi());
+  // 声明了分组的图默认用 force-group（纯力导向不含分组力学；仍可手动切回对比）
+  const graph = GRAPHS[graphSel.value]();
+  const hasGroups = (graph.subgraphs?.length ?? 0) + (graph.hiddenGroups?.length ?? 0) > 0;
+  if (hasGroups && algorithmSel.value === 'force-directed') {
+    algorithmSel.value = 'force-group';
+  }
+  layout = new ForceLayout(graph, optionsFromUi());
   converged = false;
   iterations = 0;
   cam.x = 0;

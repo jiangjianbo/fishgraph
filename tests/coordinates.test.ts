@@ -72,6 +72,7 @@ describe('grid 坐标系（布局后网格化）', () => {
       ],
     };
     const layout = new ForceLayout(graph, {
+      algorithm: 'force-group',
       naturalLength: 120,
       accuracy: 'exact',
       gravity: 'pairwise',

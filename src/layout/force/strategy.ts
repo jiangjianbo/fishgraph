@@ -1,9 +1,17 @@
 /**
- * ForceDirectedStrategy —— 力导向布局策略（默认算法）。
+ * ForceDirectedStrategy —— 纯力导向布局策略（默认算法）。
  *
  * 纯粹的"算法"角色：不拥有图数据，只通过 GraphStore 读写坐标；
  * 内部组装 参数派生 → 初始摆放 → 分阶段弛豫求解器。
  * 物理模型与公式见 README；这里只做调度与生命周期管理。
+ *
+ * 纯粹性约定：本类不含任何 group（subgraph / hidden-group）语义 ——
+ * 分组力学与组内精修由派生策略 force-group（src/layout/force-group/）
+ * 通过本类的受保护扩展缝注入：
+ *   - configureContext()  向 ForceContext.extensions 注入附加力项/钩子；
+ *   - onRefresh()         参数刷新后的派生联动；
+ *   - refineLayout()      主弛豫结束后的派生精修（坐标系修正之前）；
+ *   - coordinateRegion()  坐标系修正时单元素的吸附区域。
  */
 
 import type { GraphStore } from '../../graph/store.js';
@@ -25,13 +33,13 @@ const STAGE_BUDGETS: Array<[LayoutStage, number]> = [
 ];
 
 export class ForceDirectedStrategy implements LayoutStrategy {
-  readonly name = 'force-directed';
+  readonly name: string = 'force-directed';
 
-  private store: GraphStore;
-  private options: ResolvedLayoutOptions;
-  private params: DerivedParams;
-  private ctx: ForceContext;
-  private solver: RelaxationSolver;
+  protected store: GraphStore;
+  protected options: ResolvedLayoutOptions;
+  protected params: DerivedParams;
+  protected ctx: ForceContext;
+  protected solver: RelaxationSolver;
   /** 坐标系（组合根按注册名创建一次；布局完成后用它做坐标修正）。 */
   private cs: CoordinateSystem;
   readonly energyHistory: number[] = [];
@@ -70,36 +78,32 @@ export class ForceDirectedStrategy implements LayoutStrategy {
       edgeCrossCounts: new Array<number>(this.store.edges.length).fill(0),
       crossPenaltyEnergy: 0,
       hopScale: this.buildHopScale(),
-      hubOfMember: this.buildHubMap(),
-      clusterConstraints: this.store.clusterConstraints,
-      subgraphNodes: this.store.subgraphNodes,
+      extensions: {},
       stage: 3,
       energy: 0,
       maxForceUnit: 0,
     };
-    this.refreshClusterK();
+    this.configureContext();
     this.solver = new RelaxationSolver(this.ctx, this.solverOptions());
   }
 
+  // ── 派生扩展缝（force-group 等派生策略覆盖）──────────────
+
+  /** 向 ForceContext 注入派生扩展点与派生状态（构造与 rebuild 时调用）。 */
+  protected configureContext(): void {}
+
+  /** 参数刷新后的派生联动（previous 为刷新前的选项快照）。 */
+  protected onRefresh(_previous: ResolvedLayoutOptions): void {}
+
+  /** 主弛豫结束后的派生精修（坐标系修正之前）。纯力导向无精修。 */
+  protected refineLayout(_maxIterations: number, _onTick?: () => void): void {}
+
+  /** 坐标系修正时单个元素的吸附区域（无区域约束返回 undefined）。 */
+  protected coordinateRegion(_index: number): CoordinateNode['region'] {
+    return undefined;
+  }
+
   // ── 生命周期 ────────────────────────────────────────────
-
-  /** 下标 → 所属 subgraph 容器下标。 */
-  private buildHubMap(): Int32Array {
-    const map = new Int32Array(this.store.elements.length).fill(-1);
-    for (let i = 0; i < this.store.elements.length; i++) {
-      map[i] = this.store.hubOfMember(i);
-    }
-    return map;
-  }
-
-  /** 聚集约束的每成员束缚系数：k = 强度/(L²·n)（k_a/L² 尺度、按成员数归一）。 */
-  private refreshClusterK(): void {
-    const L2 = this.options.naturalLength * this.options.naturalLength;
-    for (const c of this.store.clusterConstraints) {
-      const strength = c.strength ?? this.options.groupCohesion;
-      c.k = strength / (L2 * Math.max(c.memberIndices.length, 1));
-    }
-  }
 
   /** 跳数斥力乘子矩阵（拓扑导出，坐标无关；仅在图结构或系数变化时重建）。 */
   private buildHopScale(): Float32Array | null {
@@ -131,8 +135,8 @@ export class ForceDirectedStrategy implements LayoutStrategy {
     const hopChanged =
       options.hopRepulsionDecay !== this.options.hopRepulsionDecay ||
       options.unrelatedRepulsion !== this.options.unrelatedRepulsion;
-    const cohesionChanged = options.groupCohesion !== this.options.groupCohesion;
     const csChanged = options.coordinateSystem !== this.options.coordinateSystem;
+    const previous = this.options;
     this.options = options;
     const newParams = deriveParams(options, this.store.elements.length);
     // 原地更新，保证 ctx.params 引用稳定
@@ -145,9 +149,7 @@ export class ForceDirectedStrategy implements LayoutStrategy {
     if (hopChanged) {
       this.ctx.hopScale = this.buildHopScale();
     }
-    if (cohesionChanged) {
-      this.refreshClusterK();
-    }
+    this.onRefresh(previous);
     if (csChanged) {
       this.cs = createCoordinateSystem(options.coordinateSystem);
     }
@@ -175,10 +177,7 @@ export class ForceDirectedStrategy implements LayoutStrategy {
     this.ctx.edgeCrossCounts = new Array<number>(this.store.edges.length).fill(0);
     this.ctx.crossPenaltyEnergy = 0;
     this.ctx.hopScale = this.buildHopScale();
-    this.ctx.hubOfMember = this.buildHubMap();
-    this.ctx.clusterConstraints = this.store.clusterConstraints;
-    this.ctx.subgraphNodes = this.store.subgraphNodes;
-    this.refreshClusterK();
+    this.configureContext();
     const spreadD =
       this.options.gravity === 'centroid'
         ? this.params.L * Math.pow(1 / (2 * Math.max(this.options.centroidStrength, 1e-4)), 0.25)
@@ -236,33 +235,19 @@ export class ForceDirectedStrategy implements LayoutStrategy {
         remaining -= used;
       }
     }
-    // 组内布局（分组原则 4）：整体收敛后冻结组外节点，组内成员弛豫；
-    // 若 hidden-group 形状（成员包围盒）变化超过 15%，引发一轮重新整体布局。
-    if (this.store.subgraphs.length + this.store.hiddenGroups.length > 0 && max > 0) {
-      const before = this.hiddenGroupBoxes();
-      this.refineGroups(Math.max(150, Math.floor(max * 0.1)), opts.onTick);
-      const after = this.hiddenGroupBoxes();
-      const changed = before.some((b, i) => {
-        const a = after[i];
-        return a && (Math.abs(a.w - b.w) > b.w * 0.15 || Math.abs(a.h - b.h) > b.h * 0.15);
-      });
-      if (changed) {
-        this.solver.invalidate();
-        this.runBudget(Math.max(200, Math.floor(max * 0.3)), opts.onTick);
-      }
-    }
+    // 派生精修（如 force-group 的组内弛豫），发生在坐标系修正之前。
+    this.refineLayout(max, opts.onTick);
 
     // 坐标系修正（布局完成后，以最优布局为基础）：free 恒等，grid 网格化吸附
     if (this.store.elements.length > 0) {
-      const nodes: CoordinateNode[] = this.store.elements.map((el, ni) => {
-        const hub = this.store.hubOfMember(ni);
-        let region: CoordinateNode['region'];
-        if (hub >= 0) {
-          const anchor = this.store.elements[hub];
-          region = { anchorId: anchor.id, rIn: anchor.r * 0.55 };
-        }
-        return { id: el.id, x: el.x, y: el.y, r: el.r, fixed: el.fixed, region };
-      });
+      const nodes: CoordinateNode[] = this.store.elements.map((el, ni) => ({
+        id: el.id,
+        x: el.x,
+        y: el.y,
+        r: el.r,
+        fixed: el.fixed,
+        region: this.coordinateRegion(ni),
+      }));
       const lattice =
         this.options.gridSize > 0 ? this.options.gridSize : this.options.naturalLength;
       this.cs.refine(nodes, { lattice });
@@ -279,44 +264,8 @@ export class ForceDirectedStrategy implements LayoutStrategy {
     };
   }
 
-  /** hidden-group 的成员包围盒（形状 = 成员组成的形状）。 */
-  private hiddenGroupBoxes(): Array<{ w: number; h: number }> {
-    return this.store.clusterConstraints.map((c) => {
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      for (const idx of c.memberIndices) {
-        const nd = this.store.elements[idx];
-        minX = Math.min(minX, nd.x);
-        minY = Math.min(minY, nd.y);
-        maxX = Math.max(maxX, nd.x);
-        maxY = Math.max(maxY, nd.y);
-      }
-      return { w: maxX - minX, h: maxY - minY };
-    });
-  }
-
-  /** 组内精修：冻结全部组外节点（含 subgraph 容器），只让组成员弛豫。 */
-  private refineGroups(budget: number, onTick?: () => void): void {
-    const isMember = new Uint8Array(this.store.elements.length);
-    for (const sg of this.store.subgraphNodes) {
-      for (const idx of sg.memberIndices) isMember[idx] = 1;
-    }
-    for (const c of this.store.clusterConstraints) {
-      for (const idx of c.memberIndices) isMember[idx] = 1;
-    }
-    // subgraph 容器代表组的全局位置：组内精修期间固定
-    // （嵌套时子容器会被外层标记为成员，此处强制保持冻结）。
-    for (const sg of this.store.subgraphNodes) isMember[this.store.indexOf(sg.id)] = 0;
-    const frozen: number[] = [];
-    for (let i = 0; i < isMember.length; i++) if (!isMember[i]) frozen.push(i);
-    for (const i of frozen) this.store.elements[i].fixed = true;
-    this.solver.invalidate();
-    this.runBudget(budget, onTick);
-    for (const i of frozen) this.store.elements[i].fixed = false;
-    this.solver.invalidate();
-  }
-
   /** 在当前阶段消耗最多 budget 次迭代，返回实际使用的迭代数。 */
-  private runBudget(budget: number, onTick?: () => void): number {
+  protected runBudget(budget: number, onTick?: () => void): number {
     let used = 0;
     let guard = budget * 2 + 64;
     while (!this.solver.converged && used < budget && guard-- > 0) {

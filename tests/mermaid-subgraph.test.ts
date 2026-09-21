@@ -82,6 +82,7 @@ function memberGap(layout: ForceLayout, a: string, b: string): number {
 
 describe('mermaid 架构图：subgraph 分组布局', () => {
   const layout = new ForceLayout(buildGraph(), {
+    algorithm: 'force-group',
     naturalLength: L,
     edgeNodeRepulsion: 3,
     weakGravityRatio: 0.05,

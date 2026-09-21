@@ -109,8 +109,10 @@ export type LayoutStage = 0 | 1 | 2 | 3;
 
 export interface LayoutOptions {
   /**
-   * 布局算法（策略名）。默认 'force-directed'（力导向）。
-   * 内置：'force-directed' | 'circle'；可用 registerStrategy 注册自定义策略。
+   * 布局算法（策略名）。默认 'force-directed'（纯力导向，不含分组力学）。
+   * 内置：'force-directed' | 'force-group' | 'circle'；可用 registerStrategy
+   * 注册自定义策略。声明了 subgraphs/hiddenGroups 的图请选 'force-group'
+   * （在力导向基础上叠加分组力学与组内精修）。
    * 运行时切换用 layout.setStrategy(name)（保留图数据，重新初始化位置）。
    */
   algorithm?: string;
@@ -155,8 +157,9 @@ export interface LayoutOptions {
    */
   lineAvoidance?: boolean;
   /**
-   * hidden-group 聚集强度全局默认值（默认 3）：HiddenGroupSpec.attractionStrength
-   * 未声明时生效。成员到组质心的简谐束缚（相对力单位 k_a/L²、按成员数归一）。
+   * hidden-group 聚集强度全局默认值（默认 3，算法：force-group）：
+   * HiddenGroupSpec.attractionStrength 未声明时生效。成员到组质心的
+   * 简谐束缚（相对力单位 k_a/L²、按成员数归一）。纯力导向不消费本项。
    */
   groupCohesion?: number;
   /**
@@ -172,9 +175,9 @@ export interface LayoutOptions {
    */
   gridSize?: number;
   /**
-   * 跨容器张力传导（实验性，默认 false）：跨容器连线的张力按有界比例
-   * 传导给两端容器（hub），使容器朝连接方向靠近。已知问题：简单传导
-   * 与容器互斥/弱引力平衡后仍可能振荡，需要专项的引力+阻尼设计。
+   * 跨容器张力传导（实验性，默认 false，算法：force-group）：跨容器连线的
+   * 张力按有界比例传导给两端容器（hub），使容器朝连接方向靠近。已知问题：
+   * 简单传导与容器互斥/弱引力平衡后仍可能振荡，需要专项的引力+阻尼设计。
    */
   tensionConduction?: boolean;
   /**

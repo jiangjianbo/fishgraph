@@ -15,7 +15,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { ForceLayout, detectHiddenGroups } from '../src/index.js';
+import { ForceLayout, detectHiddenGroups, listStrategies } from '../src/index.js';
 import type { GraphSpec } from '../src/types.js';
 
 function chainGraph(): GraphSpec {
@@ -117,6 +117,7 @@ describe('分组布局', () => {
       hiddenGroups: [{ id: 'h1', members: [0, 1, 2, 3, 4, 5] }],
     };
     const layout = new ForceLayout(graph, {
+      algorithm: 'force-group',
       naturalLength: 120,
       accuracy: 'exact',
       gravity: 'pairwise',
@@ -158,6 +159,7 @@ describe('分组布局', () => {
       ],
     };
     const layout = new ForceLayout(graph, {
+      algorithm: 'force-group',
       naturalLength: 120,
       accuracy: 'exact',
       gravity: 'pairwise',
@@ -224,7 +226,7 @@ describe('外部直连容器内成员（角色模型的张力传导）', () => {
           { id: 'sub', shape: { kind: 'rect' as const, w: 400, h: 300 }, members: ['m1'] },
         ],
       },
-      { naturalLength: 120, accuracy: 'exact', gravity: 'pairwise', seed: 21 },
+      { algorithm: 'force-group', naturalLength: 120, accuracy: 'exact', gravity: 'pairwise', seed: 21 },
     );
   }
 
@@ -264,5 +266,70 @@ describe('外部直连容器内成员（角色模型的张力传导）', () => {
     expect(d).toBeLessThan(300);
     // 无重叠
     expect(Math.hypot(on.m1.x - on.sub.x, on.m1.y - on.sub.y)).toBeGreaterThan(0);
+  });
+});
+
+describe('算法纯粹性：force 纯力导向 / force-group 分组', () => {
+  function chainGraph(): GraphSpec {
+    return {
+      nodes: [{ id: 0 }, { id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }, { id: 5 }],
+      edges: [
+        { source: 0, target: 1 },
+        { source: 1, target: 2 },
+        { source: 2, target: 3 },
+        { source: 3, target: 4 },
+        { source: 4, target: 5 },
+      ],
+    };
+  }
+
+  function run(graph: GraphSpec, algorithm: string): ForceLayout {
+    const layout = new ForceLayout(graph, {
+      algorithm,
+      naturalLength: 120,
+      accuracy: 'exact',
+      gravity: 'pairwise',
+      seed: 3,
+    });
+    layout.run({ maxIterations: 6000 });
+    return layout;
+  }
+
+  function chainSpan(layout: ForceLayout): number {
+    let minX = Infinity;
+    let maxX = -Infinity;
+    for (let i = 0; i < 6; i++) {
+      minX = Math.min(minX, layout.positions.get(i)!.x);
+      maxX = Math.max(maxX, layout.positions.get(i)!.x);
+    }
+    return maxX - minX;
+  }
+
+  function samePositions(a: ForceLayout, b: ForceLayout): boolean {
+    if (a.positions.size !== b.positions.size) return false;
+    return [...a.positions.entries()].every(([id, p]) => {
+      const q = b.positions.get(id)!;
+      return p.x === q.x && p.y === q.y;
+    });
+  }
+
+  it('注册表包含 force-group（force-directed 的派生算法）', () => {
+    expect(listStrategies()).toContain('force-directed');
+    expect(listStrategies()).toContain('force-group');
+  });
+
+  it('纯度：force-directed 忽略 hiddenGroups 声明（与无组声明逐位一致）', () => {
+    const withGroup = run({ ...chainGraph(), hiddenGroups: [{ id: 'h1', members: [0, 1, 2, 3, 4, 5] }] }, 'force-directed');
+    const withoutGroup = run(chainGraph(), 'force-directed');
+    // 基础力场不读取任何 group 声明 → 同种子下轨迹必须完全一致
+    expect(samePositions(withGroup, withoutGroup)).toBe(true);
+  });
+
+  it('分组：force-group 消费 hiddenGroups（组内跨度被压缩）', () => {
+    const withoutGroup = run(chainGraph(), 'force-group');
+    const withGroup = run({ ...chainGraph(), hiddenGroups: [{ id: 'h1', members: [0, 1, 2, 3, 4, 5] }] }, 'force-group');
+    // 有组束缚后链的总体跨度显著收缩（自然长度约 600+，束缚后 < 420）
+    expect(chainSpan(withGroup)).toBeLessThan(420);
+    expect(samePositions(withGroup, withoutGroup)).toBe(false);
   });
 });

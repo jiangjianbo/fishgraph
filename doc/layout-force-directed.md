@@ -1,6 +1,9 @@
 # 布局设计说明：力导向布局（force-directed）
 
 > 默认布局算法，注册名 `'force-directed'`，实现于 `src/layout/force/`。
+> **纯粹性约定**：本算法不含任何 group（subgraph / hidden-group）语义；
+> 分组力学由其派生策略 **force-group**（注册名 `'force-group'`，实现于
+> `src/layout/force-group/`，继承本算法）通过扩展点注入，见 §8。
 > 本文采用总分结构：§1 先给出人能直接理解的**布局规则**（力规则、避让规则、
 > 过程规则），后续章节逐条展开它们如何实现。它对架构的接缝关系见
 > [architecture.md](./architecture.md) §7。
@@ -26,7 +29,7 @@
 |---|---|---|---|
 | R5 | 节点不压线、不压字 | 节点压到连线或边文字上会被强斥力推开，**连线两端同步让路**；边文字多大就把两端撑开到恰好容纳，长文字按最小面积自动折行 | §4、§7 |
 | R6 | 交叉有代价 | 一条线每多一个交叉，它就收缩得更努力，且每个交叉抬高布局总能量；可选开关：两条线贴近时直接互相排斥，把交叉在力学上挤开 | §4、§7 |
-| R7 | 组是实体 | 无形状的组（hidden-group）成员向组质心聚拢；带形状的组（subgraph）成员被「关」在容器内，容器对外表现为一个大节点 | §8 |
+| R7 | 组是实体 | 无形状的组（hidden-group）成员向组质心聚拢；带形状的组（subgraph）成员被「关」在容器内，容器对外表现为一个大节点（**仅 force-group**） | §8 |
 
 ### 过程规则（怎么达到平衡）
 
@@ -54,7 +57,7 @@
 模块分工（策略内部的三段式）：
 
 ```text
-strategy.ts   调度与生命周期：参数派生 → 初值 → 分阶段弛豫 → 组内精修 → 坐标修正
+strategy.ts   调度与生命周期：参数派生 → 初值 → 分阶段弛豫 → 派生精修缝 → 坐标修正
 solver.ts     RelaxationSolver：信任域 + 回溯线搜索的单步弛豫
 forces.ts     力场计算（物理核心）：精确 O(n²) 与 Barnes-Hut 两路共享力项
 init.ts       初始摆放：bfs（平面扇形，默认）/ circle / grid / random
@@ -62,6 +65,13 @@ hops.ts       跳数斥力衰减矩阵（拓扑导出）
 crossings.ts  边交叉计数（扫描线 + 预算回退）
 quadtree.ts   Barnes-Hut 四叉树（双树遍历）
 spatialgrid.ts 均匀空间网格（避让候选对）
+```
+
+派生策略 `src/layout/force-group/`（继承本策略）：
+
+```text
+strategy.ts   ForceGroupStrategy：组内精修调度 + 聚集系数派生 + region 钳制
+groupForces.ts group 力学：聚集束缚、成员锚定、斥力豁免、张力传导（实验）
 ```
 
 ## 3. 总体流程（规则 R9 的调度骨架）
@@ -75,10 +85,10 @@ spatialgrid.ts 均匀空间网格（避让候选对）
 
 run(maxIterations=1500, staged=true)：
   ┌ stage 0 (35%)  只有节点力场：斥力 + 弱引力/调和约束     （R1/R3）
-  ├ stage 1 (30%)  加入连线：橡皮筋弹力、交叉收缩、组束缚   （R2/R6/R7）
+  ├ stage 1 (30%)  加入连线：橡皮筋弹力、交叉收缩           （R2/R6）
   ├ stage 2 (20%)  加入避让：边-节点软墙、边文字软墙        （R5）
   ├ stage 3 (15%)  节点文字生效（有效半径变大，重新弛豫）   （R5）
-  ├ 组内精修        冻结组外节点，只让组成员弛豫（有组时）   （R7）
+  ├ 派生精修缝      force-group 在此执行组内精修（有组时）   （R7）
   └ 坐标系修正      cs.refine()：free 恒等 / grid 网格吸附   （R10）
 
 每阶段用掉总预算的比例份额（可提前收敛）；staged=false 时全量力场一步到位。
@@ -112,8 +122,9 @@ run(maxIterations=1500, staged=true)：
   力与能量用同一组计数——「分段保守」：交叉事件之间严格保守，能量单调性不受
   影响。因此避让软墙**不钳制穿透深度**（钳制会让力与梯度不一致，线搜索全线拒绝）。
 - **两条斥力墙叠加仍保守**：远程墙与近程墙同为截断势，和的梯度 = 梯度的和。
-- **subgraph 的容器与其成员之间斥力为 0**（σ = 0）：成员位于容器内部是期望
-  状态，不算穿透；防重叠改由成员间互斥 + 包含墙保证（§8）。
+- **subgraph 的容器与其成员之间斥力为 0**（σ = 0，force-group 经
+  `repulsionExempt` 扩展点声明）：成员位于容器内部是期望状态，不算穿透；
+  防重叠改由成员间互斥 + 包含墙保证（§8）。
 - 完全重合的节点对用 `jitterDirection` 的确定性伪随机方向弹出（避免 NaN、
   保持可复现，架构决策 6）。
 
@@ -196,26 +207,31 @@ run(maxIterations=1500, staged=true)：
 - 边/标签 × 节点的避让候选对走均匀空间网格（stamp 去重），网格边长与避让
   影响半径同量级；线间避让复用同一网格（插入边包围盒后 ei<ej 去重遍历）。
 
-## 8. 组约束（规则 R7 的实现：力导向对分组模型的解释）
+## 8. 组约束（规则 R7 的实现：派生策略 force-group 对分组模型的解释）
 
-底座已把分组声明**物化**：subgraph → `LayoutSubgraphNode` 容器节点（参与
-碰撞）、hidden-group → `ClusterConstraint` 质心束缚（架构决策 5）；力导向
-是当前唯一消费这些物化结果的策略：
+**本算法（force-directed）不含任何分组语义**——声明了 subgraphs/hiddenGroups
+的图请选 `'force-group'`。底座把分组声明**物化**：subgraph →
+`LayoutSubgraphNode` 容器节点（参与碰撞）、hidden-group → `ClusterConstraint`
+质心束缚（架构决策 5）；force-group 是这些物化结果的唯一消费者，通过基类的
+受保护扩展缝注入全部组力学（`ForceContext.extensions` + 精修/region 钩子），
+基础力场只负责在固定时机调用，不解读其内容：
 
-| 组类型 | 力学实现 |
+| 组类型 | 力学实现（扩展点） |
 |---|---|
-| hidden-group | `ClusterConstraint.applyForces()`：成员到组质心的简谐束缚（强度 = `attractionStrength` ?? `groupCohesion`，按成员数归一）；整体收敛后还有一轮**组内精修**：冻结全部组外节点（含 subgraph 容器），只弛豫组成员；若精修使成员包围盒变化超 15%，视为束缚过强，再触发一轮整体弛豫 |
-| subgraph | 三件套：① 容器与成员间**斥力豁免**（成员在容器内是期望状态）；② 成员到容器锚点的束缚（把成员拢在容器内）；③ **容器半径自适应**——每轮力场求值末尾 `updateBoundsFromChildren()` 把容器 r 撑到 max(baseR, 覆盖全部成员 + padding)，容器随成员长大 |
+| hidden-group | `extraForces` → `ClusterConstraint.applyForces()`：成员到组质心的简谐束缚（强度 = `attractionStrength` ?? `groupCohesion`，按成员数归一）；整体收敛后 `refineLayout` 钩子执行**组内精修**：冻结全部组外节点（含 subgraph 容器），只弛豫组成员；若精修使成员包围盒变化超 15%，视为束缚过强，再触发一轮整体弛豫 |
+| subgraph | 三件套：① `repulsionExempt`：容器与成员间**斥力豁免**（成员在容器内是期望状态）；② `extraForces` → 成员到容器锚点的束缚（把成员拢在容器内）+ **容器半径自适应**——每轮力场求值末尾 `updateBoundsFromChildren()` 把容器 r 撑到 max(baseR, 覆盖全部成员 + padding)，容器随成员长大；③ `coordinateRegion`：格点吸附时成员区域钳制在容器内切区 |
 
 实验项 **张力传导**（`tensionConduction`，默认关）：跨容器边的弹力按有界
-比例传导给成员所属的容器，使容器朝连接方向靠近。已知问题：简单传导与容器
-互斥/弱引力平衡后仍可能振荡，需要专项的「容器间引力 + 阻尼」设计
-（`mermaid-subgraph.test.ts` 有「已知边界」用例钉住现状）。
+比例传导给成员所属的容器，使容器朝连接方向靠近（`edgeAttraction` 扩展点）。
+已知问题：简单传导与容器互斥/弱引力平衡后仍可能振荡，需要专项的
+「容器间引力 + 阻尼」设计（`mermaid-subgraph.test.ts` 有「已知边界」用例
+钉住现状）。
 
 ## 9. 坐标系修正挂点（规则 R10 的实现）
 
 弛豫与精修完成后，策略构造 `CoordinateNode[]`（坐标、半径、fixed、以及
-subgraph 成员的锚定区域 `{ anchorId: 容器, rIn: 容器内切半径 }`），调用
+派生策略经 `coordinateRegion` 钩子提供的吸附区域——force-group 给 subgraph
+成员 `{ anchorId: 容器, rIn: 容器内切半径 }`），调用
 `cs.refine(nodes, { lattice })`，再把修正后的坐标写回 store。
 
 - `lattice` = `gridSize > 0 ? gridSize : naturalLength`（0 = 跟随自然边长）；
@@ -237,10 +253,10 @@ subgraph 成员的锚定区域 `{ anchorId: 容器, rIn: 容器内切半径 }`�
 | `crossingShrink` / `crossingEnergy` | 0.15 / 0.05 | 交叉收缩乘子 λ / 每交叉点能量罚（k_a/L 单位）；0 关闭 | R6 |
 | `lineAvoidance` | false | 线间避让斥力（opt-in）：稀疏流程图开，全连接/高密度图勿开 | R6 |
 | `hopRepulsionDecay` / `unrelatedRepulsion` | 0.7 / 0.35 | 跳数衰减 / 远程斥力下限；>3000 节点自动停用 | R4 |
-| `groupCohesion` | 3 | hidden-group 聚集强度 | R7 |
+| `groupCohesion` | 3 | hidden-group 聚集强度（force-group） | R7 |
 | `init` / `seed` / `maxStepRatio` | `'bfs'` / 42 / 0.2 | 初值模式 / 可复现种子 / 信任域（×L） | R8 R9 |
 | `coordinateSystem` / `gridSize` | `'free'` / 0 | 布局后坐标修正；0 = 跟随 L | R10 |
-| `tensionConduction` | false | 跨容器张力传导（实验性） | §8 |
+| `tensionConduction` | false | 跨容器张力传导（实验性，force-group） | §8 |
 
 ## 11. 复杂度与规模边界
 

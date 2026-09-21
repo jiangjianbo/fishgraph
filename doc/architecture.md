@@ -11,7 +11,7 @@ fishgraph 是一个**图布局算法库**：输入图规格（`GraphSpec`：节�
 
 两个根本定位决定了架构形态：
 
-1. **算法会持续增加**。布局算法是变化最频繁的部分（目前已有力导向、圆形两种，坐标修正策略也有 free、grid 两种），因此「算法可替换」必须是第一接缝。
+1. **算法会持续增加**。布局算法是变化最频繁的部分（目前已有力导向、力导向+分组、圆形三种，坐标修正策略也有 free、grid 两种），因此「算法可替换」必须是第一接缝。
 2. **物理模型要求严格自洽**。所有力都从同一个能量泛函求梯度得到（力 = −∇E），求解器靠「能量单调下降」保证收敛。这不是单个算法的内部细节，而是横切所有力学实现的**架构级约束**——任何一处力与能量不一致，线搜索就会失效。
 
 ## 2. 总体结构
@@ -23,7 +23,7 @@ graph TD
     API["公共 API 层<br/>index.ts（导出 + 内置策略自注册）<br/>layout.ts（ForceLayout 门面）"]
     SEAM["扩展接缝层<br/>layout/strategy.ts（布局策略注册表）<br/>layout/coordinates.ts（坐标系注册表）"]
     BASE["数据底座层<br/>graph/store.ts（GraphStore）<br/>graph/groups.ts（隐藏组推断）<br/>label.ts / geometry.ts / rng.ts"]
-    ALGO["算法实现层<br/>layout/force/*（力导向）<br/>layout/circle/*（圆形）"]
+    ALGO["算法实现层<br/>layout/force/*（纯力导向）<br/>layout/force-group/*（力导向+分组，继承 force）<br/>layout/circle/*（圆形）"]
 
     API --> SEAM
     API --> BASE
@@ -43,8 +43,8 @@ src/
 ├── layout/
 │   ├── strategy.ts           # LayoutStrategy 接口 + 注册表（接缝）
 │   ├── coordinates.ts        # CoordinateSystem 接口 + 注册表 + free/grid 内置（接缝）
-│   ├── force/                # 力导向策略（默认算法），设计见 doc/layout-force-directed.md
-│   │   ├── strategy.ts       #   调度与生命周期：分阶段弛豫、组内精修、坐标系修正
+│   ├── force/                # 纯力导向策略（默认算法，无分组语义），设计见 doc/layout-force-directed.md
+│   │   ├── strategy.ts       #   调度与生命周期：分阶段弛豫、派生扩展缝、坐标系修正
 │   │   ├── solver.ts         #   RelaxationSolver：信任域 + 回溯线搜索
 │   │   ├── forces.ts         #   力场计算（物理核心）：精确 O(n²) 与 Barnes-Hut 两路
 │   │   ├── init.ts           #   初始摆放：BFS 平面扇形 / circle / grid / random
@@ -52,6 +52,9 @@ src/
 │   │   ├── crossings.ts      #   边交叉计数（扫描线 + 预算回退）
 │   │   ├── quadtree.ts       #   Barnes-Hut 四叉树（双树遍历，保保守性）
 │   │   └── spatialgrid.ts    #   均匀空间网格（避让候选对加速）
+│   ├── force-group/          # 力导向+分组策略（继承 ForceDirectedStrategy，组语义经扩展缝注入）
+│   │   ├── strategy.ts       #   组内精修、聚集系数派生、容器内 region 钳制
+│   │   └── groupForces.ts    #   group 力学：聚集束缚、成员锚定、斥力豁免、张力传导（实验）
 │   └── circle/
 │       └── strategy.ts       # 圆形策略（接缝验证用的最小算法），见 doc/layout-circle.md
 ├── geometry.ts               # 向量、点到线段投影、形状 SDF、包围半径
@@ -70,7 +73,7 @@ src/
   `rebuild()` 回调（见 §5.3）。
 - **`src/index.ts`**：公共 API 的唯一出口。通过副作用 import 触发内置策略与
   坐标系的自注册——消费方 `import { ForceLayout } from 'fishgraph'` 之后，
-  `'force-directed'`、`'circle'`、`'free'`、`'grid'` 即全部可用。
+  `'force-directed'`、`'force-group'`、`'circle'`、`'free'`、`'grid'` 即全部可用。
 
 ### 3.2 数据底座层
 
@@ -105,11 +108,12 @@ src/
 ### 3.4 算法实现层
 
 每个算法一个独立子目录，实现 `LayoutStrategy` 并在模块加载时自注册。
-当前内置两种，详细设计见独立文档：
+当前内置三种，详细设计见独立文档：
 
 | 算法 | 注册名 | 目录 | 设计文档 |
 |---|---|---|---|
-| 力导向（默认） | `'force-directed'` | `src/layout/force/` | [layout-force-directed.md](./layout-force-directed.md) |
+| 力导向（默认，纯力导向，无分组语义） | `'force-directed'` | `src/layout/force/` | [layout-force-directed.md](./layout-force-directed.md) |
+| 力导向+分组（继承 force，组语义经扩展缝注入） | `'force-group'` | `src/layout/force-group/` | [layout-force-directed.md](./layout-force-directed.md) §8 |
 | 圆环 | `'circle'` | `src/layout/circle/` | [layout-circle.md](./layout-circle.md) |
 
 算法内部还可以再有自己的子结构（力导向的 solver/forces/init/加速结构），
@@ -376,7 +380,7 @@ new ForceLayout(graph, options)
 设计意图：**分组物化是底座概念，不是算法概念**。`GraphStore` 把 subgraph
 物化为与普通节点同构的 `LayoutSubgraphNode`（多态基类 `LayoutElement`，
 `getBoundRadius()` 恒可用），把 hidden-group 物化为只带 `applyForces()`
-钩子的 `ClusterConstraint`。力导向策略据此做「容器与成员间斥力豁免 +
+钩子的 `ClusterConstraint`。force-group 策略据此做「容器与成员间斥力豁免 +
 包含墙」，坐标系据此构造「锚定区域」；一个不认识分组的算法（如 circle）
 可以把容器当普通节点处理，照样工作。
 
@@ -386,8 +390,9 @@ new ForceLayout(graph, options)
 run(maxIterations, staged, onTick)
    │
    ├─ [力导向] 分阶段弛豫 stage 0→3：节点力场 → +连线 → +避让/边文字 → +节点文字
-   ├─ [力导向] 组内精修：冻结组外节点，只让组成员弛豫；包围盒变化过大则再整体弛豫
-   ├─ [力导向] 坐标系修正：构造 CoordinateNode[]（含 subgraph 的锚定区域）
+   ├─ [force-group] 组内精修：冻结组外节点，只让组成员弛豫；包围盒变化过大则再整体弛豫
+   ├─ [力导向] 坐标系修正：构造 CoordinateNode[]（subgraph 成员的锚定区域由
+   │            force-group 经 coordinateRegion 钩子提供）
    │            → cs.refine() → 坐标写回 store
    └─ 返回 RunResult { iterations, converged, energy }
 

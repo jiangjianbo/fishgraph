@@ -114,7 +114,16 @@ E = ½·k_ee·(d_ee − h)²/d_ee    F = k_ee·(d_ee − h)/d_ee    k_ee = 30·k
 
 ## 分组：subgraph / hidden-group
 
-图可以声明两类分组（`GraphSpec.subgraphs` / `GraphSpec.hiddenGroups`），布局遵循"**先整体、后组内、形状变化再整体**"的流程：
+分组力学由派生算法 **force-group** 提供（`algorithm: 'force-group'`，继承自纯
+力导向 force-directed）：基础力场完全复用，组语义经扩展点注入，整体收敛后再做
+组内精修。默认的 `'force-directed'` 是**纯力导向**，不含任何分组语义（分组声明
+被忽略）。声明了分组的图布局遵循"**先整体、后组内、形状变化再整体**"的流程：
+
+```ts
+const layout = new ForceLayout(graph, { algorithm: 'force-group' });
+```
+
+图可以声明两类分组（`GraphSpec.subgraphs` / `GraphSpec.hiddenGroups`）：
 
 ```ts
 const graph = {

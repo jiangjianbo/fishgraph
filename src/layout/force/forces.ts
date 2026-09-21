@@ -31,7 +31,7 @@ import type { AccuracyMode, GravityMode, LayoutStage } from '../../types.js';
 import { closestPointOnSegment, shapeSdf } from '../../geometry.js';
 import { jitterDirection } from '../../rng.js';
 import { countEdgeCrossings } from './crossings.js';
-import type { ClusterConstraint, InternalEdge, LayoutElement, LayoutSubgraphNode } from '../../graph/store.js';
+import type { InternalEdge, LayoutElement } from '../../graph/store.js';
 import { QuadTree, type BHPoint, type QuadCell } from './quadtree.js';
 import { SpatialGrid, type GridItem } from './spatialgrid.js';
 
@@ -73,14 +73,37 @@ export interface DerivedParams {
   kee: number;
   /** 线间避让作用距离：d_ee = 0.35L（线段中心线到中心线）。 */
   dee: number;
-  /** subgraph 包含墙强度（成员出界拉回）：k_in = 12k_a/L²。 */
-  kin: number;
-  /** 隐藏组聚集系数（groupCohesion 选项值）。 */
-  groupCohesion: number;
-  /** 跨容器张力传导开关（实验性，默认关）。 */
-  tensionConduction: boolean;
   /** 线间避让开关（opt-in，默认关）。 */
   lineAvoid: boolean;
+}
+
+/**
+ * 力场扩展点 —— 派生算法（如 force-group）向基础力场注入附加力学的唯一接缝。
+ * 基础力场只负责在固定时机调用，不解读其内容；全部 group 语义都在派生侧实现。
+ */
+export interface ForceExtensions {
+  /**
+   * 附加力项：在基础力场（节点对/边/避让）求值之后调用，就地累加力，
+   * 返回附加势能（0 表示无力）。精确模式在阶段 ≥1 时调用，BH 模式每轮调用。
+   */
+  extraForces?: (ctx: ForceContext) => number;
+  /**
+   * 单条边的弹力施加后的附加项：入参为该边的弹力标量 f、弹力势能 e
+   * 与单位方向 (ux, uy)（a→b），返回附加势能（通常 0）。
+   */
+  edgeAttraction?: (
+    ctx: ForceContext,
+    edgeIndex: number,
+    f: number,
+    e: number,
+    ux: number,
+    uy: number,
+  ) => number;
+  /**
+   * 节点对斥力豁免谓词：返回 true 表示该对之间完全没有斥力
+   * （如 subgraph 容器 vs 其成员 —— 成员在容器内是期望状态，不算穿透）。
+   */
+  repulsionExempt?: (ctx: ForceContext, i: number, j: number) => boolean;
 }
 
 export interface ForceContext {
@@ -102,12 +125,8 @@ export interface ForceContext {
   crossPenaltyEnergy: number;
   /** 跳数斥力乘子矩阵（n²，拓扑导出）；null = 特性停用（σ 恒 1）。 */
   hopScale: Float32Array | null;
-  /** 成员 → 所属 subgraph 容器的下标（free/容器自身为 -1）。 */
-  hubOfMember: Int32Array;
-  /** hidden-group 聚集约束（物化自 GraphStore，k 由策略按聚集强度派生）。 */
-  clusterConstraints: ClusterConstraint[];
-  /** subgraph 容器节点（锚定成员 + 每轮求值末尾按成员几何刷新半径）。 */
-  subgraphNodes: LayoutSubgraphNode[];
+  /** 力场扩展点（派生算法注入；纯力导向为空对象）。 */
+  extensions: ForceExtensions;
   stage: LayoutStage;
   energy: number;
   /** 力残差：max|F|/forceUnit。收敛判据 —— 所有节点的合力趋近 0。 */
@@ -124,8 +143,6 @@ export function deriveParams(
     crossingShrink: number;
     crossingEnergy: number;
     lineAvoidance: number | boolean;
-    groupCohesion: number;
-    tensionConduction: number | boolean;
   },
   nodeCount: number,
 ): DerivedParams {
@@ -150,10 +167,6 @@ export function deriveParams(
   const kee = 30 * (ka / (L * L));
   const dee = 0.35 * L;
   const lineAvoid = !!opts.lineAvoidance;
-  const tensionConduction = !!opts.tensionConduction;
-  // subgraph 容器表面张力：成员出界每 1px 拉回 8·k_a/L³（把成员拢在容器内）。
-  const kin = 8 * (ka / (L * L * L));
-  const groupCohesion = Math.max(opts.groupCohesion, 0);
   const kw = ka * Math.max(opts.weakGravityRatio, 1e-6);
   // 橡皮筋刚度 k_b = τ·k_a/L³：F = k_b·g 随线长线性增强（连线越长拉力越大），
   // τ=1 时与截断斥力的平衡间隙恰为 naturalLength（k_r(1/L−1/2L)/L² = k_b·L）。
@@ -176,10 +189,7 @@ export function deriveParams(
     nearR,
     kee,
     dee,
-    kin,
-    groupCohesion,
     lineAvoid,
-    tensionConduction,
     kw,
     kt,
     ken,
@@ -318,16 +328,6 @@ function bondTerm(
   };
 }
 
-/** subgraph 容器与其成员之间的斥力豁免：容器是"区域"而非实体，
- *  成员位于容器内部是期望状态，不算穿透（防重叠由成员间互斥与锚定力保证）。 */
-function hubExempt(ctx: ForceContext, i: number, j: number): boolean {
-  const ei = ctx.elements[i];
-  if (ei.isSubgraph && (ei as LayoutSubgraphNode).memberSet.has(j)) return true;
-  const ej = ctx.elements[j];
-  if (ej.isSubgraph && (ej as LayoutSubgraphNode).memberSet.has(i)) return true;
-  return false;
-}
-
 /** 一对节点之间的核力式相互作用，返回势能贡献。 */
 function applyNodePair(ctx: ForceContext, i: number, j: number, kind: PairKind): number {
   const ni = ctx.elements[i];
@@ -351,8 +351,8 @@ function applyNodePair(ctx: ForceContext, i: number, j: number, kind: PairKind):
   const m = ni.mass * nj.mass;
   // 跳数斥力衰减：h=1 邻接不衰减，逐跳乘 decay^(h-1)，无关系对乘 floor。
   let scale = ctx.hopScale ? ctx.hopScale[i * ctx.elements.length + j] : 1;
-  // subgraph 容器 vs 其成员：无斥力（成员在容器内是期望状态）。
-  if (hubExempt(ctx, i, j)) scale = 0;
+  // 派生算法的斥力豁免（如容器 vs 成员：成员在容器内是期望状态）。
+  if (ctx.extensions.repulsionExempt?.(ctx, i, j)) scale = 0;
   const rep = repulsionTerm(p.kr, m, s, p.gFloor, p.repR, scale, p.nearK, p.nearR);
   // 弱基础引力（相邻对的连线弹力由边循环按 μ_e 缩放施加）
   const kLong = kind === 'stranger-pairwise' ? p.kw : 0;
@@ -394,28 +394,9 @@ function applyEdgeAttraction(ctx: ForceContext, edgeIndex: number): number {
   na.fy -= att.f * uy;
   nb.fx += att.f * ux;
   nb.fy += att.f * uy;
-  // 张力传导（有界）：跨容器边（成员↔free 或 成员↔异组成员）的弹力按
-  // min(半力, 封顶) 传导给成员所属的容器 —— 容器朝连接方向响应，而拉力
-  // 有界（不超过 20 力单位），不会把成员拖出容器，也不会发散。
-  // 实验开关（默认关）：简单传导会发散，需要专项设计（容器间引力+阻尼）
-  if (!ctx.params.tensionConduction) return att.e;
-  const hubA = ctx.hubOfMember[e.sourceIndex];
-  const hubB = ctx.hubOfMember[e.targetIndex];
-  if (hubA >= 0 || hubB >= 0) {
-    const fCap = 60 * ctx.params.forceUnit;
-    const fCond = Math.min(0.5 * att.f, fCap);
-    if (hubA >= 0) {
-      const ha = ctx.elements[hubA];
-      ha.fx -= fCond * ux;
-      ha.fy -= fCond * uy;
-    }
-    if (hubB >= 0) {
-      const hb = ctx.elements[hubB];
-      hb.fx += fCond * ux;
-      hb.fy += fCond * uy;
-    }
-    ctx.energy += 0.5 * (fCond / Math.max(att.f, 1e-9)) * att.e;
-  }
+  // 边弹力施加后的派生钩子（如跨容器张力传导，实验性）。
+  const edgeExt = ctx.extensions.edgeAttraction;
+  if (edgeExt) ctx.energy += edgeExt(ctx, edgeIndex, att.f, att.e, ux, uy);
   return att.e;
 }
 
@@ -542,50 +523,6 @@ function applyEdgeEdgeInteraction(ctx: ForceContext, ei: number, ej: number): nu
   }
   return energy;
 }
-
-/** 组束缚力（精确与 BH 共用，O(成员数)）：
- *  - ClusterConstraint（hidden-group）：成员到组质心的简谐束缚（向心力，
- *    保守、总合力零）—— "隐藏组内的节点倾向于聚集在一起"（力钩子在
- *    ClusterConstraint.applyForces 内实现）；
- *  - LayoutSubgraphNode：成员锚定弹簧 —— 成员被拉向容器中心，
- *    容器由全局力场定位；求值末尾容器执行 updateBoundsFromChildren()
- *    按成员几何刷新自身半径（最小面积填充）。 */
-/** 成员到锚点的线性弹力（保守、合力零）。返回该组势能。 */
-function pullToAnchor(
-  elements: readonly LayoutElement[],
-  memberIndices: readonly number[],
-  k: number,
-  anchorX: number,
-  anchorY: number,
-): number {
-  let e = 0;
-  for (const idx of memberIndices) {
-    const nd = elements[idx];
-    const fx = (k * nd.mass) * (anchorX - nd.x);
-    const fy = (k * nd.mass) * (anchorY - nd.y);
-    nd.fx += fx;
-    nd.fy += fy;
-    e += 0.5 * k * nd.mass * ((nd.x - anchorX) ** 2 + (nd.y - anchorY) ** 2);
-  }
-  return e;
-}
-
-function applyGroupForces(ctx: ForceContext): number {
-  let energy = 0;
-  // hidden-group：辅助向心引力（约束钩子自己算力与能量）
-  for (const c of ctx.clusterConstraints) {
-    energy += c.applyForces(ctx.elements);
-  }
-  // subgraph：成员锚定到容器 + 容器半径按成员几何自适应
-  for (const sg of ctx.subgraphNodes) {
-    if (sg.memberIndices.length === 0) continue;
-    // 锚点 = 容器自身。容器与成员间无斥力（成员在容器内是期望状态）。
-    energy += pullToAnchor(ctx.elements, sg.memberIndices, ctx.params.kin, sg.x, sg.y);
-    sg.updateBoundsFromChildren(ctx.elements);
-  }
-  return energy;
-}
-
 
 /** 遍历全部边-边候选对（网格给候选，ei<ej 去重）施加线间避让。 */
 function applyEdgeEdgeAvoidance(ctx: ForceContext, grid: SpatialGrid): void {
@@ -721,7 +658,9 @@ export function computeForcesExact(ctx: ForceContext): number {
       });
       if (ctx.params.lineAvoid) applyEdgeEdgeAvoidance(ctx, grid);
     }
-    ctx.energy += applyGroupForces(ctx);
+    // 派生算法的附加力项（精确模式：阶段 1 起生效）
+    const extra = ctx.extensions.extraForces;
+    if (extra) ctx.energy += extra(ctx);
   }
   if (ctx.stage >= 2) {
     for (let c = 0; c < n; c++) {
@@ -817,7 +756,9 @@ export function computeForcesBH(ctx: ForceContext): number {
   if (ctx.stage >= 1 && ctx.params.lineAvoid && ctx.edges.length > 1) {
     applyEdgeEdgeAvoidance(ctx, grid);
   }
-  ctx.energy += applyGroupForces(ctx);
+  // 派生算法的附加力项（BH 模式：各阶段都生效，与历史行为一致）
+  const extra = ctx.extensions.extraForces;
+  if (extra) ctx.energy += extra(ctx);
   const queryR = ctx.params.obstacleR + rmax;
   if (ctx.stage >= 2) {
     for (let c = 0; c < n; c++) {
