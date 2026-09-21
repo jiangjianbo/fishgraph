@@ -77,16 +77,16 @@
       <fieldset>
         <legend>求解</legend>
         <label class="row"><span class="name">布局算法</span>
-          <select id="algorithm"><option value="force-directed">力导向</option><option value="force-group">力导向+分组</option><option value="force-undirected">力导向无向图</option><option value="circle">环形</option></select>
+          <select id="algorithm"><option value="force-undirected" selected>力导向无向图</option><option value="force-directed">力导向有向图</option><option value="circle">环形</option></select>
+        </label>
+        <label class="row"><span class="name">流动方向</span>
+          <select id="direction"><option value="TB" selected>自顶向下 TB</option><option value="LR">自左向右 LR</option></select>
         </label>
         <label class="row"><span class="name">弱引力模式</span>
           <select id="gravity"><option value="pairwise">pairwise</option><option value="centroid">centroid</option></select>
         </label>
         <label class="row"><span class="name">精度</span>
           <select id="accuracy"><option value="exact">exact</option><option value="barnes-hut">barnes-hut</option></select>
-        </label>
-        <label class="row"><span class="name">初始化</span>
-          <select id="init"><option value="bfs">bfs</option><option value="circle">circle</option><option value="grid">grid</option><option value="random">random</option></select>
         </label>
       </fieldset>
 

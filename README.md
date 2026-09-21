@@ -32,7 +32,7 @@ npm run demo      # 交互式 demo（vite，http://localhost:5173）
 **补充原则（代码中同样成立）：**
 
 - **10. 防穿越硬规则**：0.8L 内的贴身斥力永不随跳数衰减 —— 远端节点可以不互相推挤，但不能互相穿越（否则树形布局会产生交叉）。
-- **11. 初始即平面**：BFS 扇形 init 按子树规模分配互不相交的角域 —— 树/森林初值无交叉；配合交叉能量罚与能量单调下降，弛豫全程保持无交叉（树 21 验收测试）。
+- **11. 初值即好图**：无向流水线用质点网格粗布局给出拓扑正确的初值（邻居相邻、无重叠、环紧凑）；有向流水线再叠加层级行与层内 barycenter 排序 —— 有向树初值即零交叉。
 - **12. 线的两端会让路**：节点压线时，反作用力按投影重心分摊给线段两端。
 - **13. 文字按最小面积回绕**：拉丁词不拆、CJK 逐字断，枚举行数取包围盒面积最小。
 - **14. 无摩擦、单调、必达平衡**：所有力 = −∇E（分段保守），信任域 + 回溯线搜索保证能量单调不增，力≈0 即停。
@@ -114,14 +114,12 @@ E = ½·k_ee·(d_ee − h)²/d_ee    F = k_ee·(d_ee − h)/d_ee    k_ee = 30·k
 
 ## 分组：subgraph / hidden-group
 
-分组力学由派生算法 **force-group** 提供（`algorithm: 'force-group'`，继承自纯
-力导向 force-directed）：基础力场完全复用，组语义经扩展点注入，整体收敛后再做
-组内精修。默认的 `'force-directed'` 是**纯力导向**，不含任何分组语义（分组声明
-被忽略）。声明了分组的图布局遵循"**先整体、后组内、形状变化再整体**"的流程：
-
-```ts
-const layout = new ForceLayout(graph, { algorithm: 'force-group' });
-```
+分组的数据层（subgraph 容器物化、`detectHiddenGroups` 隐藏组推断）是底座
+能力，始终可用；分组**力学消费者**原由派生算法 `force-group` 提供，现已随
+旧一代纯力导向算法一并移除，**待按新的基础算法派生接缝重写**。当前所有内置
+算法都不消费分组力学语义（`subgraphs` 容器按普通大节点参与布局，
+`hiddenGroups` 声明被忽略，有纯度用例锁定）。分组相关测试以 skip 保留，
+重写后恢复。下述力学行为（组内精修、包含墙、张力传导）是重写时的设计蓝本：
 
 图可以声明两类分组（`GraphSpec.subgraphs` / `GraphSpec.hiddenGroups`）：
 
@@ -217,10 +215,10 @@ const layout = new ForceLayout(graph, {
 2000 节点压力测试在秒级完成。`accuracy: 'exact'` 为 O(n²) 参考实现，
 两者结果一致性有测试保证。
 
-## 力导向无向图（force-undirected）
+## 力导向无向图（force-undirected，默认算法）
 
 `algorithm: 'force-undirected'`——按 `doc/布局核心原则.md` 无向图流水线组织的
-替代算法：**质点网格粗布局 → 膨胀压实 → 短弛豫微调**。
+**默认与基础算法**：**质点网格粗布局 → 膨胀压实 → 短弛豫微调**。
 
 ```ts
 const layout = new ForceLayout(graph, { algorithm: 'force-undirected' });
@@ -233,11 +231,34 @@ const layout = new ForceLayout(graph, { algorithm: 'force-undirected' });
 - **膨胀压实**：删除全部空行空列，按真实包围半径拉伸相邻行列间距——
   **无重叠由构造保证**，不依赖弛豫兜底。
 - **短弛豫微调**：粗布局坐标作为初值，使用共享力学引擎（位于本算法目录）
-  与收敛判据自适应收尾（实测几十至两千余步，远小于从随机初值起步的
-  force-directed）。
+  与收敛判据自适应收尾（实测几十至两千余步）。
 - 不消费分组语义（subgraph 容器按普通大节点参与布局，hiddenGroups 被忽略）；
   分组支持等 force-group 重写后再议。设计细节见
   [doc/layout-force-undirected.md](doc/layout-force-undirected.md)。
+
+## 力导向有向图（force-directed）
+
+`algorithm: 'force-directed'`——基础算法的有向派生：**解环与层级 → 软层级
+引导网格寻优 →（继承的）膨胀压实 → 流动势能微调**，流程与力学引擎全部
+复用 force-undirected，只注入有向语义。
+
+```ts
+const layout = new ForceLayout(graph, {
+  algorithm: 'force-directed',
+  direction: 'TB',   // 'TB' 自上而下（默认）| 'LR' 自左向右
+});
+```
+
+- **解环与层级**：三色 DFS 识别反馈边（回环边不参与定层级），最长路径
+  层级保证每个节点排在其全部上游之后；
+- **软层级粗布局**：节点贴自己的层级行放置（行距随节点大小自动膨胀），
+  偏行有罚分、方向不可逆（下游不得在上游）；行内顺序按邻居质心
+  （barycenter）排序，有向树零交叉；
+- **流动势能**：每条正向边是「源→汇」弹簧，目标长度 = 层级差 × 行距，
+  微调期主动维持层级感，收敛后力自然归零；
+- 有向美学承诺层级流动感与层内不交错；全局零交叉是无向算法的核心追求。
+
+设计细节见 [doc/layout-force-directed.md](doc/layout-force-directed.md)。
 
 ## 架构（策略模式）
 
@@ -249,12 +270,14 @@ src/
                           文字度量、增删改查。不含任何布局算法。
   layout/strategy.ts      LayoutStrategy 接缝：策略接口 + 注册表
                           （registerStrategy / createStrategy / listStrategies）。
-  layout/force/           力导向算法（独立子目录）：strategy.ts 调度组装、
-                          init.ts 初始摆放（bfs/circle/grid/random）。
-  layout/force-undirected/ 力导向无向图（基础算法）：质点网格粗布局 coarse.ts +
-                          流水线 strategy.ts；共享力学引擎件在此目录
+  layout/force-undirected/ 力导向无向图（默认+基础算法）：质点网格粗布局 coarse.ts
+                          （CoarseHeuristics 放置美学钩子）+ 流水线 strategy.ts
+                          （protected 派生接缝）；共享力学引擎件在此目录
                           （forces.ts 力场、solver.ts 求解器、hops/crossings/
-                          quadtree/spatialgrid），force/ 与 force-group 从这里导入。
+                          quadtree/spatialgrid）。
+  layout/force-directed/  力导向有向图（派生算法）：levels.ts 解环+层级、
+                          directedCoarse.ts 软层级引导+层内排序、strategy.ts
+                          流动势能（TB/LR）——只覆写接缝，流程与引擎全部继承。
   layout/circle/          环形布局（独立子目录）：最小策略示例。
   layout.ts               ForceLayout 门面：装配 store + 当前策略，公共 API 委派。
 ```
@@ -266,8 +289,8 @@ src/
 - **新增布局算法** = 新建一个子目录实现 `LayoutStrategy`（5 个必选成员 +
   若干只读状态），调用 `registerStrategy(name, factory)` 即接入，测试与界面无需改动。
 - 多个算法共享的公共部分（力学引擎件：力场、求解器、跳数矩阵、加速结构）
-  位于基础算法 `layout/force-undirected/` 内，`force/` 与 `force-group/`
-  从那里导入。
+  位于基础算法 `layout/force-undirected/` 内，`force-directed/` 经派生接缝
+  复用（详见 doc/layout-force-undirected.md §9）。
 
 ## API
 
@@ -294,7 +317,7 @@ r.converged;        // 力残差判据
 
 | 参数 | 默认 | 作用 |
 |---|---|---|
-| `algorithm` | 'force-directed' | 布局策略名；运行时用 `layout.setStrategy(name)` 切换 |
+| `algorithm` | 'force-undirected' | 布局策略名（内置 force-undirected / force-directed / circle）；运行时用 `layout.setStrategy(name)` 切换 |
 | `naturalLength` | 120 | 一切尺度的锚：平衡边长 = 它，斥力作用域 = 2×它 |
 | `edgeTension` | 1 | >0 让长边额外收缩；过大时会把多跳路径压成叠线 |
 | `crossingShrink` | 0.15 | 交叉收缩力：边每交叉一次，引力/张力放大 (1+λ) 倍 |
@@ -308,7 +331,7 @@ r.converged;        // 力残差判据
 | `gravity` | centroid | 多个不相关分量想保持紧凑用 centroid；想让分量自由分形用 pairwise |
 | `labelCollision` | true | 关掉后边文字不再参与力学 |
 | `accuracy` | barnes-hut | n < ~300 或要逐位复现用 exact |
-| `init` | bfs | 度数优先逐层摆放；小对称图遇局部极小可试 random |
+| `direction` | 'TB' | 流动方向（仅 force-directed 消费）：'TB' 自上而下 / 'LR' 自左向右 |
 
 ## 测试
 
@@ -318,7 +341,11 @@ r.converged;        // 力残差判据
 S4 方形贴合、S5 文字撑开+最小面积回绕）。
 
 `tests/mermaid.test.ts`：19 节点真实流程图（Quality Gate 分支 + 回环），
-断言收敛、零重叠、零线穿节点，并渲染 `output/mermaid-layout.svg` 供目视比对。
+force-directed 有向验收：收敛、零重叠、正向边全部顺流、零线穿节点，
+并渲染 `output/mermaid-layout.svg` 供目视比对。
+
+`tests/tree21.test.ts`：21 节点有向树，断言全部边顺流、层级行清晰、零交叉；
+`tests/force-directed.test.ts`：解环收敛、TB/LR、方向切换、确定性。
 
 ## demo
 

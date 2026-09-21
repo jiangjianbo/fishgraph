@@ -214,9 +214,9 @@ const energyCanvas = $<HTMLCanvasElement>('energy');
 const statusEl = $('status');
 const graphSel = $<HTMLSelectElement>('graph');
 const algorithmSel = $<HTMLSelectElement>('algorithm');
+const directionSel = $<HTMLSelectElement>('direction');
 const gravitySel = $<HTMLSelectElement>('gravity');
 const accuracySel = $<HTMLSelectElement>('accuracy');
-const initSel = $<HTMLSelectElement>('init');
 const sliders = {
   L: $<HTMLInputElement>('L'),
   en: $<HTMLInputElement>('en'),
@@ -241,6 +241,7 @@ const gsOut = $<HTMLOutputElement>('gsv');
 function optionsFromUi(): LayoutOptions {
   return {
     algorithm: algorithmSel.value,
+    direction: directionSel.value as LayoutOptions['direction'],
     naturalLength: Number(sliders.L.value),
     edgeNodeRepulsion: Number(sliders.en.value),
     weakGravityRatio: Number(sliders.wg.value) / 100,
@@ -252,7 +253,6 @@ function optionsFromUi(): LayoutOptions {
     labelCollision: labelCollision.checked,
     gravity: gravitySel.value as LayoutOptions['gravity'],
     accuracy: accuracySel.value as LayoutOptions['accuracy'],
-    init: initSel.value as LayoutOptions['init'],
     seed: 42,
   };
 }
@@ -275,13 +275,7 @@ let paused = false;
 let iterations = 0;
 
 function rebuild(): void {
-  // 声明了分组的图默认用 force-group（纯力导向不含分组力学；仍可手动切回对比）
-  const graph = GRAPHS[graphSel.value]();
-  const hasGroups = (graph.subgraphs?.length ?? 0) + (graph.hiddenGroups?.length ?? 0) > 0;
-  if (hasGroups && algorithmSel.value === 'force-directed') {
-    algorithmSel.value = 'force-group';
-  }
-  layout = new ForceLayout(graph, optionsFromUi());
+  layout = new ForceLayout(GRAPHS[graphSel.value](), optionsFromUi());
   converged = false;
   iterations = 0;
   cam.x = 0;
@@ -375,7 +369,7 @@ for (const el of [...Object.values(sliders), labelCollision, gsSlider]) {
   });
 }
 coordsSel.addEventListener('change', () => rebuild()); // 坐标系修正是 run 终点行为
-for (const el of [algorithmSel, gravitySel, accuracySel]) {
+for (const el of [algorithmSel, directionSel, gravitySel, accuracySel]) {
   el.addEventListener('change', () => {
     layout?.updateOptions(optionsFromUi());
     converged = false;

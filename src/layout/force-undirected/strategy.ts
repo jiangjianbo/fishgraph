@@ -38,10 +38,11 @@ const DEFAULT_MAX_ITERATIONS = 4000;
 export class ForceUndirectedStrategy implements LayoutStrategy {
   readonly name: string = 'force-undirected';
 
-  private store: GraphStore;
-  private options: ResolvedLayoutOptions;
-  private params: DerivedParams;
-  private ctx: ForceContext;
+  // 派生算法（如 force-directed）需要访问图数据、派生参数与力场上下文。
+  protected store: GraphStore;
+  protected options: ResolvedLayoutOptions;
+  protected params: DerivedParams;
+  protected ctx: ForceContext;
   private solver: RelaxationSolver;
   private cs: CoordinateSystem;
   readonly energyHistory: number[] = [];
@@ -55,7 +56,7 @@ export class ForceUndirectedStrategy implements LayoutStrategy {
     this.store.applyNodeLabelSizes(true);
     this.params = deriveParams(options, store.elements.length);
     // 阶段 2/3：质点网格放置 + 膨胀压实（就地写回坐标）。
-    coarsePlacement(this.store.elements, this.store.adj, this.params.L);
+    this.applyCoarsePlacement();
     this.ctx = {
       elements: this.store.elements,
       edges: this.store.edges,
@@ -78,7 +79,27 @@ export class ForceUndirectedStrategy implements LayoutStrategy {
       energy: 0,
       maxForceUnit: 0,
     };
+    // 力场扩展点注入（派生算法覆写以挂接附加力学）。
+    this.configureExtensions();
     this.solver = new RelaxationSolver(this.ctx, this.solverOptions());
+  }
+
+  /**
+   * 接缝：粗布局时机（阶段 2/3）。默认用无向放置美学（undirectedHeuristics）；
+   * 派生算法覆写本方法以传入自己的 CoarseHeuristics（如层级引导放置）。
+   * 注意：构造期会被基类构造函数调用，覆写实现不得依赖子类字段初始化器
+   * （其在本构造体返回后才执行），所需数据应在方法内就地计算。
+   */
+  protected applyCoarsePlacement(): void {
+    coarsePlacement(this.store.elements, this.store.adj, this.params.L);
+  }
+
+  /**
+   * 接缝：力场扩展点注入。默认无扩展；派生算法覆写本方法向
+   * ctx.extensions 挂接附加力学（如方向流动势能）。构造期调用约束同上。
+   */
+  protected configureExtensions(): void {
+    this.ctx.extensions = {};
   }
 
   private solverOptions(): SolverOptions {
@@ -146,7 +167,10 @@ export class ForceUndirectedStrategy implements LayoutStrategy {
       this.options.hopRepulsionDecay,
       this.options.unrelatedRepulsion,
     );
-    coarsePlacement(this.store.elements, this.store.adj, this.params.L);
+    this.applyCoarsePlacement();
+    // 扩展点重注入：派生算法的 extensions 闭包可能捕获图结构快照
+    // （如边下标集合），增删节点/边后必须用新图重建。
+    this.configureExtensions();
     this.solver = new RelaxationSolver(this.ctx, this.solverOptions());
     this.solver.invalidate();
   }

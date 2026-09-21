@@ -99,7 +99,6 @@ export interface GraphSpec {
 
 export type GravityMode = 'pairwise' | 'centroid';
 export type AccuracyMode = 'exact' | 'barnes-hut';
-export type InitMode = 'bfs' | 'circle' | 'grid' | 'random';
 
 /**
  * 分阶段弛豫的力阶段（策略内部调度概念，供动画/调试观察进度）：
@@ -109,15 +108,22 @@ export type LayoutStage = 0 | 1 | 2 | 3;
 
 export interface LayoutOptions {
   /**
-   * 布局算法（策略名）。默认 'force-directed'（纯力导向，不含分组力学）。
-   * 内置：'force-directed' | 'force-group' | 'force-undirected' | 'circle'；
-   * 可用 registerStrategy 注册自定义策略。声明了 subgraphs/hiddenGroups 的图
-   * 请选 'force-group'（在力导向基础上叠加分组力学与组内精修）；
-   * 追求均匀分布、结构对称、无交叉的紧凑布局请选 'force-undirected'
+   * 布局算法（策略名）。默认 'force-undirected'（无向力导向基础算法）。
+   * 内置：'force-undirected' | 'force-directed' | 'circle'；
+   * 可用 registerStrategy 注册自定义策略。
+   * 'force-undirected'：均匀分布、结构对称、无交叉的紧凑布局
    * （质点网格粗布局 → 膨胀压实 → 短弛豫微调，见 doc/布局核心原则.md）。
+   * 'force-directed'：有向图布局 —— 在无向基础算法上派生，叠加层级解环、
+   * 软层级引导放置与方向流动势能，配合 direction 指定流动方向。
    * 运行时切换用 layout.setStrategy(name)（保留图数据，重新初始化位置）。
    */
   algorithm?: string;
+  /**
+   * 有向图流动方向（算法：force-directed，默认 'TB'）。
+   * 'TB' = 自顶向下（top→bottom，边 target 在 source 下方）；
+   * 'LR' = 自左向右（left→right，边 target 在 source 右方）。其他算法不消费。
+   */
+  direction?: 'TB' | 'LR';
   /**
    * 自然边长：相邻节点表面的平衡间距（不是中心距）。
    * 由核力常数校准导出：无张力时平衡间隙 g* = naturalLength。
@@ -210,8 +216,6 @@ export interface LayoutOptions {
   accuracy?: AccuracyMode;
   /** Barnes-Hut 张开判据：cellSize / distance < theta 时聚合。 */
   theta?: number;
-  /** 初始摆放方式。'bfs' 按度数优先、逐层环状增量放置（推荐）。 */
-  init?: InitMode;
   /** 随机初始化 / 抖动的种子，固定则结果可复现。 */
   seed?: number;
   /** 单步最大位移（相对 naturalLength 的比例）。 */
@@ -220,12 +224,6 @@ export interface LayoutOptions {
 
 export interface RunOptions {
   maxIterations?: number;
-  /**
-   * 分阶段弛豫（默认 true，对应"先排节点 → 加连线微调 → 加边文字 → 加节点文字"）：
-   * 阶段 0 只有力场（斥力+弱引力），阶段 1 加入连线，阶段 2 加入避让与边文字，
-   * 阶段 3 节点文字生效（节点有效半径变大）。false 则一步到位全量力场。
-   */
-  staged?: boolean;
   /** 每个被接受的步进后回调（用于动画）。 */
   onTick?: () => void;
 }

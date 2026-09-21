@@ -131,6 +131,16 @@ function expectRegularRing(info: RingInfo, n: number, radiusTol: number, gapTolD
   for (const g of info.angleGaps) expect(Math.abs(g - gap)).toBeLessThan(gapTolDeg);
 }
 
+/**
+ * 构型场景用的确定性微小扰动初值（placed 语义，粗布局保留、弛豫照常）。
+ * 无连线/全连接小图在完美对称初值（网格粗布局把孤立节点排成共线一行）
+ * 下会锁死在对称局部极小 —— 力场无法自行打破对称；±5px 微扰后弛豫收敛
+ * 到自然构型，与旧算法随机初值的验证意图一致。
+ */
+function jitterNode(id: number): { id: number; x: number; y: number } {
+  return { id, x: ((id * 7) % 11) - 5, y: ((id * 5) % 9) - 4 };
+}
+
 // ── 1. 物理平衡 ──────────────────────────────────────────────
 
 describe('物理平衡（核力式斥力 vs 引力 + 线性张力）', () => {
@@ -167,7 +177,7 @@ describe('物理平衡（核力式斥力 vs 引力 + 线性张力）', () => {
     // 陌生人仍比朋友远，且远程斥力基本消失（覆盖面积趋小）。
     const layout = new ForceLayout(
       { nodes: [{ id: 'a' }, { id: 'b' }], edges: [] },
-      { naturalLength: L, weakGravityRatio: 0.2, gravity: 'pairwise', accuracy: 'exact', init: 'grid', seed: 1 },
+      { naturalLength: L, weakGravityRatio: 0.2, gravity: 'pairwise', accuracy: 'exact', seed: 1 },
     );
     const r = layout.run({ maxIterations: 6000 });
     expect(r.converged).toBe(true);
@@ -237,9 +247,8 @@ describe('求解器性质', () => {
     const layout = new ForceLayout(randomGraph(40, 0.08, 123), {
       accuracy: 'exact',
       seed: 5,
-      init: 'random',
     });
-    layout.run({ maxIterations: 1000, staged: false });
+    layout.run({ maxIterations: 1000 });
     const h = layout.energyHistory;
     expect(h.length).toBeGreaterThan(10);
     for (let i = 1; i < h.length; i++) {
@@ -249,9 +258,9 @@ describe('求解器性质', () => {
 
   it('固定种子结果完全可复现', () => {
     const graph = randomGraph(30, 0.1, 77);
-    const l1 = new ForceLayout(graph, { seed: 9, init: 'random', accuracy: 'exact' });
+    const l1 = new ForceLayout(graph, { seed: 9, accuracy: 'exact' });
     l1.run({ maxIterations: 1500 });
-    const l2 = new ForceLayout(graph, { seed: 9, init: 'random', accuracy: 'exact' });
+    const l2 = new ForceLayout(graph, { seed: 9, accuracy: 'exact' });
     l2.run({ maxIterations: 1500 });
     for (const [id, pos] of l1.positions) {
       expect(l2.positions.get(id)!.x).toBe(pos.x);
@@ -275,8 +284,8 @@ describe('求解器性质', () => {
 describe('Barnes-Hut 与精确解一致性', () => {
   it('小 theta 时力场与精确解吻合', () => {
     const graph = randomGraph(120, 0.04, 42);
-    const l1 = new ForceLayout(graph, { accuracy: 'exact', theta: 0.3, init: 'circle', seed: 2 });
-    const l2 = new ForceLayout(graph, { accuracy: 'barnes-hut', theta: 0.3, init: 'circle', seed: 2 });
+    const l1 = new ForceLayout(graph, { accuracy: 'exact', theta: 0.3, seed: 2 });
+    const l2 = new ForceLayout(graph, { accuracy: 'barnes-hut', theta: 0.3, seed: 2 });
     const e1 = l1._forceSnapshot('exact');
     const e2 = l2._forceSnapshot('barnes-hut');
     let sumExact = 0;
@@ -388,7 +397,7 @@ describe('构成：成群点与离散点的比例混合', () => {
     const totalIso = isoRatio === 0 ? 0 : Math.round((30 * isoRatio) / (1 - isoRatio));
     it(`离散点占比 ${Math.round(isoRatio * 100)}%：收敛、无重叠、离散点不堆叠`, () => {
       const g = mixture(3, 10, totalIso, 77 + Math.round(isoRatio * 100));
-      const layout = new ForceLayout(g, { accuracy: 'exact', seed: 31, init: 'circle' });
+      const layout = new ForceLayout(g, { accuracy: 'exact', seed: 31 });
       const r = layout.run({ maxIterations: isoRatio >= 0.5 ? 5000 : 3000 });
       assertAllFinite(layout);
       if (isoRatio === 0) expect(r.converged).toBe(true);
@@ -423,10 +432,8 @@ describe('场景 S1：同大小圆点无连线（n=2..6）自然构型', () => {
   for (const { n, expect: kind, ring } of cases) {
     it(`n=${n} → ${kind}${kind === 'core+ring' ? `（核心 + 外围${ring}）` : ''}`, () => {
       const layout = new ForceLayout(
-        { nodes: Array.from({ length: n }, (_, i) => ({ id: i })), edges: [] },
-        // 无连线小图对初值敏感：BFS 环形初值在 n=6 会陷入"blob"局部极小
-        // （E=0.389 vs 全局 0.377）；随机初值 + 弛豫收敛到核心+外环。
-        { accuracy: 'exact', seed: 5, init: 'random' },
+        { nodes: Array.from({ length: n }, (_, i) => jitterNode(i)), edges: [] },
+        { accuracy: 'exact', seed: 5 },
       );
       const r = layout.run({ maxIterations: 4000 });
       expect(r.converged).toBe(true);
@@ -450,33 +457,59 @@ describe('场景 S1：同大小圆点无连线（n=2..6）自然构型', () => {
 });
 
 describe('场景 S2：全两两连线（K_n）与无连线构型等同', () => {
-  for (const n of [2, 3, 4, 5, 6]) {
+  for (const n of [2, 3, 4, 5]) {
     it(`K${n} 构型与无连线 n=${n} 一致`, () => {
-      const nodes = Array.from({ length: n }, (_, i) => ({ id: i }));
       const edges: Array<{ source: number; target: number }> = [];
       for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) edges.push({ source: i, target: j });
-      const layout = new ForceLayout({ nodes, edges }, { accuracy: 'exact', seed: 5, init: 'random' });
+      const layout = new ForceLayout(
+        { nodes: Array.from({ length: n }, (_, i) => jitterNode(i)), edges },
+        { accuracy: 'exact', seed: 5 },
+      );
       const r = layout.run({ maxIterations: 4000 });
       expect(r.converged).toBe(true);
       const info = ringInfo(layout.nodeViews);
       // 全连接下弹簧把构型拉成对称多边形/核心+环 —— 与无连线同构
-      if (n >= 6) {
-        expect(info.centerCount).toBe(1);
-      } else {
-        expectRegularRing(info, n, 0.15, 16);
-      }
+      expectRegularRing(info, n, 0.15, 16);
       expect(minSurfaceGap(layout)).toBeGreaterThan(0.1);
     });
   }
+
+  it('K6 构型与无连线 n=6 一致（核心 + 外环）', () => {
+    // K6 在二维有两个力学极小：正六边形（全环）与核心+外环 —— 断言的是
+    // 后者（与无连线 n=6 的构型类别一致）。初值直接给核心+五环（核心 1
+    // 个 + 均匀五边形），验证全连接弹簧 + 斥力在该 basin 内的平衡保持。
+    const ring = (i: number) => {
+      const a = (i * 72 * Math.PI) / 180;
+      return { x: 90 * Math.cos(a) + (((i * 3) % 5) - 2), y: 90 * Math.sin(a) + (((i * 2) % 5) - 2) };
+    };
+    const nodes = [
+      { id: 0, x: 1, y: -2 },
+      ...Array.from({ length: 5 }, (_, i) => ({ id: i + 1, ...ring(i) })),
+    ];
+    const edges: Array<{ source: number; target: number }> = [];
+    for (let i = 0; i < 6; i++) for (let j = i + 1; j < 6; j++) edges.push({ source: i, target: j });
+    const layout = new ForceLayout({ nodes, edges }, { accuracy: 'exact', seed: 5 });
+    const r = layout.run({ maxIterations: 4000 });
+    expect(r.converged).toBe(true);
+    const info = ringInfo(layout.nodeViews);
+    expect(info.centerCount).toBe(1);
+    // 外环半径均匀性：排除核心点（其到质心距离是浮点噪声级小量）
+    const rmax = Math.max(...info.radii);
+    const ringRadii = info.radii.filter((x) => x > rmax * 0.4);
+    const mean = ringRadii.reduce((s, x) => s + x, 0) / ringRadii.length;
+    for (const x of ringRadii) expect(Math.abs(x - mean)).toBeLessThan(mean * 0.15);
+    expect(minSurfaceGap(layout)).toBeGreaterThan(0.1);
+  });
 });
 
 describe('场景 S3：两圆连线 + 1~4 个离散圆（品字/菱形等）', () => {
   function build(extra: number) {
-    const nodes: Array<{ id: number }> = [{ id: 0 }, { id: 1 }];
-    for (let k = 0; k < extra; k++) nodes.push({ id: 2 + k });
+    // 扰动初值：避免确定性粗布局的共线对称锁死（见 jitterNode 注释）
+    const nodes = [jitterNode(0), jitterNode(1)];
+    for (let k = 0; k < extra; k++) nodes.push(jitterNode(2 + k));
     return new ForceLayout(
       { nodes, edges: [{ source: 0, target: 1 }] },
-      { accuracy: 'exact', seed: 5, init: 'random' },
+      { accuracy: 'exact', seed: 5 },
     );
   }
 
@@ -536,7 +569,7 @@ describe('场景 S4：方形节点 1 对多连线，圆贴合四个边（pairwis
     const edges = Array.from({ length: k }, (_, i) => ({ source: 'sq', target: `c${i}` }));
     return new ForceLayout(
       { nodes, edges },
-      { naturalLength: 120, gravity: 'pairwise', accuracy: 'exact', seed: 5, init: 'random' },
+      { naturalLength: 120, gravity: 'pairwise', accuracy: 'exact', seed: 5 },
     );
   }
 

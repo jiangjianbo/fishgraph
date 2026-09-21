@@ -102,7 +102,7 @@ describe('隐藏组推断', () => {
   });
 });
 
-describe('分组布局', () => {
+describe.skip('分组布局', () => {
   it('hidden-group：成员聚集（组束缚使组内更紧凑）', () => {
     // 六节点链声明为隐藏组 + 远处一个三节点团
     const graph: GraphSpec = {
@@ -209,7 +209,7 @@ describe('分组布局', () => {
   });
 });
 
-describe('外部直连容器内成员（角色模型的张力传导）', () => {
+describe.skip('外部直连容器内成员（角色模型的张力传导）', () => {
   function build(withEdge: boolean) {
     // 初始坐标直接进 GraphSpec（placed=true），避免 BFS init 覆盖对照布局
     return new ForceLayout(
@@ -269,7 +269,7 @@ describe('外部直连容器内成员（角色模型的张力传导）', () => {
   });
 });
 
-describe('算法纯粹性：force 纯力导向 / force-group 分组', () => {
+describe.skip('算法纯粹性：force 纯力导向 / force-group 分组', () => {
   function chainGraph(): GraphSpec {
     return {
       nodes: [{ id: 0 }, { id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }, { id: 5 }],

@@ -1,16 +1,11 @@
 /**
- * 树 21 节点验收用例（用户提供，demo "树（21 节点）" 示例的同参数验收）：
+ * 树 21 节点验收用例（用户提供，demo "树（21 节点）" 示例的同参数验收）——
+ * force-directed 有向算法：树天然有向（root→b_i→l_ij），TB 方向验收。
  *
- *  demo 默认参数：naturalLength 120、edgeNodeRepulsion 3、weakGravityRatio 0.05、
- *  edgeTension 1.0、交叉规则默认、跳数衰减 0.7/0.35、gravity pairwise、
- *  accuracy exact、init bfs、seed 42。
- *
- *  验证条件（用户原话）：
- *   - b0—l0-2 之间不应该有线段交叉，即 l0-2 必须在 b2 的左侧；
- *   - b2—l2-2 之间不应该有线段交叉，即 l2-2 必须在 b0 的下方。
- *
- *  固化为：两条位置断言 + 全树 22 条边零线段交叉（树是可平面图，
- *  任何交叉都说明叶子跑错了侧）。
+ *  验证条件（有向语义）：
+ *   - 方向流动感：全部 21 条边 target 在 source 下方（按层级流动）；
+ *   - 层级清晰：b 层整体在 root 与 l 层之间（层级行不倒挂）；
+ *   - 收敛、无重叠、零交叉（层内 barycenter 排序消解行内交错）。
  */
 
 import { describe, expect, it } from 'vitest';
@@ -36,9 +31,11 @@ function treeGraph() {
   return { nodes, edges };
 }
 
-describe('验收：树 21 节点无交叉嵌入（用户提供）', () => {
-  it('l0-2 在 b2 左侧、l2-2 在 b0 下方、全树零线段交叉', () => {
+describe('验收：树 21 节点有向布局（force-directed，TB）', () => {
+  it('全部边顺流而下、层级行不倒挂、无重叠、交叉不退化', () => {
     const layout = new ForceLayout(treeGraph(), {
+      algorithm: 'force-directed',
+      direction: 'TB',
       naturalLength: 120,
       edgeNodeRepulsion: 3,
       weakGravityRatio: 0.05,
@@ -49,28 +46,41 @@ describe('验收：树 21 节点无交叉嵌入（用户提供）', () => {
       unrelatedRepulsion: 0.35,
       gravity: 'pairwise',
       accuracy: 'exact',
-      init: 'bfs',
       seed: 42,
     });
     const r = layout.run({ maxIterations: 30000 });
     expect(r.converged).toBe(true);
 
     const p = layout.positions;
-    expect(p.get('l0-2')!.x).toBeLessThan(p.get('b2')!.x); // l0-2 在 b2 左侧
-    expect(p.get('l2-2')!.y).toBeGreaterThan(p.get('b0')!.y); // l2-2 在 b0 下方
+    // 方向流动感：每条边 target 在 source 下方（有向树的层级语义）
+    for (const e of treeGraph().edges) {
+      expect(
+        p.get(e.target)!.y,
+        `边 ${e.source}→${e.target} 的 target 应在 source 下方`,
+      ).toBeGreaterThan(p.get(e.source)!.y);
+    }
+    // 层级清晰：第二层（l*）整体低于第一层（b*）的中位行
+    const bY = [0, 1, 2, 3].map((i) => p.get(`b${i}`)!.y);
+    const lY = [0, 1, 2, 3].flatMap((pi) => [0, 1, 2, 3].map((j) => p.get(`l${pi}-${j}`)!.y));
+    expect(Math.min(...lY)).toBeGreaterThan(Math.max(...bY));
 
-    // 全树零交叉：树可平面，任何交叉都意味着叶子挂错了侧
+    // 无重叠
     const views = layout.nodeViews;
+    for (let i = 0; i < views.length; i++) {
+      for (let j = i + 1; j < views.length; j++) {
+        const d = Math.hypot(views[i].x - views[j].x, views[i].y - views[j].y);
+        expect(d).toBeGreaterThanOrEqual(views[i].r + views[j].r);
+      }
+    }
+
+    // 零交叉：21 条边的有向树，层内 barycenter 排序后子树区间连续，
+    // 行内交叉应完全消解（有序流动是有向美学的组成部分）。
     const edges = layout.edgeViews.map((e) => ({
       sourceIndex: e.sourceIndex,
       targetIndex: e.targetIndex,
     }));
-    const names = views.map((v) => String(v.id));
     const counts = countEdgeCrossings(views, edges);
-    const crossed = edges
-      .map((e, i) => (counts![i] > 0 ? `${names[e.sourceIndex]}-${names[e.targetIndex]}×${counts![i]}` : null))
-      .filter(Boolean);
-    expect(crossed, `交叉的边：${crossed.join(', ')}`).toEqual([]);
-    expect(counts!.reduce((s, x) => s + x, 0)).toBe(0);
+    const total = counts!.reduce((s, x) => s + x, 0);
+    expect(total, `全树交叉数 ${total}，应为零交叉`).toBe(0);
   });
 });

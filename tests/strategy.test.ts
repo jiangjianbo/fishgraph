@@ -26,10 +26,11 @@ function minSurfaceGap(layout: ForceLayout): number {
 
 describe('布局策略（策略模式）', () => {
   it('注册表：内置策略已自注册；未知策略抛错并提示可用项', () => {
+    expect(listStrategies()).toContain('force-undirected');
     expect(listStrategies()).toContain('force-directed');
     expect(listStrategies()).toContain('circle');
     expect(() => new ForceLayout({ nodes: [{ id: 1 }], edges: [] }, { algorithm: 'nope' })).toThrow(
-      /nope.*force-directed/s,
+      /nope.*force-undirected/s,
     );
   });
 
@@ -72,7 +73,7 @@ describe('布局策略（策略模式）', () => {
     }
     expect(minSurfaceGap(layout)).toBeGreaterThan(0.1);
 
-    layout.setStrategy('force-directed');
+    layout.setStrategy('force-undirected');
     const r1 = layout.run({ maxIterations: 3000 });
     expect(r1.converged).toBe(true);
     expect(minSurfaceGap(layout)).toBeGreaterThan(0.1);

@@ -63,7 +63,9 @@ describe('grid 坐标系（布局后网格化）', () => {
     expect(run()).toBe(run());
   });
 
-  it('subgraph 成员吸附后仍在包含区域内', () => {
+  // force-group 算法已被移除（待重写），subgraph 成员钳制语义随之禁用；
+  // 重写 force-group 后恢复本用例（用户决定：保留用例不删除）。
+  it.skip('subgraph 成员吸附后仍在包含区域内', () => {
     const graph: GraphSpec = {
       nodes: [{ id: 'in1' }, { id: 'in2' }, { id: 'ext' }],
       edges: [{ source: 'in1', target: 'in2' }, { source: 'sub', target: 'ext' }],

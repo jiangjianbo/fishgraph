@@ -14,7 +14,7 @@
  * 并渲染 output/mermaid-subgraph.svg 供目视比对。
  */
 
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { ForceLayout } from '../src/index.js';
 import type { GraphSpec } from '../src/types.js';
 
@@ -80,19 +80,25 @@ function memberGap(layout: ForceLayout, a: string, b: string): number {
   return Math.hypot(pa.x - pb.x, pa.y - pb.y) - ra - rb;
 }
 
-describe('mermaid 架构图：subgraph 分组布局', () => {
-  const layout = new ForceLayout(buildGraph(), {
-    algorithm: 'force-group',
-    naturalLength: L,
-    edgeNodeRepulsion: 3,
-    weakGravityRatio: 0.05,
-    edgeTension: 1.0,
-    gravity: 'pairwise',
-    accuracy: 'exact',
-    init: 'bfs',
-    seed: 42,
+describe.skip('mermaid 架构图：subgraph 分组布局（force-group 待重写）', () => {
+  // vitest 的 describe.skip factory 体在收集期也会同步执行，而 force-group
+  // 算法已移除（待重写）—— 构造必须延后到用例真正运行前，否则收集期抛
+  // "unknown layout algorithm"。重写 force-group 后恢复本 describe 时同理。
+  let layout!: ForceLayout;
+  let r!: ReturnType<ForceLayout['run']>;
+  beforeEach(() => {
+    layout = new ForceLayout(buildGraph(), {
+      algorithm: 'force-group',
+      naturalLength: L,
+      edgeNodeRepulsion: 3,
+      weakGravityRatio: 0.05,
+      edgeTension: 1.0,
+      gravity: 'pairwise',
+      accuracy: 'exact',
+      seed: 42,
+    });
+    r = layout.run({ maxIterations: 8000 });
   });
-  const r = layout.run({ maxIterations: 8000 });
 
   it('收敛或达到平衡构型，全部坐标有限，节点不重叠', () => {
     expect(r.iterations).toBeGreaterThan(0);

@@ -1,24 +1,26 @@
 /**
- * 质点网格粗布局 + 膨胀压实（doc/布局核心原则.md 无向图流水线的阶段 2/3）。
+ * 质点网格粗布局 + 膨胀压实（doc/布局核心原则.md 流水线的阶段 2/3）。
+ *
+ * 主流程（连通生长 → 环形扩搜 → 死锁插行列 → 压实映射）与方向无关，
+ * 全部在此实现；与"放置美学"相关的四个决策点抽为 CoarseHeuristics
+ * 钩子（搜索锚点 / 候选评分 / 死锁判定 / 死锁解法），由具体算法提供：
+ *  - undirectedHeuristics（本文件）：无向图 —— 邻居均值锚点、
+ *    张力−环周长评分、四方向最小移动插行列；
+ *  - 有向图（layout/force-directed/）：层级行锚点、软层级惩罚评分、
+ *    优先插列 —— 见 doc/布局核心原则.md 有向图流水线。
  *
  * 阶段 2（质点弹性网格放置）：所有节点一律视为 1×1 无面积质点，碰撞检查
- * 退化为格子占用查询（O(1)）。节点按度数降序逐个放置：度数最高者占据
- * 网格中心 (0,0)；后续节点以已放置邻居的格坐标为中心环形扩搜空格，
- * 按综合得分择优：
- *     score = 张力项 + w·环周长项
- *   张力项   = Σ 到已放置邻居的曼哈顿距离（连线像橡皮筋把节点拉向邻居）；
- *   环周长项 = 与候选格贴邻且图上相邻的已放置邻居对的环周长奖励 ——
- *              把节点拉进已放置邻居的"夹角"里，消灭长边穿透。
- * 搜索预算内找不到贴近邻居的空格（候选点周围被完全占满）时触发
- * 死锁机制：insertRow/insertColumn 把已放置节点整体推开一格，强行挤出
+ * 退化为格子占用查询（O(1)）。节点按「度数优先连通生长」（Prim 式候选集）
+ * 逐个放置：度数最高者占据网格中心 (0,0)；后续节点以 heuristics.anchor
+ * 为中心环形扩搜空格，按 heuristics.score 择优。搜索预算内无合格空格时
+ * 触发死锁机制：heuristics.deadlock 把已放置节点整体推开一格，强行挤出
  * 新空间 —— 保障放置 100% 不死锁。
  *
- * 阶段 3（轴向膨胀与四方向压实）：质点网格坐标不含真实尺寸。压实阶段
- * 收集占用行/列并删除全部空行空列（推箱子式消灭大片空白），再按行/列
- * 上的最大包围半径计算相邻占用行/列的物理间距 —— 任意相邻占用行（列）
- * 的物理距离 ≥ 两侧最大半径和 + 目标间隙，因此任何两个节点的中心距
- * 都不小于半径和 + 间隙（无重叠由构造保证，不依赖弛豫兜底）。最后把
- * 网格坐标映射为连续坐标写回 x/y。
+ * 阶段 3（轴向膨胀与压实）：压实阶段收集占用行/列并删除全部空行空列
+ * （推箱子式消灭大片空白），再按行/列上的最大包围半径计算相邻占用行/列
+ * 的物理间距 —— 任意相邻占用行（列）的物理距离 ≥ 两侧最大半径和 + 目标
+ * 间隙，因此任何两个节点的中心距都不小于半径和 + 间隙（无重叠由构造
+ * 保证，不依赖弛豫兜底）。最后把网格坐标映射为连续坐标写回 x/y。
  *
  * 确定性：放置顺序、环扩展次序、死锁方向选择全部使用固定规则，
  * 同一组输入（含 seed 派生的 placed 反算）产出逐位一致的结果。
@@ -26,13 +28,8 @@
 
 import type { LayoutElement } from '../../graph/store.js';
 
-/** 环周长奖励权重（相对张力项）：把节点拉进"夹角"的强度。 */
-const RING_BONUS = 0.5;
-/** 邻居环形扩搜的半径上限（格）。超出仍无合格空格即触发插行列。 */
+/** 邻居环形扩搜的半径上限（格）。超出仍无合格空格即触发死锁机制。 */
 const SEARCH_RING_CAP = 5;
-/** 死锁判定：最佳空格张力超过该阈值视为候选点周围被完全占满。 */
-const DEADLOCK_TENSION_FACTOR = 2;
-const DEADLOCK_TENSION_EXTRA = 2;
 /** 压实后相邻占用行/列的目标表面间隙（× naturalLength）。 */
 const COMPACTION_GAP_RATIO = 0.3;
 
@@ -41,7 +38,7 @@ function cellKey(gx: number, gy: number): string {
   return `${gx},${gy}`;
 }
 
-interface Cell {
+export interface Cell {
   gx: number;
   gy: number;
 }
@@ -49,8 +46,22 @@ interface Cell {
 /** 已放置节点的格坐标（下标 → 格）。 */
 type GridPos = Array<Cell | null>;
 
+/** 插行列的方向（沿该方向把占用格整体推开一格）。 */
+export interface PushDir {
+  dx: 0 | 1 | -1;
+  dy: 0 | 1 | -1;
+}
+
+/** 四方向（+x/−x/+y/−y）：无向图死锁的候选方向集。 */
+export const PUSH_DIRS_ALL: readonly PushDir[] = [
+  { dx: 1, dy: 0 },
+  { dx: -1, dy: 0 },
+  { dx: 0, dy: 1 },
+  { dx: 0, dy: -1 },
+];
+
 /** 质点网格：占用格（键 → 元素下标）+ 包围盒。 */
-class PointGrid {
+export class PointGrid {
   readonly occ = new Map<string, number>();
   minGx = 0;
   maxGx = 0;
@@ -70,53 +81,18 @@ class PointGrid {
   }
 }
 
-/** 计算候选格的张力项：到全部已放置邻居的曼哈顿距离和。 */
-function tension(gx: number, gy: number, neighbors: Cell[]): number {
-  let sum = 0;
-  for (const u of neighbors) {
-    sum += Math.abs(gx - u.gx) + Math.abs(gy - u.gy);
-  }
-  return sum;
-}
-
 /**
- * 环周长奖励：与候选格 8 邻接的已放置邻居中，图上相邻的对构成环 ——
- * 每一对奖励一个 RING_BONUS（三角形环的周长 3 格已接近下限）。
+ * 死锁机制：在锚点 (ux, uy) 的 dirs 中某一侧插入一行/列，把该侧所有
+ * 已放置节点整体推开一格，挤出新空格并返回其坐标。方向取需要移动的
+ * 占用格最少的一侧（平局按 dirs 给定序），保证确定性。
  */
-function ringBonus(
-  gx: number,
-  gy: number,
-  neighborIdx: number[],
-  posOf: GridPos,
-  adjacency: Array<Set<number>>,
-): number {
-  const touching: number[] = [];
-  for (const u of neighborIdx) {
-    const p = posOf[u]!;
-    if (Math.max(Math.abs(p.gx - gx), Math.abs(p.gy - gy)) === 1) touching.push(u);
-  }
-  let bonus = 0;
-  for (let a = 0; a < touching.length; a++) {
-    for (let b = a + 1; b < touching.length; b++) {
-      if (adjacency[touching[a]].has(touching[b])) bonus += RING_BONUS;
-    }
-  }
-  return bonus;
-}
-
-/**
- * 死锁机制：在锚点 (ux, uy) 的某一侧插入一行/列，把该侧所有已放置
- * 节点整体推开一格，挤出新空格并返回其坐标。方向取需要移动的占用格
- * 最少的一侧（平局按 +x/-x/+y/-y 固定序），保证确定性。
- */
-function insertLine(grid: PointGrid, ux: number, uy: number): Cell {
-  const dirs: Array<{ dx: 0 | 1 | -1; dy: 0 | 1 | -1 }> = [
-    { dx: 1, dy: 0 },
-    { dx: -1, dy: 0 },
-    { dx: 0, dy: 1 },
-    { dx: 0, dy: -1 },
-  ];
-  let bestDir = dirs[0];
+export function insertLine(
+  grid: PointGrid,
+  ux: number,
+  uy: number,
+  dirs: readonly PushDir[] = PUSH_DIRS_ALL,
+): Cell {
+  let bestDir = dirs[0]!;
   let bestCost = Infinity;
   for (const dir of dirs) {
     let cost = 0;
@@ -154,19 +130,131 @@ function insertLine(grid: PointGrid, ux: number, uy: number): Cell {
     grid.minGy = Math.min(grid.minGy, gy);
     grid.maxGy = Math.max(grid.maxGy, gy);
   }
-  return { gx: ux + bestDir.dx, gy: uy + bestDir.dy };
+  // 推开条件含锚点本身（>=），锚点的占用者总被移走 —— 挤出的新格就是
+  // 锚点格自己（锚点本来为空时同样成立）。绝不能返回推挤方向上的相邻格：
+  // 那是锚点占用者的新位置，写回时会把已放置节点从占用表里覆盖掉。
+  return { gx: ux, gy: uy };
 }
 
-/** 放置一个已放置邻居的节点：环形扩搜 + 评分择优，必要时插行列解死锁。 */
-function placeNearNeighbors(
+/** 放置差异钩子：主流程在四个决策点上向具体算法征求答案。 */
+export interface CoarseHeuristics {
+  /** 搜索锚点（环形扩搜的中心格）。 */
+  anchor(v: number, neighbors: readonly Cell[]): Cell;
+  /**
+   * 候选格评分（越小越优）。neighbors 与 neighborIndices 平行：
+   * 已放置邻居的格坐标及其元素下标（可查 adjacency 判断图上相邻）。
+   */
+  score(
+    v: number,
+    gx: number,
+    gy: number,
+    neighbors: readonly Cell[],
+    neighborIndices: readonly number[],
+  ): number;
+  /**
+   * 死锁判定：是否已差到该触发插列。v 为正在放置的元素；theoreticalMin
+   * 为全部邻居贴邻时的得分下界（主流程计算）；bestCell 为当前最佳空格
+   * （搜索预算内一个空格都没有时为 null —— 这总是死锁）。综合分差大但
+   * 空格尚可的候选不一定算死锁（插列是"挤出新空间"的手段，要不要推挤
+   * 由具体算法的放置美学决定）。
+   */
+  isDeadlock(
+    v: number,
+    bestScore: number,
+    theoreticalMin: number,
+    neighborCount: number,
+    bestCell: Cell | null,
+  ): boolean;
+  /** 死锁解法：以最近邻居格为锚整体推开已放置节点，返回挤出的新格。 */
+  deadlock(grid: PointGrid, anchor: Cell): Cell;
+  /**
+   * 新分量种子的落格（可选）。缺省 placeOrphan：贴已放置区域右缘外侧。
+   * 有向算法覆写它把种子放到自己的层级行上 —— 否则微调期的流动弹簧
+   * 要把种子从任意落点硬拉回层级，拉不到位就在上游行卡住（逆流）。
+   */
+  placeSeed?(grid: PointGrid, v: number): Cell;
+}
+
+/**
+ * 无向图放置美学（默认实现，doc/布局核心原则.md 无向图阶段 2）：
+ *  - 锚点 = 已放置邻居的格坐标均值；
+ *  - 评分 = 张力项（到全部已放置邻居的曼哈顿距离和，连线像橡皮筋）
+ *    − 环周长奖励（与候选格 8 邻接且图上相邻的邻居对，把节点拉进
+ *    "夹角"里消灭长边穿透）；
+ *  - 死锁 = 最佳得分超过 2×邻居数+2；解法 = 四方向最小移动插行列。
+ */
+export function undirectedHeuristics(adjacency: Array<Set<number>>): CoarseHeuristics {
+  const RING_BONUS = 0.5;
+  const DEADLOCK_TENSION_FACTOR = 2;
+  const DEADLOCK_TENSION_EXTRA = 2;
+
+  /** 计算候选格的张力项。 */
+  const tension = (gx: number, gy: number, neighbors: readonly Cell[]): number => {
+    let sum = 0;
+    for (const u of neighbors) {
+      sum += Math.abs(gx - u.gx) + Math.abs(gy - u.gy);
+    }
+    return sum;
+  };
+
+  /**
+   * 环周长奖励：与候选格 8 邻接的已放置邻居中，图上相邻的对构成环 ——
+   * 每一对奖励一个 RING_BONUS（三角形环的周长 3 格已接近下限）。
+   */
+  const ringBonus = (
+    gx: number,
+    gy: number,
+    neighborCells: readonly Cell[],
+    neighborIdx: readonly number[],
+  ): number => {
+    const touching: number[] = [];
+    for (let k = 0; k < neighborIdx.length; k++) {
+      const p = neighborCells[k]!;
+      if (Math.max(Math.abs(p.gx - gx), Math.abs(p.gy - gy)) === 1) touching.push(neighborIdx[k]!);
+    }
+    let bonus = 0;
+    for (let a = 0; a < touching.length; a++) {
+      for (let b = a + 1; b < touching.length; b++) {
+        if (adjacency[touching[a]!].has(touching[b]!)) bonus += RING_BONUS;
+      }
+    }
+    return bonus;
+  };
+
+  return {
+    anchor(_v, neighbors) {
+      return {
+        gx: Math.round(neighbors.reduce((s, p) => s + p.gx, 0) / neighbors.length),
+        gy: Math.round(neighbors.reduce((s, p) => s + p.gy, 0) / neighbors.length),
+      };
+    },
+    score(v, gx, gy, neighbors, neighborIndices) {
+      return tension(gx, gy, neighbors) - ringBonus(gx, gy, neighbors, neighborIndices);
+    },
+    isDeadlock(_v, bestScore, _theoreticalMin, neighborCount, bestCell) {
+      return (
+        bestCell === null ||
+        bestScore > DEADLOCK_TENSION_FACTOR * neighborCount + DEADLOCK_TENSION_EXTRA
+      );
+    },
+    deadlock(grid, anchor) {
+      return insertLine(grid, anchor.gx, anchor.gy);
+    },
+  };
+}
+
+/** 放置一个已放置邻居的节点：环形扩搜 + 评分择优，必要时走死锁机制。 */
+function placeWithHeuristics(
   grid: PointGrid,
-  neighborIdx: number[],
+  v: number,
+  placedNeighborIdx: number[],
   posOf: GridPos,
-  adjacency: Array<Set<number>>,
+  heuristics: CoarseHeuristics,
 ): Cell {
-  const neighbors = neighborIdx.map((u) => posOf[u]!);
-  const cx = Math.round(neighbors.reduce((s, p) => s + p.gx, 0) / neighbors.length);
-  const cy = Math.round(neighbors.reduce((s, p) => s + p.gy, 0) / neighbors.length);
+  const neighbors = placedNeighborIdx.map((u) => posOf[u]!);
+  const anchor = heuristics.anchor(v, neighbors);
+  const cx = anchor.gx;
+  const cy = anchor.gy;
   const theoreticalMin = neighbors.length;
   let bestCell: Cell | null = null;
   let bestScore = Infinity;
@@ -178,8 +266,7 @@ function placeNearNeighbors(
         const gx = cx + dx;
         const gy = cy + dy;
         if (grid.has(gx, gy)) continue;
-        const score =
-          tension(gx, gy, neighbors) - ringBonus(gx, gy, neighborIdx, posOf, adjacency);
+        const score = heuristics.score(v, gx, gy, neighbors, placedNeighborIdx);
         if (score < bestScore) {
           bestCell = { gx, gy };
           bestScore = score;
@@ -191,25 +278,27 @@ function placeNearNeighbors(
     if (ring >= 3 && bestCell) break;
   }
 
-  const deadlockLimit = DEADLOCK_TENSION_FACTOR * neighbors.length + DEADLOCK_TENSION_EXTRA;
-  if (!bestCell || bestScore > deadlockLimit) {
-    // 候选点周围被完全占满：插行列挤出新空间。
-    let anchor = neighbors[0];
-    let anchorDist = Infinity;
+  if (
+    !bestCell ||
+    heuristics.isDeadlock(v, bestScore, theoreticalMin, neighbors.length, bestCell)
+  ) {
+    // 候选点周围被完全占满：按最近邻居格为锚插行列挤出新空间。
+    let near = neighbors[0]!;
+    let nearDist = Infinity;
     for (const p of neighbors) {
       const d = Math.abs(p.gx - cx) + Math.abs(p.gy - cy);
-      if (d < anchorDist) {
-        anchorDist = d;
-        anchor = p;
+      if (d < nearDist) {
+        nearDist = d;
+        near = p;
       }
     }
-    bestCell = insertLine(grid, anchor.gx, anchor.gy);
+    bestCell = heuristics.deadlock(grid, near);
   }
-  return bestCell;
+  return bestCell!;
 }
 
 /** 放置孤立节点/新分量首节点：贴着已放置区域右边缘外侧，从顶行向下找空格。 */
-function placeOrphan(grid: PointGrid): Cell {
+export function placeOrphan(grid: PointGrid): Cell {
   if (grid.occ.size === 0) return { gx: 0, gy: 0 };
   const gx = grid.maxGx + 1;
   for (let gy = grid.minGy; gy <= grid.maxGy; gy++) {
@@ -222,13 +311,15 @@ function placeOrphan(grid: PointGrid): Cell {
  * 质点网格粗布局 + 膨胀压实（就地写回 elements[i].x/y）。
  *
  * 用户显式定位（placed）的元素预先反算占格且最终不被移动；
- * 其余元素全部按度数降序放置。整体平移使布局质心位于原点
+ * 其余元素按「度数优先连通生长」放置。整体平移使布局质心位于原点
  * （有 placed 元素时改为对齐 placed 的实际坐标均值）。
+ * heuristics 缺省为无向图放置美学；有向图算法传入层级引导实现。
  */
 export function coarsePlacement(
   elements: readonly LayoutElement[],
   adjacency: Array<Set<number>>,
   naturalLength: number,
+  heuristics: CoarseHeuristics = undirectedHeuristics(adjacency),
 ): void {
   const n = elements.length;
   if (n === 0) return;
@@ -274,7 +365,9 @@ export function coarsePlacement(
         if (done[v]) continue;
         if (seed < 0 || deg(v) > deg(seed)) seed = v;
       }
-      const cellPos = placeOrphan(grid);
+      const cellPos = heuristics.placeSeed
+        ? heuristics.placeSeed(grid, seed)
+        : placeOrphan(grid);
       grid.place(cellPos, seed);
       posOf[seed] = cellPos;
       done[seed] = true;
@@ -288,12 +381,11 @@ export function coarsePlacement(
       if (v < 0 || deg(c) > deg(v) || (deg(c) === deg(v) && c < v)) v = c;
     }
     candidates.delete(v);
-    const cellPos = placeNearNeighbors(
-      grid,
-      [...adjacency[v]].filter((u) => posOf[u]),
-      posOf,
-      adjacency,
-    );
+    const placed = [...adjacency[v]].filter((u) => posOf[u]);
+    const cellPos =
+      placed.length > 0
+        ? placeWithHeuristics(grid, v, placed, posOf, heuristics)
+        : placeOrphan(grid);
     grid.place(cellPos, v);
     posOf[v] = cellPos;
     done[v] = true;

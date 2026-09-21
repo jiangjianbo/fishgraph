@@ -108,6 +108,8 @@ export class RelaxationSolver {
     // 计算试探位移（力方向 × 比例步长，远场漂移下限，整体截断到 stepSize）
     const dxArr = new Float64Array(nodes.length);
     const dyArr = new Float64Array(nodes.length);
+    // 是否存在非零试探位移（决定线搜索的接受判据，见下方回溯循环）
+    let anyMove = false;
     // 信任域下限：防止线搜索把步长压塌成"每步纳米级爬行"。
     const sFloor = this.opts.maxStep * 0.05;
     for (let i = 0; i < nodes.length; i++) {
@@ -117,6 +119,7 @@ export class RelaxationSolver {
       if (nd.fixed) continue;
       const fMag = Math.hypot(nd.fx, nd.fy);
       if (fMag < 1e-12) continue;
+      anyMove = true;
       const fUnitMag = fMag * invUnit;
       let mag = fUnitMag * s;
       if (fUnitMag > this.opts.driftForceEps) {
@@ -143,7 +146,11 @@ export class RelaxationSolver {
       }
       this.forcesValid = false;
       e1 = this.computeEnergy();
-      if (e1 < e0 || Math.abs(e1 - e0) <= 1e-12 * (1 + Math.abs(e0))) {
+      // 容差相等只对「无力可施、位置未动」的确认步成立；有位移的步必须
+      // 严格降能 —— 否则在不连续的能量平台（如离散碰撞判定边界）上会形成
+      // 「移过去 / 移回来」的 2 周期极限环，且位移停滞、力残差、回溯触底
+      // 三条收敛出口同时失守，布局永久空转不收敛。
+      if (e1 < e0 || (!anyMove && Math.abs(e1 - e0) <= 1e-12 * (1 + Math.abs(e0)))) {
         accepted = true;
         break;
       }

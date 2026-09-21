@@ -61,7 +61,6 @@ describe('跳数斥力衰减', () => {
       {
         accuracy: 'exact',
         seed: 9,
-        init: 'random',
         centroidStrength: 5, // 极强的向心调和约束：把无关系节点压成一团
         unrelatedRepulsion: 0.05,
         hopRepulsionDecay: 0.5,

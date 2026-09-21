@@ -41,7 +41,10 @@ import type {
 } from './types.js';
 
 const DEFAULTS = {
-  algorithm: 'force-directed',
+  // 默认基础算法：无向力导向（均匀分布、无交叉的紧凑布局）
+  algorithm: 'force-undirected',
+  // 有向图流动方向（算法：force-directed 消费，默认自顶向下）
+  direction: 'TB' as const,
   naturalLength: 120,
   // pairwise 弱引力比例：陌生人的平衡间隙 g = 1/(k_w/k_r + 1/2L)，饱和于斥力作用域。
   weakGravityRatio: 0.2,
@@ -75,7 +78,6 @@ const DEFAULTS = {
   centroidStrength: 0.1,
   accuracy: 'barnes-hut' as const,
   theta: 0.9,
-  init: 'bfs' as const,
   seed: 42,
   maxStepRatio: 0.2,
 };

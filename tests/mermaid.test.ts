@@ -1,5 +1,6 @@
 /**
- * 用户提供的 mermaid flowchart（TD）—— 作为真实业务图的压力/目视样本。
+ * 用户提供的 mermaid flowchart（TD）—— 作为真实业务图的压力/目视样本
+ * （force-directed 有向算法验收：TD 流程图的层级流动感）。
  *
  * 拓扑（与 mermaid 完全一致）：
  *   A 输入变更 → B 建立 Change Set → C 读取 Trace Graph → D 计算 Impact Set
@@ -13,10 +14,12 @@
  *   M → Q 更新 Trace Graph → R{是否存在后续 Impact}
  *   R --是--> G    R --否--> S 阶段执行完成
  *
- * 断言侧重"物理合法性 + 视觉可比较性"：
+ * 断言侧重"物理合法性 + 方向流动感 + 视觉可比较性"：
  *   - 收敛、坐标有限、包围圆不重叠、确定性；
+ *   - 方向流动感：解环后的全部正向边 target 在 source 下方（TB 层级流动；
+ *     反馈边 O/P/R→G 等构成回环，不要求顺流）；
  *   - 每条中心到中心的连线不得穿过任何无关节点的矩形（边-节点避让墙生效；
- *     大图/大矩形节点用 edgeNodeRepulsion: 20 强化软墙 —— 线遮盖节点是
+ *     大图/大矩形节点用 edgeNodeRepulsion: 40 强化软墙 —— 线遮盖节点是
  *     用户物理模型里明确要求"强斥力"排除的状态）；
  *   - 任意两个节点矩形不相交（包围圆不重叠的推论）。
  * 结果渲染成 SVG（output/mermaid-layout.svg），可与原 mermaid 图比对拓扑：
@@ -27,6 +30,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ForceLayout, estimateLabelBox, type NodeView } from '../src/index.js';
+import { computeLevels } from '../src/layout/force-directed/levels.js';
 import { MERMAID_GRAPH } from './mermaid.graph.js';
 
 /** 判断节点（mermaid 的 {} 菱形）。 */
@@ -207,17 +211,20 @@ function renderSvg(layout: ForceLayout, file: string): void {
 
 describe('mermaid 流程图（用户样本）', () => {
   it(
-    '收敛、无重叠、连线不穿节点，并渲染 SVG 供目视比对',
+    '收敛、无重叠、正向边全部顺流、连线不穿节点，并渲染 SVG 供目视比对',
     () => {
     // edgeNodeRepulsion: 40 —— 大矩形节点图 + 跳数衰减的紧凑布局里，
     // 软墙必须坚决生效才能守住"零线穿节点"。
-    const layout = new ForceLayout(MERMAID_GRAPH, {
+    const options = {
+      algorithm: 'force-directed',
+      direction: 'TB',
       naturalLength: 120,
       seed: 42,
       // edgeNodeRepulsion 40：跳数衰减(0.7)让图更紧凑，软墙需同步加强
       // 才能守住"零线穿节点"（20 会被挤压穿透，40 实测零穿透且收敛）。
       edgeNodeRepulsion: 40,
-    });
+    } as const;
+    const layout = new ForceLayout(MERMAID_GRAPH, options);
     const r = layout.run({ maxIterations: 24000 });
     expect(r.converged).toBe(true);
 
@@ -228,10 +235,26 @@ describe('mermaid 流程图（用户样本）', () => {
     }
     expect(nodeOverlapDepth(layout.nodeViews)).toBeLessThanOrEqual(0);
 
+    // 方向流动感：解环后的全部正向边 target 在 source 下方（层级流动）。
+    // 反馈边（回环 O/P/R→G 等）不要求 —— 其真实上下游由环上其余路径表达。
+    const viewById = new Map(layout.nodeViews.map((p) => [String(p.id), p]));
+    const { isForwardEdge } = computeLevels(
+      layout.nodeViews.length,
+      layout.edgeViews.map((e) => ({ sourceIndex: e.sourceIndex, targetIndex: e.targetIndex })),
+    );
+    const nameOf = (i: number) => String(layout.nodeViews[i].id);
+    for (let ei = 0; ei < layout.edgeViews.length; ei++) {
+      if (!isForwardEdge[ei]) continue;
+      const e = layout.edgeViews[ei];
+      expect(
+        viewById.get(nameOf(e.targetIndex))!.y,
+        `正向边 ${nameOf(e.sourceIndex)}→${nameOf(e.targetIndex)} 的 target 应在 source 下方`,
+      ).toBeGreaterThan(viewById.get(nameOf(e.sourceIndex))!.y);
+    }
+
     // 拓扑保持：相连节点的表面间隙（中心距 − 两包围半径）< 5×naturalLength。
     // 大节点（包围半径可达 120px）+ 回环枢纽 G 的四入边 + 标签软墙会把个别
     // 链边拉得比 naturalLength 长 —— 上限防的是"边两端飞散"这类拓扑破坏。
-    const viewById = new Map(layout.nodeViews.map((p) => [String(p.id), p]));
     for (const e of MERMAID_GRAPH.edges) {
       const a = viewById.get(String(e.source))!;
       const b = viewById.get(String(e.target))!;
@@ -274,7 +297,7 @@ describe('mermaid 流程图（用户样本）', () => {
     expect(maxPair).toBeLessThan(4000);
 
     // 确定性：相同 seed 两次完整求解结果逐位一致
-    const again = new ForceLayout(MERMAID_GRAPH, { naturalLength: 120, seed: 42, edgeNodeRepulsion: 40 });
+    const again = new ForceLayout(MERMAID_GRAPH, options);
     again.run({ maxIterations: 24000 });
     for (let i = 0; i < layout.nodeViews.length; i++) {
       expect(again.nodeViews[i].x).toBeCloseTo(layout.nodeViews[i].x, 6);
