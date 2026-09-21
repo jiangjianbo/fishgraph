@@ -72,6 +72,10 @@ export abstract class LayoutElement {
   placed: boolean;
   /** 引力质量（容器 = 成员数 + 1：外部视角的"大节点"惯性更大）。 */
   mass: number;
+  /** 网格布局（grid-undirected）物化的 AABB 物理宽（px）；连续布局不设置。 */
+  w?: number;
+  /** 网格布局（grid-undirected）物化的 AABB 物理高（px）；连续布局不设置。 */
+  h?: number;
 
   protected constructor(init: ElementInit) {
     this.id = init.id;
@@ -209,6 +213,11 @@ export interface InternalEdge {
   /** 标签包围盒半宽/半高（无标签时为 0）。 */
   labelHw: number;
   labelHh: number;
+  /**
+   * 走线层输出的物理路径拐点（首尾为两端节点中心，中间为格中心；
+   * 正交折线语义）。力导向等连续布局不产生本字段。
+   */
+  waypoints?: Array<{ x: number; y: number }>;
 }
 
 /** group 内成员的角色：与组外有连线的成员是边界（入口/出口），纯内连是内部。 */
@@ -479,6 +488,35 @@ export class GraphStore {
       const box = estimateLabelBox(nd.label, fs, pad);
       nd.r = Math.max(nd.baseR, Math.hypot(box.hw, box.hh) + 2);
     }
+  }
+
+  /**
+   * 元素的物理 AABB 尺寸（形状声明与文字盒取较大者，px）。
+   * 网格布局（grid-undirected）用本尺寸换算节点的逻辑格宽高；
+   * 注意不含 subgraph 容器的成员包裹（容器按声明形状参与网格布局）。
+   */
+  nodeBoxSize(el: LayoutElement): { w: number; h: number } {
+    let w: number;
+    let h: number;
+    switch (el.shape.kind) {
+      case 'circle':
+        w = h = 2 * el.shape.r;
+        break;
+      case 'ellipse':
+        w = 2 * el.shape.rx;
+        h = 2 * el.shape.ry;
+        break;
+      case 'rect':
+        w = el.shape.w;
+        h = el.shape.h;
+        break;
+    }
+    if (el.label !== null) {
+      const box = estimateLabelBox(el.label, this.labelFontSize, this.labelPadding);
+      w = Math.max(w, 2 * box.hw);
+      h = Math.max(h, 2 * box.hh);
+    }
+    return { w, h };
   }
 
   // ── 交互（拖拽支持）─────────────────────────────────────

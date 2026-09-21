@@ -227,6 +227,12 @@ export interface LayoutOptions {
    * 开关（opt-in）：默认 0 = 关闭，需要排列感时显式设置正值（如 0.1）开启。
    */
   edgeAngleAlignment?: number;
+  /**
+   * 走线通道宽度（格，算法：grid-undirected）：通道约束压实把相邻占用
+   * 行/列之间的空隙压缩到恰好不小于本值 —— 相邻节点 AABB 之间天然留出
+   * 走线走廊（Channel Safety Margin）。默认 1；0 = 不留通道（压到贴邻）。
+   */
+  channelMargin?: number;
 }
 
 export interface RunOptions {
@@ -251,6 +257,12 @@ export interface NodeView {
   shape: ShapeSpec;
   label?: string | null;
   fixed: boolean;
+  /**
+   * 物化 AABB 物理宽/高（px，算法：grid-undirected）—— 中心 (x,y) +
+   * 半宽高即节点包围盒；力导向等连续布局不产生本字段（用 r 包围圆）。
+   */
+  w?: number;
+  h?: number;
 }
 
 /**

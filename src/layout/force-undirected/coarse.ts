@@ -308,24 +308,39 @@ export function placeOrphan(grid: PointGrid): Cell {
 }
 
 /**
- * 质点网格粗布局 + 膨胀压实（就地写回 elements[i].x/y）。
- *
- * 用户显式定位（placed）的元素预先反算占格且最终不被移动；
- * 其余元素按「度数优先连通生长」放置。整体平移使布局质心位于原点
- * （有 placed 元素时改为对齐 placed 的实际坐标均值）。
- * heuristics 缺省为无向图放置美学；有向图算法传入层级引导实现。
+ * 纯质点网格放置的结果（阶段 2 产物，不含压实与坐标写回）。
+ * grid-first 流水线（grid-undirected）消费本结果做后续的 AABB 膨胀、
+ * 通道压实与走线；力导向流水线则继续走 coarsePlacement 的压实映射。
  */
-export function coarsePlacement(
+export interface CoarsePlacementGrid {
+  /** 已放置完成的占用网格（每格一元素）。 */
+  grid: PointGrid;
+  /** 每元素的格坐标（放置 100% 不死锁，无 null 项）。 */
+  posOf: GridPos;
+  /** 格距（物理 px）。 */
+  cell: number;
+  /** 放置顺序（元素下标；placed 反算在前，其余按连通生长/种子序）。 */
+  order: number[];
+}
+
+/**
+ * 阶段 2：纯质点网格放置（不压实、不写回坐标）。
+ *
+ * 用户显式定位（placed）的元素预先反算占格；其余元素按「度数优先
+ * 连通生长」放置。详见文件头与 doc/布局核心原则.md 无向图阶段 2。
+ */
+export function coarseGridPlacement(
   elements: readonly LayoutElement[],
   adjacency: Array<Set<number>>,
   naturalLength: number,
   heuristics: CoarseHeuristics = undirectedHeuristics(adjacency),
-): void {
+): CoarsePlacementGrid {
   const n = elements.length;
-  if (n === 0) return;
+  if (n === 0) return { grid: new PointGrid(), posOf: [], cell: Math.max(naturalLength, 1e-3), order: [] };
   const cell = Math.max(naturalLength, 1e-3);
   const grid = new PointGrid();
   const posOf: GridPos = new Array(n).fill(null);
+  const order: number[] = [];
 
   // 用户显式定位的元素：连续坐标反算占格（冲突时向右找相邻空格）。
   for (let i = 0; i < n; i++) {
@@ -336,6 +351,7 @@ export function coarsePlacement(
     while (grid.has(gx, gy)) gx++;
     grid.place({ gx, gy }, i);
     posOf[i] = { gx, gy };
+    order.push(i);
   }
 
   // 度数降序 + 连通生长（Prim 式）：从全局度数最高的节点开始，每次从
@@ -372,6 +388,7 @@ export function coarsePlacement(
       posOf[seed] = cellPos;
       done[seed] = true;
       remaining--;
+      order.push(seed);
       enqueueNeighbors(seed);
       continue;
     }
@@ -390,8 +407,30 @@ export function coarsePlacement(
     posOf[v] = cellPos;
     done[v] = true;
     remaining--;
+    order.push(v);
     enqueueNeighbors(v);
   }
+
+  return { grid, posOf, cell, order };
+}
+
+/**
+ * 质点网格粗布局 + 膨胀压实（就地写回 elements[i].x/y）。
+ *
+ * 用户显式定位（placed）的元素预先反算占格且最终不被移动；
+ * 其余元素按「度数优先连通生长」放置。整体平移使布局质心位于原点
+ * （有 placed 元素时改为对齐 placed 的实际坐标均值）。
+ * heuristics 缺省为无向图放置美学；有向图算法传入层级引导实现。
+ */
+export function coarsePlacement(
+  elements: readonly LayoutElement[],
+  adjacency: Array<Set<number>>,
+  naturalLength: number,
+  heuristics: CoarseHeuristics = undirectedHeuristics(adjacency),
+): void {
+  const n = elements.length;
+  if (n === 0) return;
+  const { grid, posOf, cell } = coarseGridPlacement(elements, adjacency, naturalLength, heuristics);
 
   // ── 压实 + 变距映射：删空行空列，按行/列最大半径拉伸物理间距 ──
 

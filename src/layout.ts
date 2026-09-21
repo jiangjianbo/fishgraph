@@ -20,7 +20,7 @@
  *     长文字按"占用面积最小"自动回绕
  */
 
-import { GraphStore } from './graph/store.js';
+import { GraphStore, type InternalEdge } from './graph/store.js';
 import {
   createStrategy,
   type ForceSnapshot,
@@ -63,6 +63,9 @@ const DEFAULTS = {
   edgeAngleAlignment: 0,
   // 隐藏组聚集强度：hidden-group 成员向组质心的简谐束缚（越大越紧凑）
   groupCohesion: 3,
+  // 走线通道宽度（格，算法：grid-undirected）：通道约束压实后相邻节点
+  // AABB 之间保留的最小空行/列数（走线走廊）。
+  channelMargin: 1,
   // 坐标系（布局完成后的坐标修正策略）：'free' 恒等；'grid' 网格化吸附
   coordinateSystem: 'free' as const,
   // 网格间距；0 = 跟随 naturalLength
@@ -192,14 +195,11 @@ export class ForceLayout {
     return this.store.subgraphViews;
   }
 
-  /** 物理边列表（sourceIndex/targetIndex 为 nodeViews 所在 elements 数组下标；自环已剔除）。 */
-  get edgeViews(): readonly Readonly<{
-    sourceIndex: number;
-    targetIndex: number;
-    label: string | null;
-    labelHw: number;
-    labelHh: number;
-  }>[] {
+  /**
+   * 物理边列表（sourceIndex/targetIndex 为 nodeViews 所在 elements 数组
+   * 下标；自环已剔除；grid-undirected 策略附带走线 waypoints）。
+   */
+  get edgeViews(): readonly InternalEdge[] {
     return this.store.edgeViews;
   }
 

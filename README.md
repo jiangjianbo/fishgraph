@@ -236,6 +236,31 @@ const layout = new ForceLayout(graph, { algorithm: 'force-undirected' });
   分组支持等 force-group 重写后再议。设计细节见
   [doc/layout-force-undirected.md](doc/layout-force-undirected.md)。
 
+## 网格无向图（grid-undirected，grid-first 流水线）
+
+`algorithm: 'grid-undirected'`——按 `doc/布局核心原则.md`「纯网格布局算法
+流程」组织的**纯网格策略**：**质点拓扑粗布局 → 节点与文字轴向膨胀物化为
+格 AABB → 通道约束压实 → 网格 A\* 避障走线**，全程整数格运算、确定性重放，
+不经力场弛豫。
+
+```ts
+const layout = new ForceLayout(graph, { algorithm: 'grid-undirected' });
+layout.run();
+// nodeViews 附带 w/h（物化 AABB 物理尺寸）
+// edgeViews 附带 waypoints（A* 正交走线拐点，物理坐标）
+```
+
+- **膨胀**：节点按形状 + 文字盒换算逻辑格宽高，锚点不动向右/下扩张，
+  扩张所需行列由插行/插列让位（邻居整体平移）；
+- **通道约束压实**（`channelMargin`，默认 1 格）：相邻占用行/列之间的
+  空隙统一调整为恰好 margin 格——贴邻的扩张出走线走廊，大片空白压缩回收，
+  全局成行成列、走线走廊均匀；
+- **A\* 走线**：连线不占空间，只在自由通道格中流转（拐点惩罚偏好少弯折），
+  节点位置一旦物化不再被走线反向推开；无可行正交路径时降级直线；
+- 第一期边界：连线文字不占格（虚拟文本节点待后续）；subgraph 容器按声明
+  形状参与；无连续模式短弛豫；平行线等距分布待做。空间原语抽象见
+  `src/layout/space/`（`SpaceContext`：GridSpaceContext / ContinuousSpaceContext）。
+
 ## 力导向有向图（force-directed）
 
 `algorithm: 'force-directed'`——基础算法的有向派生：**解环与层级 → 软层级
@@ -317,7 +342,7 @@ r.converged;        // 力残差判据
 
 | 参数 | 默认 | 作用 |
 |---|---|---|
-| `algorithm` | 'force-undirected' | 布局策略名（内置 force-undirected / force-directed / circle）；运行时用 `layout.setStrategy(name)` 切换 |
+| `algorithm` | 'force-undirected' | 布局策略名（内置 force-undirected / force-directed / grid-undirected / circle）；运行时用 `layout.setStrategy(name)` 切换 |
 | `naturalLength` | 120 | 一切尺度的锚：平衡边长 = 它，斥力作用域 = 2×它 |
 | `edgeTension` | 1 | >0 让长边额外收缩；过大时会把多跳路径压成叠线 |
 | `crossingShrink` | 0.15 | 交叉收缩力：边每交叉一次，引力/张力放大 (1+λ) 倍 |
@@ -332,6 +357,7 @@ r.converged;        // 力残差判据
 | `labelCollision` | true | 关掉后边文字不再参与力学 |
 | `accuracy` | barnes-hut | n < ~300 或要逐位复现用 exact |
 | `edgeAngleAlignment` | 0 | 连线方向对齐开关（opt-in，默认关）：>0 时水平/垂直能量最低、±45° 稍高、其余更高，温和鼓励排列感，推荐 0.1；0 关闭 |
+| `channelMargin` | 1 | 走线通道宽（格，仅 grid-undirected）：压实后相邻节点 AABB 间的空行/列数；0 = 压到贴邻 |
 | `direction` | 'TB' | 流动方向（仅 force-directed 消费）：'TB' 自上而下 / 'LR' 自左向右 |
 
 ## 测试
