@@ -144,13 +144,15 @@ function jitterNode(id: number): { id: number; x: number; y: number } {
 // ── 1. 物理平衡 ──────────────────────────────────────────────
 
 describe('物理平衡（核力式斥力 vs 引力 + 线性张力）', () => {
+  // 本组断言的是基础力场（斥力/引力/张力）的理论平衡值；
+  // 连线方向对齐是可选增强力项，与理论值无关，显式关闭以控制变量。
   const L = 100;
 
   it('相邻节点平衡在「斥力 = 引力 + 线性张力」处', () => {
     const gStar = equilibriumGap(L, 0.1); // ≈ 92.7 → 中心距 ≈ 112.7
     const layout = new ForceLayout(
       { nodes: [{ id: 'a' }, { id: 'b' }], edges: [{ source: 'a', target: 'b' }] },
-      { naturalLength: L, edgeTension: 0.1, gravity: 'pairwise', accuracy: 'exact', seed: 1 },
+      { naturalLength: L, edgeTension: 0.1, gravity: 'pairwise', accuracy: 'exact', seed: 1, edgeAngleAlignment: 0 },
     );
     const r = layout.run({ maxIterations: 3000 });
     expect(r.converged).toBe(true);
@@ -162,7 +164,7 @@ describe('物理平衡（核力式斥力 vs 引力 + 线性张力）', () => {
   it('edgeTension=0 时橡皮筋松弛：间隙退到斥力作用域边缘（2L）', () => {
     const layout = new ForceLayout(
       { nodes: [{ id: 'a' }, { id: 'b' }], edges: [{ source: 'a', target: 'b' }] },
-      { naturalLength: L, edgeTension: 0, gravity: 'pairwise', accuracy: 'exact', seed: 1 },
+      { naturalLength: L, edgeTension: 0, gravity: 'pairwise', accuracy: 'exact', seed: 1, edgeAngleAlignment: 0 },
     );
     const r = layout.run({ maxIterations: 3000 });
     expect(r.converged).toBe(true);
@@ -196,7 +198,7 @@ describe('物理平衡（核力式斥力 vs 引力 + 线性张力）', () => {
           { source: 1, target: 3 },
         ],
       },
-      { naturalLength: L, gravity: 'pairwise', accuracy: 'exact', seed: 7 },
+      { naturalLength: L, gravity: 'pairwise', accuracy: 'exact', seed: 7, edgeAngleAlignment: 0 },
     );
     const r = layout.run({ maxIterations: 3000 });
     expect(r.converged).toBe(true);
@@ -457,13 +459,15 @@ describe('场景 S1：同大小圆点无连线（n=2..6）自然构型', () => {
 });
 
 describe('场景 S2：全两两连线（K_n）与无连线构型等同', () => {
+  // 对称全连接构型（60°/72° 边）会被方向对齐力矩整体转向偏好朝向，
+  // 断言的是基础力场的对称极小，显式关闭该可选项以控制变量。
   for (const n of [2, 3, 4, 5]) {
     it(`K${n} 构型与无连线 n=${n} 一致`, () => {
       const edges: Array<{ source: number; target: number }> = [];
       for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) edges.push({ source: i, target: j });
       const layout = new ForceLayout(
         { nodes: Array.from({ length: n }, (_, i) => jitterNode(i)), edges },
-        { accuracy: 'exact', seed: 5 },
+        { accuracy: 'exact', seed: 5, edgeAngleAlignment: 0 },
       );
       const r = layout.run({ maxIterations: 4000 });
       expect(r.converged).toBe(true);
@@ -488,7 +492,7 @@ describe('场景 S2：全两两连线（K_n）与无连线构型等同', () => {
     ];
     const edges: Array<{ source: number; target: number }> = [];
     for (let i = 0; i < 6; i++) for (let j = i + 1; j < 6; j++) edges.push({ source: i, target: j });
-    const layout = new ForceLayout({ nodes, edges }, { accuracy: 'exact', seed: 5 });
+    const layout = new ForceLayout({ nodes, edges }, { accuracy: 'exact', seed: 5, edgeAngleAlignment: 0 });
     const r = layout.run({ maxIterations: 4000 });
     expect(r.converged).toBe(true);
     const info = ringInfo(layout.nodeViews);

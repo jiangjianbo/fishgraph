@@ -331,6 +331,7 @@ r.converged;        // 力残差判据
 | `gravity` | centroid | 多个不相关分量想保持紧凑用 centroid；想让分量自由分形用 pairwise |
 | `labelCollision` | true | 关掉后边文字不再参与力学 |
 | `accuracy` | barnes-hut | n < ~300 或要逐位复现用 exact |
+| `edgeAngleAlignment` | 0.1 | 连线方向对齐：水平/垂直能量最低、±45° 稍高、其余更高，温和鼓励排列感；0 关闭 |
 | `direction` | 'TB' | 流动方向（仅 force-directed 消费）：'TB' 自上而下 / 'LR' 自左向右 |
 
 ## 测试
@@ -346,6 +347,8 @@ force-directed 有向验收：收敛、零重叠、正向边全部顺流、零�
 
 `tests/tree21.test.ts`：21 节点有向树，断言全部边顺流、层级行清晰、零交叉；
 `tests/force-directed.test.ts`：解环收敛、TB/LR、方向切换、确定性。
+`tests/angle-alignment.test.ts`：连线方向对齐验收（三档能量、力=−∇E 差分、
+strength=0 纯度、单边转向、稀疏链排列感）。
 
 ## demo
 

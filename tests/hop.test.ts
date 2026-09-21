@@ -39,7 +39,8 @@ describe('跳数斥力衰减', () => {
     function nearest(extra: { hopRepulsionDecay: number; unrelatedRepulsion: number }): number {
       const layout = new ForceLayout(
         { nodes: [{ id: 0 }, { id: 1 }, { id: 2 }], edges: [{ source: 0, target: 1 }] },
-        { accuracy: 'exact', gravity: 'pairwise', seed: 5, ...extra },
+        // 断言跳数衰减开/关的贴近度对照，与方向对齐力矩无关，显式关闭以控制变量
+        { accuracy: 'exact', gravity: 'pairwise', seed: 5, edgeAngleAlignment: 0, ...extra },
       );
       const r = layout.run({ maxIterations: 4000 });
       expect(r.converged).toBe(true);

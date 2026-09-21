@@ -220,6 +220,12 @@ export interface LayoutOptions {
   seed?: number;
   /** 单步最大位移（相对 naturalLength 的比例）。 */
   maxStepRatio?: number;
+  /**
+   * 连线方向对齐强度（相对力单位 k_a）：连线落在水平/垂直方向能量最低，
+   * ±45° 稍高，其余角度更高 —— 温和鼓励图形成横平竖直（兼对角）的排列感。
+   * 纯切向内力（合力恒零），只转边不改边长；0 = 关闭。
+   */
+  edgeAngleAlignment?: number;
 }
 
 export interface RunOptions {

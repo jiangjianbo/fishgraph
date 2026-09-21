@@ -75,6 +75,8 @@ export interface DerivedParams {
   dee: number;
   /** 线间避让开关（opt-in，默认关）。 */
   lineAvoid: boolean;
+  /** 连线方向对齐强度（能量/力的绝对系数，已含 edgeAngleAlignment 倍率）。 */
+  kAng: number;
 }
 
 /**
@@ -143,6 +145,7 @@ export function deriveParams(
     crossingShrink: number;
     crossingEnergy: number;
     lineAvoidance: number | boolean;
+    edgeAngleAlignment?: number;
   },
   nodeCount: number,
 ): DerivedParams {
@@ -167,6 +170,10 @@ export function deriveParams(
   const kee = 30 * (ka / (L * L));
   const dee = 0.35 * L;
   const lineAvoid = !!opts.lineAvoidance;
+  // 连线方向对齐：E(θ) = kAng·[(1−cos4θ) + (1−cos8θ)]，θ 为边的倾角。
+  // 水平/垂直（θ=0°/90°）= 0 最低，±45° = 2 稍高，中间角度（22.5°/67.5°）= 3 更高；
+  // 稳定方向 0°/45°/90°。kAng 直接以力单位 k_a 计（45° 边罚 2×strength）。
+  const kAng = Math.max(opts.edgeAngleAlignment ?? 0, 0) * ka;
   const kw = ka * Math.max(opts.weakGravityRatio, 1e-6);
   // 橡皮筋刚度 k_b = τ·k_a/L³：F = k_b·g 随线长线性增强（连线越长拉力越大），
   // τ=1 时与截断斥力的平衡间隙恰为 naturalLength（k_r(1/L−1/2L)/L² = k_b·L）。
@@ -190,6 +197,7 @@ export function deriveParams(
     kee,
     dee,
     lineAvoid,
+    kAng,
     kw,
     kt,
     ken,
@@ -371,6 +379,31 @@ function applyNodePair(ctx: ForceContext, i: number, j: number, kind: PairKind):
   );
 }
 
+/** 连线方向对齐项（严格保守，纯切向内力）：
+ *  E(θ) = kAng·[(1−cos4θ) + (1−cos8θ)]，θ 为边的倾角 ——
+ *  水平/垂直 = 0 最低，±45° = 2 稍高，中间角度（22.5°/67.5° 附近）= 3 更高，
+ *  稳定方向 0°/45°/90°。只依赖 θ（不乘当前边长），没有径向分量：
+ *  F = −∇E = ∓dE/dθ·(dy,−dx)/d² 把边往最近能量低的方向转，长度不受影响；
+ *  两端力大小相等方向相反，合力恒为零（不平移整体）。退化边（d≈0）跳过。 */
+function applyEdgeAngleAlignment(ctx: ForceContext, na: LayoutElement, nb: LayoutElement): number {
+  const kAng = ctx.params.kAng;
+  if (kAng <= 0) return 0;
+  const dx = nb.x - na.x;
+  const dy = nb.y - na.y;
+  const q = dx * dx + dy * dy;
+  if (q < 1e-18) return 0;
+  const theta = Math.atan2(dy, dx);
+  // ∂θ/∂a = (dy,−dx)/q（b 端反号）；F = −dE/dθ · ∂θ/∂p
+  const dEdTheta = kAng * (4 * Math.sin(4 * theta) + 8 * Math.sin(8 * theta));
+  const fx = (-dEdTheta * dy) / q;
+  const fy = (dEdTheta * dx) / q;
+  na.fx += fx;
+  na.fy += fy;
+  nb.fx -= fx;
+  nb.fy -= fy;
+  return kAng * (2 - Math.cos(4 * theta) - Math.cos(8 * theta));
+}
+
 /** BH 模式：沿边累加相邻节点的引力 + 线性张力（斥力已由四叉树负责）。
  *  与精确模式 adjacent 对的引力项是同一个 attractionTerm，保证两种精度一致。 */
 /** 沿边累加相邻节点的橡皮筋弹力（斥力已由逐对/四叉树负责）。
@@ -394,10 +427,15 @@ function applyEdgeAttraction(ctx: ForceContext, edgeIndex: number): number {
   na.fy -= att.f * uy;
   nb.fx += att.f * ux;
   nb.fy += att.f * uy;
+  // 所有能量贡献在函数内聚成总和返回：调用方是 `ctx.energy += applyEdgeAttraction(...)`
+  // 复合赋值 —— 左值旧值先读，函数内部若直接改 ctx.energy 会被外层写回覆盖。
+  let energy = att.e;
+  // 连线方向对齐：往水平/垂直/45° 转的温和力矩（能量与力一处算出，严格成对）
+  energy += applyEdgeAngleAlignment(ctx, na, nb);
   // 边弹力施加后的派生钩子（如跨容器张力传导，实验性）。
   const edgeExt = ctx.extensions.edgeAttraction;
-  if (edgeExt) ctx.energy += edgeExt(ctx, edgeIndex, att.f, att.e, ux, uy);
-  return att.e;
+  if (edgeExt) energy += edgeExt(ctx, edgeIndex, att.f, att.e, ux, uy);
+  return energy;
 }
 
 /** 单次力场求值内刷新交叉项：
