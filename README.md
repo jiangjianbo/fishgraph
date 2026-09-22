@@ -286,6 +286,31 @@ const layout = new ForceLayout(graph, {
 
 设计细节见 [doc/layout-force-directed.md](doc/layout-force-directed.md)。
 
+## 无向分组图（group-undirected，递归折叠流水线）
+
+`algorithm: 'group-undirected'`——**深度优先递归的复合布局**：组内成员先由
+同一套流水线（粗布局→压实→弛豫→坐标修正）递归布局，组折叠为一个
+"巨大号的单元"（单元半径 = 内部块包围圆半径 + 包裹边距）参与外层布局，
+最后把内部块平移映射到单元最终位置。消费 `subgraphs` 与 `hiddenGroups`
+声明（含嵌套）。
+
+```ts
+const layout = new ForceLayout(graph, { algorithm: 'group-undirected' });
+layout.run();
+// subgraph 容器与成员、hidden-group 成员全部就位；
+// 组内成员先聚成模块，组间像普通节点一样排布
+```
+
+- **组树与折叠**（`group-undirected/compound.ts`）：subgraph 容器即单元；
+  hidden-group 物化为布局期伪单元（不进 store、不渲染）；跨组连线提升到
+  单元上（多条去重）；成员重叠且互不嵌套的声明显式抛错；
+- **递归流水线**：每层独立弛豫求解（组内外无力场耦合，无容器-成员振荡）；
+  无组声明时与 force-undirected 结果逐位一致（退化纯度）；
+- **平移映射**：组内部块纯平移到单元最终位置（不缩放）；
+- 第一期边界：单元以包围圆参与外层（扁长块偏保守）；纯折叠——成员不跟随
+  外部连线方向；流水线构造期一次完成，`step()` 不驱动动画。
+  设计细节见 [doc/layout-group-undirected.md](doc/layout-group-undirected.md)。
+
 ## 架构（策略模式）
 
 布局算法随时在变，节点管理与界面展示是稳定的 —— 三者严格分离：
@@ -304,6 +329,12 @@ src/
   layout/force-directed/  力导向有向图（派生算法）：levels.ts 解环+层级、
                           directedCoarse.ts 软层级引导+层内排序、strategy.ts
                           流动势能（TB/LR）——只覆写接缝，流程与引擎全部继承。
+  layout/grid-undirected/ 网格无向图（独立流水线）：expansion.ts AABB 膨胀 +
+                          strategy.ts 通道压实与网格 A* 走线（质点粗布局复用
+                          force-undirected/coarse.ts；空间原语在 layout/space/）。
+  layout/group-undirected/ 无向分组图（递归折叠）：compound.ts 组树构建+层级
+                          视图（连线提升/伪单元）+ strategy.ts——每层递归运行
+                          force-undirected 流水线，组折叠为巨大单元参与外层。
   layout/circle/          环形布局（独立子目录）：最小策略示例。
   layout.ts               ForceLayout 门面：装配 store + 当前策略，公共 API 委派。
 ```
@@ -343,7 +374,7 @@ r.converged;        // 力残差判据
 
 | 参数 | 默认 | 作用 |
 |---|---|---|
-| `algorithm` | 'force-undirected' | 布局策略名（内置 force-undirected / force-directed / grid-undirected / circle）；运行时用 `layout.setStrategy(name)` 切换 |
+| `algorithm` | 'force-undirected' | 布局策略名（内置 force-undirected / force-directed / grid-undirected / group-undirected / circle）；运行时用 `layout.setStrategy(name)` 切换 |
 | `naturalLength` | 120 | 一切尺度的锚：平衡边长 = 它，斥力作用域 = 2×它 |
 | `edgeTension` | 1 | >0 让长边额外收缩；过大时会把多跳路径压成叠线 |
 | `crossingShrink` | 0.15 | 交叉收缩力：边每交叉一次，引力/张力放大 (1+λ) 倍 |

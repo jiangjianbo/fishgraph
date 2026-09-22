@@ -1,5 +1,5 @@
 import { ForceLayout, estimateLabelBox } from '../src/index.js';
-import type { GraphSpec, LayoutOptions, NodeId } from '../src/index.js';
+import type { GraphSpec, LayoutOptions, NodeId, SubgraphView } from '../src/index.js';
 
 // ── 示例图 ────────────────────────────────────────────────
 
@@ -368,6 +368,7 @@ for (const el of [...Object.values(sliders), labelCollision, gsSlider]) {
     converged = false;
   });
 }
+graphSel.addEventListener('change', () => rebuild()); // 切换图需要整体重建布局实例
 coordsSel.addEventListener('change', () => rebuild()); // 坐标系修正是 run 终点行为
 for (const el of [algorithmSel, directionSel, gravitySel, accuracySel]) {
   el.addEventListener('change', () => {
@@ -382,6 +383,33 @@ $('pause').addEventListener('click', () => {
 });
 
 // ── 绘制 ──────────────────────────────────────────────────
+
+/**
+ * 容器嵌套深度表：children 引用其它容器 id 视为嵌套，深度 = 1 +
+ * 最深子容器深度（子为物理节点计 0）。供绘制排序使用——深度浅的
+ * 容器先画（更靠底层），内层容器框才不会被外层填充盖住。
+ */
+function subgraphDepthMap(views: readonly SubgraphView[]): Map<string, number> {
+  const byId = new Map(views.map((v) => [String(v.id), v] as const));
+  const depth = new Map<string, number>();
+  const visit = (id: string, path: Set<string>): number => {
+    const cached = depth.get(id);
+    if (cached !== undefined) return cached;
+    const v = byId.get(id);
+    if (!v || path.has(id)) return 0; // path 防环（store 构造已拒绝环，双保险）
+    path.add(id);
+    let d = 0;
+    for (const c of v.children) {
+      const cid = String(c);
+      if (byId.has(cid)) d = Math.max(d, visit(cid, path) + 1);
+    }
+    path.delete(id);
+    depth.set(id, d);
+    return d;
+  };
+  for (const v of views) visit(String(v.id), new Set());
+  return depth;
+}
 
 function fitCanvas(cv: HTMLCanvasElement): boolean {
   const dpr = window.devicePixelRatio || 1;
@@ -427,9 +455,19 @@ function drawView(): void {
   }
 
   const nv = layout.nodeViews;
+  // 边端点下标基于 elements 数组（物理节点在前、subgraph 容器按声明序
+  // 追加在后）：以容器 id 为端点的边在 nodeViews（仅物理节点）中越界，
+  // 需要拼上容器视图才能解析端点坐标。
+  const edgeEnds = [...nv, ...layout.subgraphViews];
 
-  // 背景层 0：subgraph 容器（z-order 最低 —— 先于所有线段与节点）
-  const hubs = layout.subgraphViews;
+  // 背景层 0：subgraph 容器 —— z-order 硬约束：容器是画面最底层，
+  // 必须先于所有连线与节点绘制，不得遮掩任何节点和连线（连线与节点
+  // 在后续层统一绘制，永远位于容器之上）；嵌套容器按深度升序绘制
+  // （外层先画、内层后画），保证内层容器框不被外层填充盖住。
+  const hubDepth = subgraphDepthMap(layout.subgraphViews);
+  const hubs = [...layout.subgraphViews].sort(
+    (a, b) => (hubDepth.get(String(a.id)) ?? 0) - (hubDepth.get(String(b.id)) ?? 0),
+  );
   for (const nd of hubs) {
     const [sx, sy] = worldToScreen(nd.x, nd.y);
     const sh = nd.shape;
@@ -460,8 +498,8 @@ function drawView(): void {
 
   // 边：剪到起点/终点轮廓，末端画箭头；中点画白底文字
   for (const e of layout.edgeViews) {
-    const a = nv[e.sourceIndex];
-    const b = nv[e.targetIndex];
+    const a = edgeEnds[e.sourceIndex];
+    const b = edgeEnds[e.targetIndex];
     const dx = b.x - a.x;
     const dy = b.y - a.y;
     const d = Math.hypot(dx, dy) || 1;

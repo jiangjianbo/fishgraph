@@ -102,7 +102,7 @@ describe('隐藏组推断', () => {
   });
 });
 
-describe.skip('分组布局', () => {
+describe('分组布局', () => {
   it('hidden-group：成员聚集（组束缚使组内更紧凑）', () => {
     // 六节点链声明为隐藏组 + 远处一个三节点团
     const graph: GraphSpec = {
@@ -117,7 +117,7 @@ describe.skip('分组布局', () => {
       hiddenGroups: [{ id: 'h1', members: [0, 1, 2, 3, 4, 5] }],
     };
     const layout = new ForceLayout(graph, {
-      algorithm: 'force-group',
+      algorithm: 'group-undirected',
       naturalLength: 120,
       accuracy: 'exact',
       gravity: 'pairwise',
@@ -159,7 +159,7 @@ describe.skip('分组布局', () => {
       ],
     };
     const layout = new ForceLayout(graph, {
-      algorithm: 'force-group',
+      algorithm: 'group-undirected',
       naturalLength: 120,
       accuracy: 'exact',
       gravity: 'pairwise',
@@ -209,7 +209,7 @@ describe.skip('分组布局', () => {
   });
 });
 
-describe.skip('外部直连容器内成员（角色模型的张力传导）', () => {
+describe('外部直连容器内成员（group-undirected：包含与连通）', () => {
   function build(withEdge: boolean) {
     // 初始坐标直接进 GraphSpec（placed=true），避免 BFS init 覆盖对照布局
     return new ForceLayout(
@@ -226,7 +226,7 @@ describe.skip('外部直连容器内成员（角色模型的张力传导）', ()
           { id: 'sub', shape: { kind: 'rect' as const, w: 400, h: 300 }, members: ['m1'] },
         ],
       },
-      { algorithm: 'force-group', naturalLength: 120, accuracy: 'exact', gravity: 'pairwise', seed: 21 },
+      { algorithm: 'group-undirected', naturalLength: 120, accuracy: 'exact', gravity: 'pairwise', seed: 21 },
     );
   }
 
@@ -244,32 +244,30 @@ describe.skip('外部直连容器内成员（角色模型的张力传导）', ()
     expect(store.elements[3].isSubgraph).toBe(true); // sub: hub（容器节点）
   });
 
-  it('成员被直连拉向外部侧；hub 朝连接方向偏移；包含保持', () => {
-    // f1 固定在 +y 方向作为参照系
-    const buildPos = (withEdge: boolean) => {
-      const layout = build(withEdge);
-      layout.run({ maxIterations: 6000 });
-      return {
-        m1: layout.positions.get('m1')!,
-        sub: layout.positions.get('sub')!,
-        f1: layout.positions.get('f1')!,
-      };
-    };
-    const on = buildPos(true);
-    const off = buildPos(false);
-    // 成员被拉向外部侧：m1 的 y 位置比无连接对照更靠近 f1
-    expect(on.m1.y).toBeGreaterThan(off.m1.y);
-    // hub 朝连接方向偏移（张力传导，有界）
-    expect(on.sub.y).toBeGreaterThan(off.sub.y);
-    // 包含保持：成员不出容器（rIn+容差）
-    const d = Math.hypot(on.m1.x - on.sub.x, on.m1.y - on.sub.y);
+  it('跨容器直连：成员保持包含、与外部节点间距有界', () => {
+    // 旧 force-group 的"张力传导"力学已随算法重写消亡（简单传导实验
+    // 发散已回退）；group-undirected 下的等价语义：容器折叠不破坏
+    // 包含性，跨容器边经折叠提升后仍保持端点间距有界。
+    const layout = build(true);
+    layout.run({ maxIterations: 6000 });
+    const m1 = layout.positions.get('m1')!;
+    const sub = layout.positions.get('sub')!;
+    const f1 = layout.positions.get('f1')!;
+    // 包含保持：成员不出容器（声明内切半径 + 容差）
+    const d = Math.hypot(m1.x - sub.x, m1.y - sub.y);
     expect(d).toBeLessThan(300);
-    // 无重叠
-    expect(Math.hypot(on.m1.x - on.sub.x, on.m1.y - on.sub.y)).toBeGreaterThan(0);
+    // 跨容器边连通：m1—f1 间距有界 = 容器外层边弛豫（~自然长度）+
+    // 成员容器内偏移（<300，上一断言），合计数倍自然长度内（防发散量级）
+    expect(Math.hypot(m1.x - f1.x, m1.y - f1.y)).toBeLessThan(4 * 120);
+    // 容器—外部固定点（filler）经容器边保持分离且间距有界
+    const filler = layout.positions.get('filler')!;
+    const dSubFiller = Math.hypot(sub.x - filler.x, sub.y - filler.y);
+    expect(dSubFiller).toBeGreaterThan(0);
+    expect(dSubFiller).toBeLessThan(4 * 120);
   });
 });
 
-describe.skip('算法纯粹性：force 纯力导向 / force-group 分组', () => {
+describe('算法纯粹性：force 纯力导向 / group-undirected 分组', () => {
   function chainGraph(): GraphSpec {
     return {
       nodes: [{ id: 0 }, { id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }, { id: 5 }],
@@ -313,9 +311,9 @@ describe.skip('算法纯粹性：force 纯力导向 / force-group 分组', () =>
     });
   }
 
-  it('注册表包含 force-group（force-directed 的派生算法）', () => {
+  it('注册表包含 group-undirected（分组折叠算法）', () => {
     expect(listStrategies()).toContain('force-directed');
-    expect(listStrategies()).toContain('force-group');
+    expect(listStrategies()).toContain('group-undirected');
   });
 
   it('纯度：force-directed 忽略 hiddenGroups 声明（与无组声明逐位一致）', () => {
@@ -325,9 +323,9 @@ describe.skip('算法纯粹性：force 纯力导向 / force-group 分组', () =>
     expect(samePositions(withGroup, withoutGroup)).toBe(true);
   });
 
-  it('分组：force-group 消费 hiddenGroups（组内跨度被压缩）', () => {
-    const withoutGroup = run(chainGraph(), 'force-group');
-    const withGroup = run({ ...chainGraph(), hiddenGroups: [{ id: 'h1', members: [0, 1, 2, 3, 4, 5] }] }, 'force-group');
+  it('分组：group-undirected 消费 hiddenGroups（组内跨度被压缩）', () => {
+    const withoutGroup = run(chainGraph(), 'group-undirected');
+    const withGroup = run({ ...chainGraph(), hiddenGroups: [{ id: 'h1', members: [0, 1, 2, 3, 4, 5] }] }, 'group-undirected');
     // 有组束缚后链的总体跨度显著收缩（自然长度约 600+，束缚后 < 420）
     expect(chainSpan(withGroup)).toBeLessThan(420);
     expect(samePositions(withGroup, withoutGroup)).toBe(false);

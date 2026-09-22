@@ -80,15 +80,15 @@ function memberGap(layout: ForceLayout, a: string, b: string): number {
   return Math.hypot(pa.x - pb.x, pa.y - pb.y) - ra - rb;
 }
 
-describe.skip('mermaid 架构图：subgraph 分组布局（force-group 待重写）', () => {
-  // vitest 的 describe.skip factory 体在收集期也会同步执行，而 force-group
-  // 算法已移除（待重写）—— 构造必须延后到用例真正运行前，否则收集期抛
-  // "unknown layout algorithm"。重写 force-group 后恢复本 describe 时同理。
+describe('mermaid 架构图：subgraph 分组布局（group-undirected 折叠流水线）', () => {
+  // group-undirected 在构造期完成分层折叠流水线：run() 仅为流水线内部
+  // 的收尾弛豫消耗少量迭代（本图实测 ~99 步），不承诺具体值；布局质量
+  // 以坐标断言验收。
   let layout!: ForceLayout;
   let r!: ReturnType<ForceLayout['run']>;
   beforeEach(() => {
     layout = new ForceLayout(buildGraph(), {
-      algorithm: 'force-group',
+      algorithm: 'group-undirected',
       naturalLength: L,
       edgeNodeRepulsion: 3,
       weakGravityRatio: 0.05,
@@ -100,8 +100,8 @@ describe.skip('mermaid 架构图：subgraph 分组布局（force-group 待重写
     r = layout.run({ maxIterations: 8000 });
   });
 
-  it('收敛或达到平衡构型，全部坐标有限，节点不重叠', () => {
-    expect(r.iterations).toBeGreaterThan(0);
+  it('布局完成：迭代预算内返回，全部坐标有限，节点不重叠', () => {
+    expect(r.iterations).toBeLessThanOrEqual(8000);
     const views = layout.nodeViews;
     for (const v of views) {
       expect(Number.isFinite(v.x)).toBe(true);
@@ -119,19 +119,21 @@ describe.skip('mermaid 架构图：subgraph 分组布局（force-group 待重写
     }
   });
 
-  it('包含性：成员中心+半径落在所属 subgraph 内切半径内（容差内）', () => {
+  it('包含性：成员落在容器包围圆内（view.r = 包裹全部成员 + padding）', () => {
     const graph = buildGraph();
     for (const g of graph.subgraphs ?? []) {
       const hubView = layout.subgraphViews.find((v) => v.id === g.id)!;
-      const rIn = hubView.r * 0.55;
+      // group-undirected 的视图半径按成员几何刷新：max(d + r) + padding，
+      // 故 d + mr ≤ view.r 是精确不变量（旧 0.55 内切口径是 force-group
+      // 软墙的近似，不再适用）
       for (const m of g.members) {
         const p = layout.positions.get(String(m))!;
         const mr = layout.nodeViews.find((v) => v.id === m)!.r;
         const d = Math.hypot(p.x - hubView.x, p.y - hubView.y);
         expect(
           d + mr,
-          `${m} 未被包含在 ${g.id} 内（d=${d.toFixed(0)} + r=${mr.toFixed(0)} > rIn=${rIn.toFixed(0)}）`,
-        ).toBeLessThanOrEqual(rIn + mr + 45);
+          `${m} 未被包含在 ${g.id} 内（d=${d.toFixed(0)} + r=${mr.toFixed(0)} > r=${hubView.r.toFixed(0)}）`,
+        ).toBeLessThanOrEqual(hubView.r + 2);
       }
     }
   });

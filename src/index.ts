@@ -2,6 +2,7 @@
 import './layout/force-undirected/strategy.js';
 import './layout/force-directed/strategy.js';
 import './layout/grid-undirected/strategy.js';
+import './layout/group-undirected/strategy.js';
 import './layout/circle/strategy.js';
 
 export { ForceLayout } from './layout.js';

@@ -63,9 +63,9 @@ describe('grid 坐标系（布局后网格化）', () => {
     expect(run()).toBe(run());
   });
 
-  // force-group 算法已被移除（待重写），subgraph 成员钳制语义随之禁用；
-  // 重写 force-group 后恢复本用例（用户决定：保留用例不删除）。
-  it.skip('subgraph 成员吸附后仍在包含区域内', () => {
+  // force-group 已由 group-undirected（递归折叠流水线）取代：成员包含
+  // 由折叠布局保证，本用例随之切换算法恢复（原用例保留不删除）。
+  it('subgraph 成员吸附后仍在包含区域内', () => {
     const graph: GraphSpec = {
       nodes: [{ id: 'in1' }, { id: 'in2' }, { id: 'ext' }],
       edges: [{ source: 'in1', target: 'in2' }, { source: 'sub', target: 'ext' }],
@@ -74,7 +74,7 @@ describe('grid 坐标系（布局后网格化）', () => {
       ],
     };
     const layout = new ForceLayout(graph, {
-      algorithm: 'force-group',
+      algorithm: 'group-undirected',
       naturalLength: 120,
       accuracy: 'exact',
       gravity: 'pairwise',

@@ -38,6 +38,18 @@ function cellKey(gx: number, gy: number): string {
   return `${gx},${gy}`;
 }
 
+/**
+ * 粗布局的可选行为开关。
+ */
+export interface CoarsePlacementOptions {
+  /**
+   * 忽略用户显式定位（placed）：分组布局的组内层级在自身的局部坐标系中
+   * 运行，成员上残留的外层世界坐标不具备"用户定位"语义 —— 视全部元素
+   * 为未定位（否则 placed 成员会被留在局部布局之外，污染块包围盒）。
+   */
+  ignorePlaced?: boolean;
+}
+
 export interface Cell {
   gx: number;
   gy: number;
@@ -334,6 +346,7 @@ export function coarseGridPlacement(
   adjacency: Array<Set<number>>,
   naturalLength: number,
   heuristics: CoarseHeuristics = undirectedHeuristics(adjacency),
+  options: CoarsePlacementOptions = {},
 ): CoarsePlacementGrid {
   const n = elements.length;
   if (n === 0) return { grid: new PointGrid(), posOf: [], cell: Math.max(naturalLength, 1e-3), order: [] };
@@ -341,11 +354,12 @@ export function coarseGridPlacement(
   const grid = new PointGrid();
   const posOf: GridPos = new Array(n).fill(null);
   const order: number[] = [];
+  const ignorePlaced = options.ignorePlaced ?? false;
 
   // 用户显式定位的元素：连续坐标反算占格（冲突时向右找相邻空格）。
   for (let i = 0; i < n; i++) {
     const el = elements[i];
-    if (!el.placed) continue;
+    if (!el.placed || ignorePlaced) continue;
     let gx = Math.round(el.x / cell);
     const gy = Math.round(el.y / cell);
     while (grid.has(gx, gy)) gx++;
@@ -427,10 +441,12 @@ export function coarsePlacement(
   adjacency: Array<Set<number>>,
   naturalLength: number,
   heuristics: CoarseHeuristics = undirectedHeuristics(adjacency),
+  options: CoarsePlacementOptions = {},
 ): void {
   const n = elements.length;
   if (n === 0) return;
-  const { grid, posOf, cell } = coarseGridPlacement(elements, adjacency, naturalLength, heuristics);
+  const ignorePlaced = options.ignorePlaced ?? false;
+  const { grid, posOf, cell } = coarseGridPlacement(elements, adjacency, naturalLength, heuristics, options);
 
   // ── 压实 + 变距映射：删空行空列，按行/列最大半径拉伸物理间距 ──
 
@@ -483,7 +499,7 @@ export function coarsePlacement(
   let oy = 0;
   let placedCount = 0;
   for (let i = 0; i < n; i++) {
-    if (!elements[i].placed) continue;
+    if (ignorePlaced || !elements[i].placed) continue;
     const p = posOf[i]!;
     ox += elements[i].x - xs[colAt.get(p.gx)!];
     oy += elements[i].y - ys[rowAt.get(p.gy)!];
@@ -507,7 +523,7 @@ export function coarsePlacement(
   for (const [key, index] of grid.occ) {
     const [gx, gy] = key.split(',').map(Number);
     const el = elements[index];
-    if (el.placed) continue; // 用户显式定位的元素不移动
+    if (el.placed && !ignorePlaced) continue; // 用户显式定位的元素不移动
     el.x = xs[colAt.get(gx)!] + ox;
     el.y = ys[rowAt.get(gy)!] + oy;
   }

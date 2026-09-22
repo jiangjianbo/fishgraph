@@ -109,12 +109,16 @@ export type LayoutStage = 0 | 1 | 2 | 3;
 export interface LayoutOptions {
   /**
    * 布局算法（策略名）。默认 'force-undirected'（无向力导向基础算法）。
-   * 内置：'force-undirected' | 'force-directed' | 'circle'；
-   * 可用 registerStrategy 注册自定义策略。
+   * 内置：'force-undirected' | 'force-directed' | 'grid-undirected' |
+   * 'group-undirected' | 'circle'；可用 registerStrategy 注册自定义策略。
    * 'force-undirected'：均匀分布、结构对称、无交叉的紧凑布局
    * （质点网格粗布局 → 膨胀压实 → 短弛豫微调，见 doc/布局核心原则.md）。
    * 'force-directed'：有向图布局 —— 在无向基础算法上派生，叠加层级解环、
    * 软层级引导放置与方向流动势能，配合 direction 指定流动方向。
+   * 'group-undirected'：无向分组布局 —— 深度优先递归的复合布局：组内成员
+   * 先用同一套流水线递归布局，组折叠为一个"巨大号的单元"（单元半径 =
+   * 内部块包围半径）参与外层布局，最后把内部块平移映射到单元最终位置。
+   * 消费 subgraphs 与 hiddenGroups 声明（含嵌套；成员重叠抛错）。
    * 运行时切换用 layout.setStrategy(name)（保留图数据，重新初始化位置）。
    */
   algorithm?: string;

@@ -124,17 +124,20 @@ src/
 ### 3.4 算法实现层
 
 每个算法一个独立子目录，实现 `LayoutStrategy` 并在模块加载时自注册。
-当前内置四种，详细设计见独立文档：
+当前内置五种，详细设计见独立文档：
 
 | 算法 | 注册名 | 目录 | 设计文档 |
 |---|---|---|---|
 | 力导向无向图（**默认算法、基础算法**：质点网格粗布局 + 短弛豫微调，共享力学引擎所在地） | `'force-undirected'` | `src/layout/force-undirected/` | [layout-force-undirected.md](./layout-force-undirected.md) |
 | 力导向有向图（继承 force-undirected，解环层级 + 软层级引导 + 流动势能，支持 TB/LR） | `'force-directed'` | `src/layout/force-directed/` | [layout-force-directed.md](./layout-force-directed.md) |
 | 网格无向图（grid-first 纯网格流水线：质点放置复用 → AABB 膨胀 → 通道压实 → A\* 走线） | `'grid-undirected'` | `src/layout/grid-undirected/` | [layout-grid-undirected.md](./layout-grid-undirected.md) |
+| 无向分组图（深度优先递归折叠：组内同流水线递归布局 → 组折叠为单元参与外层 → 平移映射） | `'group-undirected'` | `src/layout/group-undirected/` | [layout-group-undirected.md](./layout-group-undirected.md) |
 | 圆环 | `'circle'` | `src/layout/circle/` | [layout-circle.md](./layout-circle.md) |
 
-> 力导向+分组（`'force-group'`）已随旧 `force/` 一并移除，待按新的
-> 基础算法派生接缝重写；分组消费相关测试暂以 `describe.skip` 保留。
+> 力导向+分组（`'force-group'`，力场注入式：包含墙/向心束缚/张力传导）
+> 已随旧 `force/` 一并移除，仍待按派生接缝重写；分组消费相关测试暂以
+> `describe.skip` 保留。结构折叠路线的 `'group-undirected'` 已先行落地
+> （与 force-group 是两条互补路线，见 layout-group-undirected.md §7）。
 
 算法内部还可以再有自己的子结构，只要不泄漏到接缝之外。共享力学引擎
 （参数派生、求解器、力场、跳数矩阵、交叉计数、BH 四叉树、空间网格）
@@ -415,9 +418,12 @@ run(maxIterations, onTick)
    ├─ [force-directed] 同上 + 流动势能（extraForces 缝）与有向粗布局
    ├─ [grid-undirected] 构造期已完成整条网格流水线（放置→膨胀→压实→走线），
    │                    run() 即返回收敛（无迭代力学）
+   ├─ [group-undirected] 构造期已完成递归折叠流水线（组内先布局 → 单元折叠
+   │                    → 逐层弛豫 → 自顶向下平移映射），run() 即返回收敛
    ├─ [force-group]（待重写）组内精修：冻结组外节点弛豫
    ├─ 坐标系修正：构造 CoordinateNode[] → cs.refine() → 坐标写回 store
-   │            （grid-undirected 不消费：网格解本身就是格点）
+   │            （grid-undirected 不消费：网格解本身就是格点；
+   │             group-undirected 按层级在递归内部执行）
    └─ 返回 RunResult { iterations, converged, energy }
 
 任意时刻：step() 单步推进（demo 动画帧驱动）
