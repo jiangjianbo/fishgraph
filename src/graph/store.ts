@@ -115,9 +115,9 @@ export class LayoutNode extends LayoutElement {
 /**
  * LayoutSubgraphNode —— subgraph 容器（Compound Node）。
  *
- * 有固定边界/物理实体：引擎把它当作巨大号的节点解算碰撞与排斥；
- * 每轮力场求值末尾执行 updateBoundsFromChildren()，按成员几何
- * （包围全部成员）+ padding 重算自身半径（最小面积填充）。
+ * 有物理实体：引擎把它当作一个节点与外部元素解算碰撞与排斥；半径 =
+ * 成员实占 + padding（updateBoundsFromChildren，世界分块种入与终局
+ * 对齐时刷新），声明的 shape 只用于渲染与成员钳制，不参与力学占位。
  * 结构上支持嵌套（children 可含其它容器 id）。
  */
 export class LayoutSubgraphNode extends LayoutElement {
@@ -140,15 +140,19 @@ export class LayoutSubgraphNode extends LayoutElement {
       shape: spec.shape,
       label: spec.label ?? null,
       placed: false,
-      mass: spec.members.length + 1,
+      // 斥力强度与节点大小无关（2026-09-22 起）：质量维度整体归一，
+      // 容器不再按成员数放大力学强度（对外推力、提升边弹力、弱引力）。
+      mass: 1,
     });
     this.children = [...spec.members];
     this.padding = spec.padding ?? DEFAULT_SUBGRAPH_PADDING;
   }
 
   /**
-   * 按成员几何刷新容器半径（最小面积填充）：
+   * 按成员几何刷新容器半径（成员实占口径，2026-09-22 起）：
    * 包围全部成员（中心距 + 成员半径的最大值）再外扩 padding。
+   * 不再以声明形状的 baseR 为下限——容器本体的力学占位与外部元素
+   * 的斥力平衡距离跟随成员实占，声明的空白画布不参与力学。
    */
   updateBoundsFromChildren(elements: readonly LayoutElement[]): void {
     let maxD = 0;
@@ -156,7 +160,7 @@ export class LayoutSubgraphNode extends LayoutElement {
       const nd = elements[idx];
       maxD = Math.max(maxD, Math.hypot(nd.x - this.x, nd.y - this.y) + nd.r);
     }
-    this.r = Math.max(this.baseR, maxD + this.padding);
+    this.r = maxD + this.padding;
   }
 }
 
@@ -519,6 +523,9 @@ export class GraphStore {
     const fs = this.labelFontSize;
     const pad = this.labelPadding;
     for (const nd of this.elements) {
+      // 容器的 r 由 updateBoundsFromChildren（成员实占）全权管理，
+      // 不吃文字盒、也不回落 baseR 声明值。
+      if (nd.isSubgraph) continue;
       if (!enabled || nd.label === null) {
         nd.r = nd.baseR;
         continue;
