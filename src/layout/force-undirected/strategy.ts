@@ -10,8 +10,11 @@
  * 只需消除网格折线感并到达力学平衡，因此迭代预算的安全网远小于
  * force-directed。
  *
- * 算法不消费 subgraphs/hiddenGroups 声明（分组语义归 force-group）；
- * subgraph 容器作为普通大节点参与布局。
+ * 算法消费 subgraphs 声明为「世界分块」（见 worlds.ts）：每个容器内部
+ * 是独立力学世界 —— 容器对成员无力、外部对内部无影响（跨世界零耦合），
+ * 跨世界连线提升为容器本体间的连线；根层即"无限大容器"的世界。成员块
+ * 与容器的对齐用纯平移（粗布局后种入 + 收敛后终局对齐）。hiddenGroups
+ * 声明仍不消费（聚类语义归 group-undirected）。
  */
 
 import type { GraphStore } from '../../graph/store.js';
@@ -27,6 +30,12 @@ import { registerStrategy } from '../strategy.js';
 import type { ForceSnapshot, LayoutStrategy, ResolvedLayoutOptions } from '../strategy.js';
 import type { AccuracyMode, LayoutStage, RunOptions, RunResult } from '../../types.js';
 import { coarsePlacement } from './coarse.js';
+import {
+  alignMembersToContainers,
+  buildWorldPartition,
+  clampMembersToContainers,
+  type WorldPartition,
+} from './worlds.js';
 
 /**
  * 微调预算安全网（正常路径由收敛判据自适应提前停，实测远低于该值）：
@@ -43,6 +52,8 @@ export class ForceUndirectedStrategy implements LayoutStrategy {
   protected options: ResolvedLayoutOptions;
   protected params: DerivedParams;
   protected ctx: ForceContext;
+  /** 世界分块表（有 subgraph 声明时非空；null = 无分组，全部走原路径）。 */
+  protected partition: WorldPartition | null = null;
   private solver: RelaxationSolver;
   private cs: CoordinateSystem;
   readonly energyHistory: number[] = [];
@@ -55,26 +66,34 @@ export class ForceUndirectedStrategy implements LayoutStrategy {
     // 文字尺寸先物化进有效半径：粗布局的膨胀按最终包围尺寸计算。
     this.store.applyNodeLabelSizes(true);
     this.params = deriveParams(options, store.elements.length);
+    // 世界分块在粗布局前构建：粗布局按提升拓扑放置（成员聚块、容器聚外），
+    // 随后种入容器。
+    if (store.subgraphNodes.length > 0) {
+      this.partition = buildWorldPartition(store);
+    }
     // 阶段 2/3：质点网格放置 + 膨胀压实（就地写回坐标）。
     this.applyCoarsePlacement();
+    const partition = this.partition;
     this.ctx = {
       elements: this.store.elements,
-      edges: this.store.edges,
-      adj: this.store.adj,
+      edges: partition ? partition.liftedEdges : this.store.edges,
+      adj: partition ? partition.liftedAdj : this.store.adj,
       params: this.params,
       gravity: options.gravity,
       accuracy: options.accuracy,
       theta: options.theta,
       labelCollision: options.labelCollision,
-      edgeKaMul: new Array<number>(this.store.edges.length).fill(1),
-      edgeCrossCounts: new Array<number>(this.store.edges.length).fill(0),
+      edgeKaMul: new Array<number>(partition ? partition.liftedEdges.length : this.store.edges.length).fill(1),
+      edgeCrossCounts: new Array<number>(partition ? partition.liftedEdges.length : this.store.edges.length).fill(0),
       crossPenaltyEnergy: 0,
       hopScale: buildHopScale(
-        this.store.adj,
+        partition ? partition.liftedAdj : this.store.adj,
         options.hopRepulsionDecay,
         options.unrelatedRepulsion,
       ),
       extensions: {},
+      world: partition?.world,
+      edgeWorld: partition?.edgeWorld,
       stage: 3,
       energy: 0,
       maxForceUnit: 0,
@@ -89,9 +108,20 @@ export class ForceUndirectedStrategy implements LayoutStrategy {
    * 派生算法覆写本方法以传入自己的 CoarseHeuristics（如层级引导放置）。
    * 注意：构造期会被基类构造函数调用，覆写实现不得依赖子类字段初始化器
    * （其在本构造体返回后才执行），所需数据应在方法内就地计算。
+   *
+   * 有世界分块时：粗布局按提升拓扑放置（成员按同世界内部边聚块、容器
+   * 与提升邻居聚拢），随后把成员块种入容器（纯平移）。
    */
   protected applyCoarsePlacement(): void {
-    coarsePlacement(this.store.elements, this.store.adj, this.params.L);
+    const partition = this.partition;
+    coarsePlacement(
+      this.store.elements,
+      partition ? partition.liftedAdj : this.store.adj,
+      this.params.L,
+    );
+    if (partition) {
+      alignMembersToContainers(this.store, partition);
+    }
   }
 
   /**
@@ -131,7 +161,7 @@ export class ForceUndirectedStrategy implements LayoutStrategy {
     this.ctx.labelCollision = options.labelCollision;
     if (hopChanged) {
       this.ctx.hopScale = buildHopScale(
-        this.store.adj,
+        this.partition ? this.partition.liftedAdj : this.store.adj,
         options.hopRepulsionDecay,
         options.unrelatedRepulsion,
       );
@@ -150,20 +180,25 @@ export class ForceUndirectedStrategy implements LayoutStrategy {
     this.solver.invalidate();
   }
 
-  /** 图结构变化（增删节点/边）：重新粗布局并重建求解器。 */
+  /** 图结构变化（增删节点/边）：重建世界分块、重新粗布局并重建求解器。 */
   rebuild(): void {
     this.params = deriveParams(this.options, this.store.elements.length);
     Object.assign(this.ctx.params, this.params);
     this.store.refreshLabelBoxes();
     this.store.applyNodeLabelSizes(true);
+    this.partition =
+      this.store.subgraphNodes.length > 0 ? buildWorldPartition(this.store) : null;
+    const partition = this.partition;
     this.ctx.elements = this.store.elements;
-    this.ctx.edges = this.store.edges;
-    this.ctx.adj = this.store.adj;
-    this.ctx.edgeKaMul = new Array<number>(this.store.edges.length).fill(1);
-    this.ctx.edgeCrossCounts = new Array<number>(this.store.edges.length).fill(0);
+    this.ctx.edges = partition ? partition.liftedEdges : this.store.edges;
+    this.ctx.adj = partition ? partition.liftedAdj : this.store.adj;
+    this.ctx.world = partition?.world;
+    this.ctx.edgeWorld = partition?.edgeWorld;
+    this.ctx.edgeKaMul = new Array<number>(this.ctx.edges.length).fill(1);
+    this.ctx.edgeCrossCounts = new Array<number>(this.ctx.edges.length).fill(0);
     this.ctx.crossPenaltyEnergy = 0;
     this.ctx.hopScale = buildHopScale(
-      this.store.adj,
+      this.ctx.adj,
       this.options.hopRepulsionDecay,
       this.options.unrelatedRepulsion,
     );
@@ -187,6 +222,17 @@ export class ForceUndirectedStrategy implements LayoutStrategy {
       this.energyHistory.push(this.ctx.energy);
       if (this.energyHistory.length > 4000) this.energyHistory.shift();
     }
+    if (this.partition) {
+      // 弛豫每步钳制：世界内弹力可能把成员推出容器边界（交互拖拽贴边
+      // 时尤甚），压回保证成员任何时刻都在自己的世界内。run 与逐帧
+      // （demo 动画）共用本方法，两条路径行为一致。
+      clampMembersToContainers(this.store, this.partition);
+      // 逐帧调用不会经过 run() 末尾的终局对齐，收敛时在此补齐；
+      // 对齐是纯平移、幂等，收敛态下重复调用零位移。
+      if (this.solver.converged) {
+        alignMembersToContainers(this.store, this.partition);
+      }
+    }
     return moved;
   }
 
@@ -197,9 +243,15 @@ export class ForceUndirectedStrategy implements LayoutStrategy {
     this.solver.invalidate();
     this.runBudget(max, opts.onTick);
 
-    // 坐标系修正（布局完成后，以最优布局为基础）：free 恒等，grid 网格化吸附
+    // 坐标系修正（布局完成后，以最优布局为基础）：free 恒等，grid 网格化吸附。
+    // 世界分块时只修正根世界（world=-1）元素：吸附会破坏容器内的相对构型，
+    // 容器本体的位移由终局对齐以纯平移传导给成员。
     if (this.store.elements.length > 0) {
-      const nodes: CoordinateNode[] = this.store.elements.map((el) => ({
+      const partition = this.partition;
+      const targets = partition
+        ? this.store.elements.filter((_, i) => partition.world[i] < 0)
+        : this.store.elements;
+      const nodes: CoordinateNode[] = targets.map((el) => ({
         id: el.id,
         x: el.x,
         y: el.y,
@@ -210,8 +262,13 @@ export class ForceUndirectedStrategy implements LayoutStrategy {
         this.options.gridSize > 0 ? this.options.gridSize : this.options.naturalLength;
       this.cs.refine(nodes, { lattice });
       for (let i = 0; i < nodes.length; i++) {
-        this.store.elements[i].x = nodes[i].x;
-        this.store.elements[i].y = nodes[i].y;
+        targets[i]!.x = nodes[i]!.x;
+        targets[i]!.y = nodes[i]!.y;
+      }
+      // 终局对齐：弛豫期两世界零耦合各自收敛，末次纯平移把成员块
+      // 对齐容器本体（不改内部相对构型，能量不变量保持）。
+      if (partition) {
+        alignMembersToContainers(this.store, partition);
       }
     }
 

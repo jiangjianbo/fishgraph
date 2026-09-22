@@ -71,6 +71,22 @@ export function sdfEllipse(dx: number, dy: number, rx: number, ry: number): SdfS
   return { dist, gx: gx0 / g, gy: gy0 / g };
 }
 
+/**
+ * 把点 (x, y) 沿形状 SDF 梯度压入形状内 margin（cx/cy 为形状中心）。
+ * 已在界内（dist < -margin）则原样返回。拖拽钳制与弛豫边界约束共用。
+ */
+export function clampPointToShape(
+  shape: ShapeSpec,
+  cx: number, cy: number,
+  x: number, y: number,
+  margin: number,
+): { x: number; y: number } {
+  const s = shapeSdf(shape, x - cx, y - cy);
+  if (s.dist < -margin) return { x, y };
+  const push = s.dist + margin;
+  return { x: x - s.gx * push, y: y - s.gy * push };
+}
+
 /** 任意形状的 SDF，dx/dy 为相对形状中心的偏移。 */
 export function shapeSdf(shape: ShapeSpec, dx: number, dy: number): SdfSample {
   switch (shape.kind) {

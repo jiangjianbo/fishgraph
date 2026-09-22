@@ -20,7 +20,7 @@
  *     长文字按"占用面积最小"自动回绕
  */
 
-import { GraphStore, type InternalEdge } from './graph/store.js';
+import { GraphStore, type InternalEdge, LayoutSubgraphNode } from './graph/store.js';
 import {
   createStrategy,
   type ForceSnapshot,
@@ -166,6 +166,24 @@ export class ForceLayout {
   setNodePosition(id: ElementId, x: number, y: number): void {
     this.store.setNodePosition(id, x, y);
     this.strategy.invalidate();
+  }
+
+  /**
+   * 把成员坐标钳制进所属容器（成员包围圆完全落在容器边界内）；
+   * 非成员原样返回。拖拽交互用——成员不可被拖出 subgraph。
+   */
+  clampToContainer(id: ElementId, x: number, y: number): { x: number; y: number } {
+    return this.store.clampToContainer(id, x, y);
+  }
+
+  /** 容器的全部成员 id（递归展开嵌套容器，不含容器自身）。 */
+  subgraphMemberIds(id: ElementId): ElementId[] {
+    return this.store.subgraphMemberIds(id);
+  }
+
+  /** id 所属最内层 subgraph 容器（非成员返回 null）。 */
+  containerOf(id: ElementId): LayoutSubgraphNode | null {
+    return this.store.containerOf(id);
   }
 
   // ── 迭代 ────────────────────────────────────────────────

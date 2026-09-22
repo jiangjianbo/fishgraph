@@ -129,6 +129,15 @@ export interface ForceContext {
   hopScale: Float32Array | null;
   /** 力场扩展点（派生算法注入；纯力导向为空对象）。 */
   extensions: ForceExtensions;
+  /**
+   * 世界分块（容器内部 = 独立世界）：元素 → 所属最内层容器下标
+   * （非成员 -1）。undefined = 无分组，全部元素同属根世界。
+   * 跨世界节点对零力耦合（见 worlds.ts）。
+   */
+  world?: Int32Array;
+  /** 与 world 同存：每条边的世界（世界内边 = 该世界；提升边/根边 = -1）。
+   *  避让（节点-边 / 标签 / 线间）只在同世界内生效。 */
+  edgeWorld?: Int32Array;
   stage: LayoutStage;
   energy: number;
   /** 力残差：max|F|/forceUnit。收敛判据 —— 所有节点的合力趋近 0。 */
@@ -338,6 +347,9 @@ function bondTerm(
 
 /** 一对节点之间的核力式相互作用，返回势能贡献。 */
 function applyNodePair(ctx: ForceContext, i: number, j: number, kind: PairKind): number {
+  // 世界分块：跨世界对零力零能量（容器对成员无力、外部对内部无影响，
+  // 严格双向 —— 见 worlds.ts）。
+  if (ctx.world && ctx.world[i] !== ctx.world[j]) return 0;
   const ni = ctx.elements[i];
   const nj = ctx.elements[j];
   const p = ctx.params;
@@ -576,6 +588,9 @@ function applyEdgeEdgeAvoidance(ctx: ForceContext, grid: SpatialGrid): void {
       if (item.kind !== 0) return; // 跳过标签 item（BH 网格共用，否则线间斥力翻倍）
       const j = item.edgeIndex;
       if (j <= i) return;
+      // 世界分块：线间避让只在同世界的边对之间生效（跨世界边互不打扰，
+      // 力也不会经线间避让漏进容器内部）。
+      if (ctx.world && ctx.edgeWorld && ctx.edgeWorld[i] !== ctx.edgeWorld[j]) return;
       ctx.energy += applyEdgeEdgeInteraction(ctx, i, j);
     });
   }
@@ -702,7 +717,11 @@ export function computeForcesExact(ctx: ForceContext): number {
   }
   if (ctx.stage >= 2) {
     for (let c = 0; c < n; c++) {
-      for (const e of ctx.edges) {
+      for (let ei = 0; ei < ctx.edges.length; ei++) {
+        // 世界分块：节点只受同世界边的避让/标签墙（提升边不侵扰容器内部，
+        // 容器内部边也不打扰外部节点 —— 严格双向）。
+        if (ctx.world && ctx.edgeWorld && ctx.edgeWorld[ei] !== ctx.world[c]) continue;
+        const e = ctx.edges[ei];
         // 边的避让不作用于自己的端点（线属于这两个节点）；
         // 标签避让对端点同样生效（文字会把两端撑开）。
         if (e.sourceIndex !== c && e.targetIndex !== c) ctx.energy += applyEdgeNodeInteraction(ctx, c, e);
@@ -733,23 +752,35 @@ export function computeForcesBH(ctx: ForceContext): number {
 
   // 1. 节点-节点：斥力 + 弱引力/调和约束（相邻节点的引力在第 2 步沿边精确累加，避免重复）。
   //    双树遍历保证每个无序对恰好访问一次，力与能量是同一泛函的精确梯度。
-  tree.forEachPairInteraction(
-    ctx.theta,
-    (a, b) => {
-      const adjacent = ctx.stage >= 1 && ctx.adj[a.index].has(b.index);
-      const kind: PairKind = adjacent ? 'stranger-repulsion' : pairKind(ctx, false);
-      ctx.energy += applyNodePair(ctx, a.index, b.index, kind);
-    },
-    (p, cell) => {
-      ctx.energy += applyCellInteraction(ctx, p.index, cell);
-    },
-  );
-  // 远块聚合交互的反作用力按均摊常力摊派给块内成员。
-  tree.distributeReactions((index, fx, fy) => {
-    const nd = ctx.elements[index];
-    nd.fx += fx;
-    nd.fy += fy;
-  });
+  //    世界分块时四叉树会把跨世界质点聚进同一聚合块（力泄漏），退化为
+  //    逐对循环 —— applyNodePair 入口的世界短路保证零耦合（分块成本
+  //    Σ n_w² 仍远小于全图 n²，且分组图规模通常有限）。
+  if (ctx.world) {
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        const adjacent = ctx.stage >= 1 && ctx.adj[i].has(j);
+        ctx.energy += applyNodePair(ctx, i, j, pairKind(ctx, adjacent));
+      }
+    }
+  } else {
+    tree.forEachPairInteraction(
+      ctx.theta,
+      (a, b) => {
+        const adjacent = ctx.stage >= 1 && ctx.adj[a.index].has(b.index);
+        const kind: PairKind = adjacent ? 'stranger-repulsion' : pairKind(ctx, false);
+        ctx.energy += applyNodePair(ctx, a.index, b.index, kind);
+      },
+      (p, cell) => {
+        ctx.energy += applyCellInteraction(ctx, p.index, cell);
+      },
+    );
+    // 远块聚合交互的反作用力按均摊常力摊派给块内成员。
+    tree.distributeReactions((index, fx, fy) => {
+      const nd = ctx.elements[index];
+      nd.fx += fx;
+      nd.fy += fy;
+    });
+  }
 
   // 2. 沿边累加相邻弹力（按 μ_e 缩放）+ 交叉能量罚
   if (ctx.stage >= 1) {
@@ -802,6 +833,8 @@ export function computeForcesBH(ctx: ForceContext): number {
     for (let c = 0; c < n; c++) {
       const nd = ctx.elements[c];
       grid.query(nd.x, nd.y, queryR, (item) => {
+        // 世界分块：节点只受同世界边的避让/标签墙（与精确模式同一规则）。
+        if (ctx.world && ctx.edgeWorld && ctx.edgeWorld[item.edgeIndex] !== ctx.world[c]) return;
         const e = ctx.edges[item.edgeIndex];
         if (item.kind === 0) {
           if (e.sourceIndex !== c && e.targetIndex !== c) ctx.energy += applyEdgeNodeInteraction(ctx, c, e);

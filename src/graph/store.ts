@@ -15,7 +15,7 @@
  */
 
 import { estimateLabelBox } from '../label.js';
-import { DEFAULT_SHAPE, boundingRadius } from '../geometry.js';
+import { DEFAULT_SHAPE, boundingRadius, clampPointToShape } from '../geometry.js';
 import type {
   EdgeSpec,
   ElementId,
@@ -357,6 +357,44 @@ export class GraphStore {
     const el = this.elements[index];
     if (!el) return -1;
     return this.memberHub.get(el.id) ?? -1;
+  }
+
+  /** id 所属最内层 subgraph 容器（非成员返回 null）。 */
+  containerOf(id: ElementId): LayoutSubgraphNode | null {
+    const hub = this.memberHub.get(id);
+    if (hub === undefined) return null;
+    const el = this.elements[hub];
+    return el instanceof LayoutSubgraphNode ? el : null;
+  }
+
+  /**
+   * 容器的全部成员 id（递归展开嵌套容器：嵌套容器本体与其成员都包含；
+   * 容器自身不在结果中）。交互整体平移（拖容器带成员）使用。
+   */
+  subgraphMemberIds(id: ElementId): ElementId[] {
+    const out: ElementId[] = [];
+    const visit = (cid: ElementId): void => {
+      const idx = this.idToIndex.get(cid);
+      const el = idx === undefined ? null : this.elements[idx];
+      if (!(el instanceof LayoutSubgraphNode)) return;
+      for (const child of el.children) {
+        out.push(child);
+        visit(child);
+      }
+    };
+    visit(id);
+    return out;
+  }
+
+  /**
+   * 把成员坐标钳制进所属容器：成员包围圆完全落在容器边界内
+   * （margin = 成员有效半径）；非成员原样返回。
+   */
+  clampToContainer(id: ElementId, x: number, y: number): { x: number; y: number } {
+    const el = this.elementById(id);
+    const box = this.containerOf(id);
+    if (!box) return { x, y };
+    return clampPointToShape(box.shape, box.x, box.y, x, y, el.r);
   }
 
   /**

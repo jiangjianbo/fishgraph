@@ -294,10 +294,11 @@ function screenToWorld(sx: number, sy: number): [number, number] {
   return [(sx - viewCanvas.clientWidth / 2) / cam.k + cam.x, (sy - viewCanvas.clientHeight / 2) / cam.k + cam.y];
 }
 
-// ── 交互：拖节点 / 平移 / 缩放 ────────────────────────────
+// ── 交互：拖节点 / 拖容器 / 平移 / 缩放 ────────────────────
 
 type Drag =
   | { kind: 'node'; id: NodeId }
+  | { kind: 'subgraph'; id: NodeId; members: NodeId[]; lastX: number; lastY: number }
   | { kind: 'pan'; sx: number; sy: number; camX: number; camY: number }
   | null;
 let drag: Drag = null;
@@ -305,6 +306,18 @@ let drag: Drag = null;
 function eventPos(ev: MouseEvent): [number, number] {
   const rect = viewCanvas.getBoundingClientRect();
   return [ev.clientX - rect.left, ev.clientY - rect.top];
+}
+
+/** 点是否落在容器形状内（dx/dy 为相对容器中心的偏移）。 */
+function pointInSubgraph(v: SubgraphView, dx: number, dy: number): boolean {
+  switch (v.shape.kind) {
+    case 'rect':
+      return Math.abs(dx) <= v.shape.w / 2 && Math.abs(dy) <= v.shape.h / 2;
+    case 'circle':
+      return Math.hypot(dx, dy) <= v.shape.r;
+    case 'ellipse':
+      return (dx / v.shape.rx) ** 2 + (dy / v.shape.ry) ** 2 <= 1;
+  }
 }
 
 viewCanvas.addEventListener('pointerdown', (ev) => {
@@ -325,8 +338,29 @@ viewCanvas.addEventListener('pointerdown', (ev) => {
     layout.fix(hit);
     viewCanvas.classList.add('dragging');
   } else {
-    drag = { kind: 'pan', sx, sy, camX: cam.x, camY: cam.y };
+    // 容器命中：嵌套时取最深的容器（视觉上在最上层）
+    const views = layout.subgraphViews;
+    if (views.length > 0) {
+      const depth = subgraphDepthMap(views);
+      let best: SubgraphView | null = null;
+      let bestDepth = -1;
+      for (const v of views) {
+        if (!pointInSubgraph(v, wx - v.x, wy - v.y)) continue;
+        const d = depth.get(String(v.id)) ?? 0;
+        if (d > bestDepth) {
+          bestDepth = d;
+          best = v;
+        }
+      }
+      if (best) {
+        const members: NodeId[] = [best.id, ...layout.subgraphMemberIds(best.id)];
+        drag = { kind: 'subgraph', id: best.id, members, lastX: wx, lastY: wy };
+        for (const m of members) layout.fix(m);
+        viewCanvas.classList.add('dragging');
+      }
+    }
   }
+  if (!drag) drag = { kind: 'pan', sx, sy, camX: cam.x, camY: cam.y };
   viewCanvas.setPointerCapture(ev.pointerId);
 });
 
@@ -335,9 +369,25 @@ viewCanvas.addEventListener('pointermove', (ev) => {
   const [sx, sy] = eventPos(ev);
   if (drag.kind === 'node') {
     const [wx, wy] = screenToWorld(sx, sy);
-    layout.setNodePosition(drag.id, wx, wy);
-    layout.fix(drag.id, wx, wy);
+    const p = layout.clampToContainer(drag.id, wx, wy);
+    layout.setNodePosition(drag.id, p.x, p.y);
+    layout.fix(drag.id, p.x, p.y);
     converged = false; // 拖拽持续弛豫，实时看力场响应
+  } else if (drag.kind === 'subgraph') {
+    const [wx, wy] = screenToWorld(sx, sy);
+    const dx = wx - drag.lastX;
+    const dy = wy - drag.lastY;
+    drag.lastX = wx;
+    drag.lastY = wy;
+    // 容器带动全部成员（含嵌套）刚性平移，连线随端点走
+    const pos = layout.positions;
+    for (const m of drag.members) {
+      const cur = pos.get(m);
+      if (!cur) continue;
+      layout.setNodePosition(m, cur.x + dx, cur.y + dy);
+      layout.fix(m, cur.x + dx, cur.y + dy);
+    }
+    converged = false;
   } else {
     cam.x = drag.camX - (sx - drag.sx) / cam.k;
     cam.y = drag.camY - (sy - drag.sy) / cam.k;
@@ -345,7 +395,10 @@ viewCanvas.addEventListener('pointermove', (ev) => {
 });
 
 viewCanvas.addEventListener('pointerup', () => {
-  if (drag?.kind === 'node' && layout) layout.unfix(drag.id);
+  if (layout && drag?.kind === 'node') layout.unfix(drag.id);
+  if (layout && drag?.kind === 'subgraph') {
+    for (const m of drag.members) layout.unfix(m);
+  }
   drag = null;
   viewCanvas.classList.remove('dragging');
 });

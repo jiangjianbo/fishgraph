@@ -331,3 +331,43 @@ describe('算法纯粹性：force 纯力导向 / group-undirected 分组', () =>
     expect(samePositions(withGroup, withoutGroup)).toBe(false);
   });
 });
+
+describe('subgraph 交互约束（拖拽钳制与整体平移）', () => {
+  /** 容器 C(300×300) 含成员 a、b 与嵌套容器 N(120×120)，N 含成员 n1；外部节点 x。 */
+  function interactGraph(): GraphSpec {
+    return {
+      nodes: [{ id: 'a' }, { id: 'b' }, { id: 'n1' }, { id: 'x' }],
+      edges: [{ source: 'a', target: 'b' }],
+      subgraphs: [
+        { id: 'N', shape: { kind: 'rect', w: 120, h: 120 }, members: ['n1'] },
+        { id: 'C', shape: { kind: 'rect', w: 300, h: 300 }, members: ['a', 'b', 'N'] },
+      ],
+    };
+  }
+
+  it('subgraphMemberIds：递归展开嵌套容器（容器本体 + 深层成员）', () => {
+    const layout = new ForceLayout(interactGraph());
+    expect(layout.subgraphMemberIds('C')).toEqual(['a', 'b', 'N', 'n1']);
+    expect(layout.subgraphMemberIds('N')).toEqual(['n1']);
+    expect(layout.subgraphMemberIds('x')).toEqual([]);
+  });
+
+  it('clampToContainer：成员拖出边界被夹回容器内（含自身半径）', () => {
+    const layout = new ForceLayout(interactGraph());
+    layout.setNodePosition('C', 0, 0);
+    const box = layout.subgraphViews.find((v) => v.id === 'C')!;
+    const a = layout.nodeViews.find((v) => v.id === 'a')!;
+    const p = layout.clampToContainer('a', 500, 0);
+    const hw = (box.shape as { kind: 'rect'; w: number }).w / 2;
+    expect(p.x).toBeLessThanOrEqual(box.x + hw - a.r);
+    expect(p.y).toBe(0);
+    // 容器内的点保持不动
+    const inside = layout.clampToContainer('a', 10, -20);
+    expect(inside).toEqual({ x: 10, y: -20 });
+  });
+
+  it('clampToContainer：非成员节点原样返回（不受根层限制）', () => {
+    const layout = new ForceLayout(interactGraph());
+    expect(layout.clampToContainer('x', -9999, 8888)).toEqual({ x: -9999, y: 8888 });
+  });
+});
