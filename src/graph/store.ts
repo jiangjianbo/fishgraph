@@ -696,6 +696,28 @@ export class GraphStore {
     return this.edges;
   }
 
+  /**
+   * 作废全部边的走线拐点。waypoints 是 grid-undirected 的布局产物，
+   * 绑定产出时的节点坐标 —— 切换到其他布局算法后节点整体重排，旧拐点
+   * 指向的是失效位置，必须显式清除（否则渲染层会拿旧走线画错位折线）。
+   */
+  clearEdgeWaypoints(): void {
+    for (const e of this.edges) e.waypoints = undefined;
+  }
+
+  /**
+   * 作废全部节点的物化实占尺寸。w/h 是 grid-undirected 膨胀阶段的产物
+   * （格宽高 × 格距的 AABB），其他策略不产出 —— 切换算法后残留的 w/h
+   * 会让渲染层把节点画成旧网格的矩形、fit-to-view 按旧实占算包围盒，
+   * 必须恢复为「未物化」（渲染按声明形状、fit 按包围圆口径）。
+   */
+  clearMaterializedSizes(): void {
+    for (const el of this.elements) {
+      el.w = undefined;
+      el.h = undefined;
+    }
+  }
+
   get positions(): Map<ElementId, { x: number; y: number }> {
     const map = new Map<ElementId, { x: number; y: number }>();
     for (const el of this.elements) map.set(el.id, { x: el.x, y: el.y });

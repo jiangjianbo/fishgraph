@@ -111,6 +111,9 @@ export class ForceLayout {
   /** 运行时切换布局算法：图数据保留，位置由新策略重新初始化。 */
   setStrategy(name: string): void {
     this.options = { ...this.options, algorithm: name };
+    // 旧策略的走线拐点与物化尺寸都绑定旧坐标，换算法即失效
+    this.store.clearEdgeWaypoints();
+    this.store.clearMaterializedSizes();
     this.strategy = createStrategy(name, this.store, this.options);
   }
 
@@ -119,6 +122,9 @@ export class ForceLayout {
     const next = { ...this.options, ...partial } as ResolvedLayoutOptions;
     if (partial.algorithm !== undefined && partial.algorithm !== this.options.algorithm) {
       this.options = next;
+      // 旧策略的走线拐点与物化尺寸都绑定旧坐标，换算法即失效
+      this.store.clearEdgeWaypoints();
+      this.store.clearMaterializedSizes();
       this.strategy = createStrategy(next.algorithm, this.store, next);
       return;
     }

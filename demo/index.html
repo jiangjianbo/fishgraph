@@ -77,7 +77,7 @@
       <fieldset>
         <legend>求解</legend>
         <label class="row"><span class="name">布局算法</span>
-          <select id="algorithm"><option value="force-undirected" selected>力导向无向图</option><option value="force-directed">力导向有向图</option><option value="group-undirected">分组无向图</option><option value="circle">环形</option></select>
+          <select id="algorithm"><option value="force-undirected" selected>力导向无向图</option><option value="force-directed">力导向有向图</option><option value="group-undirected">分组无向图</option><option value="grid-undirected">网格无向图</option><option value="circle">环形</option></select>
         </label>
         <label class="row"><span class="name">流动方向</span>
           <select id="direction"><option value="TB" selected>自顶向下 TB</option><option value="LR">自左向右 LR</option></select>
@@ -93,6 +93,7 @@
       <div class="btnrow">
         <button id="restart" class="primary">重新布局</button>
         <button id="pause">暂停</button>
+        <button id="fitView">适应视图</button>
       </div>
       <div id="status"></div>
     </div>

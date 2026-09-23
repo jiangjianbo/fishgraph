@@ -273,14 +273,20 @@ let layout: ForceLayout | null = null;
 let converged = false;
 let paused = false;
 let iterations = 0;
+/** 布局（重）开始后待执行的视图适配标记：收敛时 fit 一次后清除，
+ *  用户交互（拖拽/缩放）引发的再收敛不重复触发。 */
+let needFit = false;
 
 function rebuild(): void {
   layout = new ForceLayout(GRAPHS[graphSel.value](), optionsFromUi());
   converged = false;
   iterations = 0;
+  needFit = true;
   cam.x = 0;
   cam.y = 0;
   cam.k = 1;
+  // 粗布局在构造期已完成，坐标可用：立即适配一次，弛豫收敛后再精调一次
+  fitToView();
 }
 
 // ── 视图变换（world ↔ screen）─────────────────────────────
@@ -292,6 +298,50 @@ function worldToScreen(wx: number, wy: number): [number, number] {
 }
 function screenToWorld(sx: number, sy: number): [number, number] {
   return [(sx - viewCanvas.clientWidth / 2) / cam.k + cam.x, (sy - viewCanvas.clientHeight / 2) / cam.k + cam.y];
+}
+
+/**
+ * 视图适配（fit-to-view）：把布局包围盒平移缩放到画布中央。包围盒口径 =
+ * 节点实占（物化 w/h，无则包围圆 r）∪ subgraph 容器形状，四周留 40px；
+ * 缩放钳制在与滚轮一致的 [0.1, 2]。重建与算法切换时自动触发（收敛时
+ * 再精调一次），也可用"适应视图"按钮手动触发。
+ */
+function fitToView(): void {
+  if (!layout) return;
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (const nd of layout.nodeViews) {
+    const hw = nd.w !== undefined ? nd.w / 2 : nd.r;
+    const hh = nd.h !== undefined ? nd.h / 2 : nd.r;
+    x0 = Math.min(x0, nd.x - hw);
+    x1 = Math.max(x1, nd.x + hw);
+    y0 = Math.min(y0, nd.y - hh);
+    y1 = Math.max(y1, nd.y + hh);
+  }
+  for (const sg of layout.subgraphViews) {
+    const he = halfExtentsOf(sg.shape);
+    x0 = Math.min(x0, sg.x - he.hw);
+    x1 = Math.max(x1, sg.x + he.hw);
+    y0 = Math.min(y0, sg.y - he.hh);
+    y1 = Math.max(y1, sg.y + he.hh);
+  }
+  if (!Number.isFinite(x0)) return; // 空图无可适配
+  const pad = 40;
+  const k = Math.min(
+    2,
+    Math.max(
+      0.1,
+      Math.min(
+        (viewCanvas.clientWidth - pad * 2) / (x1 - x0),
+        (viewCanvas.clientHeight - pad * 2) / (y1 - y0),
+      ),
+    ),
+  );
+  cam.k = k;
+  cam.x = (x0 + x1) / 2;
+  cam.y = (y0 + y1) / 2;
 }
 
 // ── 交互：拖节点 / 拖容器 / 平移 / 缩放 ────────────────────
@@ -438,9 +488,14 @@ for (const el of [algorithmSel, directionSel, gravitySel, accuracySel]) {
   el.addEventListener('change', () => {
     layout?.updateOptions(optionsFromUi());
     converged = false;
+    // 换算法/方向会整体重排（新策略或 rebuild），坐标全部失效：立即适配
+    // 新布局，收敛后再由 needFit 精调一次
+    needFit = true;
+    fitToView();
   });
 }
 $('restart').addEventListener('click', rebuild);
+$('fitView').addEventListener('click', fitToView);
 $('pause').addEventListener('click', () => {
   paused = !paused;
   $('pause').textContent = paused ? '继续' : '暂停';
@@ -555,33 +610,42 @@ function drawView(): void {
   }
 
 
-  // 边：两端按各自真实形状贴合求交（圆/矩形/椭圆轮廓的精确出射点），
-  // 末端画箭头；中点画白底文字
+  // 边：优先按走线拐点画折线（grid-undirected 的 A* 正交走线），
+  // 无 waypoints 时退化为直线；两端按各自真实形状贴合求交（圆/矩形/
+  // 椭圆轮廓的精确出射点），末端画箭头；标签画在折线路径长度中点
   for (const e of layout.edgeViews) {
     const a = edgeEnds[e.sourceIndex];
     const b = edgeEnds[e.targetIndex];
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
-    const d = Math.hypot(dx, dy) || 1;
-    const ux = dx / d;
-    const uy = dy / d;
-    // 形状贴合：端点 = 中心 + 方向 × (中心到形状边界的距离)，与渲染轮廓一致
-    const t0 = rayShapeExit(a.shape, ux, uy);
-    const t1 = d - rayShapeExit(b.shape, -ux, -uy) - 3;
-    if (t1 <= t0) continue;
-    const x0 = a.x + ux * t0;
-    const y0 = a.y + uy * t0;
-    const x1 = a.x + ux * t1;
-    const y1 = a.y + uy * t1;
-    const [sx0, sy0] = worldToScreen(x0, y0);
-    const [sx1, sy1] = worldToScreen(x1, y1);
+    // 走线点序列（含首末中心）；无 waypoints（连续布局）时即直线两端
+    const wps = e.waypoints && e.waypoints.length >= 2 ? e.waypoints : [a, b];
+    // 首段方向：从 a 中心贴形状出射
+    const d0 = Math.hypot(wps[1]!.x - a.x, wps[1]!.y - a.y) || 1;
+    const u0x = (wps[1]!.x - a.x) / d0;
+    const u0y = (wps[1]!.y - a.y) / d0;
+    const t0 = rayShapeExit(a.shape, u0x, u0y);
+    // 末段方向：贴 b 形状入射；末端回退量 = 形状出射距离 + 3px 箭头余量
+    const last = wps[wps.length - 2]!;
+    const d1 = Math.hypot(b.x - last.x, b.y - last.y) || 1;
+    const u1x = (b.x - last.x) / d1;
+    const u1y = (b.y - last.y) / d1;
+    const t1 = rayShapeExit(b.shape, -u1x, -u1y) + 3;
+    const isLine = wps.length === 2;
+    // 直线时两端贴合点交叠（贴邻节点）则无可画长度
+    if (isLine && d1 - t1 <= t0) continue;
+    const pts = [
+      { x: a.x + u0x * t0, y: a.y + u0y * t0 },
+      ...wps.slice(1, -1),
+      { x: b.x - u1x * t1, y: b.y - u1y * t1 },
+    ];
+    const scr = pts.map((p) => worldToScreen(p.x, p.y));
     g.strokeStyle = '#64748b';
     g.lineWidth = 1.5;
     g.beginPath();
-    g.moveTo(sx0, sy0);
-    g.lineTo(sx1, sy1);
+    scr.forEach(([sx, sy], i) => (i === 0 ? g.moveTo(sx, sy) : g.lineTo(sx, sy)));
     g.stroke();
-    const ang = Math.atan2(sy1 - sy0, sx1 - sx0);
+    // 箭头按末段方向
+    const [sx1, sy1] = scr[scr.length - 1]!;
+    const ang = Math.atan2(sy1 - scr[scr.length - 2]![1], sx1 - scr[scr.length - 2]![0]);
     g.fillStyle = '#64748b';
     g.beginPath();
     g.moveTo(sx1, sy1);
@@ -591,8 +655,25 @@ function drawView(): void {
     g.fill();
 
     if (e.label !== null && e.label !== '') {
-      const mx = (x0 + x1) / 2;
-      const my = (y0 + y1) / 2;
+      // 路径长度中点：累计折线段长取一半，定位标签（正交走线时落在
+      // 中间走廊段上，不压节点）
+      let total = 0;
+      for (let i = 1; i < pts.length; i++) {
+        total += Math.hypot(pts[i]!.x - pts[i - 1]!.x, pts[i]!.y - pts[i - 1]!.y);
+      }
+      let remain = total / 2;
+      let mx = pts[0]!.x;
+      let my = pts[0]!.y;
+      for (let i = 1; i < pts.length; i++) {
+        const seg = Math.hypot(pts[i]!.x - pts[i - 1]!.x, pts[i]!.y - pts[i - 1]!.y);
+        if (seg >= remain) {
+          const r = seg === 0 ? 0 : remain / seg;
+          mx = pts[i - 1]!.x + (pts[i]!.x - pts[i - 1]!.x) * r;
+          my = pts[i - 1]!.y + (pts[i]!.y - pts[i - 1]!.y) * r;
+          break;
+        }
+        remain -= seg;
+      }
       const box = estimateLabelBox(e.label, 12, 3);
       const [smx, smy] = worldToScreen(mx, my);
       const bw = Math.max(30, box.hw * 2 * cam.k);
@@ -610,13 +691,24 @@ function drawView(): void {
     }
   }
 
-  // 节点层：普通节点（subgraph 容器已在背景层绘制）
+  // 节点层：普通节点（subgraph 容器已在背景层绘制）。
+  // grid-undirected 物化节点（nd.w/nd.h 存在）按实占 AABB 矩形画，
+  // 其余按声明形状画。
   for (const nd of nv) {
     const [sx, sy] = worldToScreen(nd.x, nd.y);
     const sh = nd.shape;
-    const he = halfExtentsOf(sh);
     g.beginPath();
-    shapePath(g, sh, sx, sy, cam.k, Math.min(8, (he.hh * 2 * cam.k) / 4));
+    let labelTopOffset: number | null = null;
+    if (nd.w !== undefined && nd.h !== undefined) {
+      const w = nd.w * cam.k;
+      const h = nd.h * cam.k;
+      g.roundRect(sx - w / 2, sy - h / 2, w, h, Math.min(8, h / 4));
+    } else {
+      const he = halfExtentsOf(sh);
+      shapePath(g, sh, sx, sy, cam.k, Math.min(8, (he.hh * 2 * cam.k) / 4));
+      // subgraph（大矩形）的标签画在矩形顶部内侧，不遮挡内部成员
+      if (sh.kind === 'rect' && sh.w >= 200) labelTopOffset = sh.h / 2 - 10;
+    }
     g.fillStyle = nd.fixed ? '#fef9c3' : '#e0f2fe';
     g.fill();
     g.strokeStyle = '#0284c7';
@@ -627,12 +719,7 @@ function drawView(): void {
       g.font = `${Math.max(8, 12 * cam.k)}px system-ui, 'PingFang SC', sans-serif`;
       g.textAlign = 'center';
       g.textBaseline = 'middle';
-      // subgraph（大矩形）的标签画在矩形顶部内侧，不遮挡内部成员
-      if (sh.kind === 'rect' && sh.w >= 200) {
-        g.fillText(String(nd.label), sx, sy - sh.h / 2 + 10 * cam.k);
-      } else {
-        g.fillText(String(nd.label), sx, sy);
-      }
+      g.fillText(String(nd.label), sx, labelTopOffset !== null ? sy - labelTopOffset * cam.k : sy);
     }
   }
 }
@@ -686,6 +773,11 @@ function frame(): void {
       iterations++;
     }
     if (layout.converged) converged = true;
+  }
+  // 布局收敛后的视图适配（重建/换算法置位，fit 一次即清除）
+  if (converged && needFit) {
+    needFit = false;
+    fitToView();
   }
   drawView();
   drawEnergy();

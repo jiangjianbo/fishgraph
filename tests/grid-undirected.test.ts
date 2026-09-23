@@ -243,4 +243,29 @@ describe('grid-undirected（grid-first 纯网格流水线）', () => {
       expect(Number.isFinite(v.x) && Number.isFinite(v.y)).toBe(true);
     }
   });
+
+  it('切换布局算法后旧策略产物（waypoints/物化 w/h）失效清除', () => {
+    const layout = new ForceLayout(chain(5), {
+      algorithm: 'grid-undirected',
+      naturalLength: CELL,
+      labelCollision: false,
+    });
+    layout.run();
+    expect(layout.edgeViews.length).toBeGreaterThan(0);
+    expect(layout.edgeViews.every((e) => (e.waypoints?.length ?? 0) >= 2)).toBe(true);
+    expect([...layout.nodeViews].every((v) => v.w !== undefined && v.h !== undefined)).toBe(true);
+    // demo 的换算法路径（updateOptions）：旧拐点绑定旧坐标，必须作废；
+    // 物化 w/h 同理，否则节点被画成旧网格矩形、fit 包围盒偏大
+    layout.updateOptions({ algorithm: 'force-undirected' });
+    expect(layout.edgeViews.every((e) => e.waypoints === undefined)).toBe(true);
+    expect([...layout.nodeViews].every((v) => v.w === undefined && v.h === undefined)).toBe(true);
+    // setStrategy 路径同样清除
+    layout.setStrategy('grid-undirected');
+    layout.run();
+    expect(layout.edgeViews.every((e) => (e.waypoints?.length ?? 0) >= 2)).toBe(true);
+    expect([...layout.nodeViews].every((v) => v.w !== undefined && v.h !== undefined)).toBe(true);
+    layout.setStrategy('circle');
+    expect(layout.edgeViews.every((e) => e.waypoints === undefined)).toBe(true);
+    expect([...layout.nodeViews].every((v) => v.w === undefined && v.h === undefined)).toBe(true);
+  });
 });
