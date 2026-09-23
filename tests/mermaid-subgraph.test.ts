@@ -119,40 +119,47 @@ describe('mermaid 架构图：subgraph 分组布局（group-undirected 折叠流
     }
   });
 
-  it('包含性：成员落在容器包围圆内（view.r = 包裹全部成员 + padding）', () => {
+  it('包含性：成员外接矩形落在容器矩形内（统一形状口径的构造性不变量）', () => {
     const graph = buildGraph();
     for (const g of graph.subgraphs ?? []) {
       const hubView = layout.subgraphViews.find((v) => v.id === g.id)!;
-      // group-undirected 的视图半径按成员几何刷新：max(d + r) + padding，
-      // 故 d + mr ≤ view.r 是精确不变量（旧 0.55 内切口径是 force-group
-      // 软墙的近似，不再适用）
+      const rect = hubView.shape as { kind: 'rect'; w: number; h: number };
       for (const m of g.members) {
         const p = layout.positions.get(String(m))!;
-        const mr = layout.nodeViews.find((v) => v.id === m)!.r;
-        const d = Math.hypot(p.x - hubView.x, p.y - hubView.y);
+        const mv = layout.nodeViews.find((v) => v.id === m)!;
         expect(
-          d + mr,
-          `${m} 未被包含在 ${g.id} 内（d=${d.toFixed(0)} + r=${mr.toFixed(0)} > r=${hubView.r.toFixed(0)}）`,
-        ).toBeLessThanOrEqual(hubView.r + 2);
+          Math.abs(p.x - hubView.x) + mv.hw,
+          `${m} 超出 ${g.id} 矩形左/右边界（dx=${Math.abs(p.x - hubView.x).toFixed(0)} + hw=${mv.hw.toFixed(0)} > hw=${(rect.w / 2).toFixed(0)}）`,
+        ).toBeLessThanOrEqual(rect.w / 2 + 1e-6);
+        expect(
+          Math.abs(p.y - hubView.y) + mv.hh,
+          `${m} 超出 ${g.id} 矩形上/下边界`,
+        ).toBeLessThanOrEqual(rect.h / 2 + 1e-6);
       }
     }
   });
 
-  it('归属凝聚：成员距自己 hub 显著近于任何外部 hub', () => {
+  it('归属凝聚：成员中心在自己容器矩形内、不在任何外部容器矩形内', () => {
     const graph = buildGraph();
+    const hubViews = (graph.subgraphs ?? []).map((g) => ({
+      id: g.id,
+      v: layout.subgraphViews.find((x) => x.id === g.id)!,
+    }));
     for (const g of graph.subgraphs ?? []) {
-      const own = layout.positions.get(String(g.id))!;
+      const own = hubViews.find((h) => h.id === g.id)!.v;
       for (const m of g.members) {
         const p = layout.positions.get(String(m))!;
-        const dOwn = Math.hypot(p.x - own.x, p.y - own.y);
-        for (const other of graph.subgraphs ?? []) {
+        const inRect = (v: { x: number; y: number; shape: unknown }) => {
+          const rect = v.shape as { kind: 'rect'; w: number; h: number };
+          return (
+            Math.abs(p.x - v.x) <= rect.w / 2 + 1e-6 &&
+            Math.abs(p.y - v.y) <= rect.h / 2 + 1e-6
+          );
+        };
+        expect(inRect(own), `${m} 不在自家容器 ${String(g.id)} 矩形内`).toBe(true);
+        for (const other of hubViews) {
           if (other.id === g.id) continue;
-          const fo = layout.positions.get(String(other.id))!;
-          const dForeign = Math.hypot(p.x - fo.x, p.y - fo.y);
-          expect(
-            dOwn,
-            `${m} 离外部 hub ${other.id} 更近（${dForeign.toFixed(0)} < ${dOwn.toFixed(0)}）`,
-          ).toBeLessThan(dForeign - 10);
+          expect(inRect(other.v), `${m} 落入外部容器 ${String(other.id)} 矩形内`).toBe(false);
         }
       }
     }
@@ -173,11 +180,14 @@ describe('mermaid 架构图：subgraph 分组布局（group-undirected 折叠流
   });
 
   it('容器不重叠：subgraph 矩形（不嵌套时）两两不相交', () => {
+    // 统一形状口径：容器矩形 = 布局后的成员实占动态矩形（subgraphViews.shape），
+    // 声明画布只作成员钳制上界，不再参与碰撞/渲染语义
     const hubs = (buildGraph().subgraphs ?? [])
       .filter((g) => g.shape.kind === 'rect')
       .map((g) => {
+        const v = layout.subgraphViews.find((x) => x.id === g.id)!;
         const p = layout.positions.get(g.id)!;
-        const shape = g.shape as { kind: 'rect'; w: number; h: number };
+        const shape = v.shape as { kind: 'rect'; w: number; h: number };
         return { id: g.id, x: p.x, y: p.y, w: shape.w, h: shape.h };
       });
     for (let i = 0; i < hubs.length; i++) {

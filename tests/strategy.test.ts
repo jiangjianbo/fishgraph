@@ -10,19 +10,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { minSurfaceGap } from './helpers.js';
 import { ForceLayout, listStrategies } from '../src/index.js';
-
-function minSurfaceGap(layout: ForceLayout): number {
-  const nodes = layout.nodeViews;
-  let min = Infinity;
-  for (let i = 0; i < nodes.length; i++) {
-    for (let j = i + 1; j < nodes.length; j++) {
-      const gap = Math.hypot(nodes[i].x - nodes[j].x, nodes[i].y - nodes[j].y) - nodes[i].r - nodes[j].r;
-      if (gap < min) min = gap;
-    }
-  }
-  return min;
-}
 
 describe('布局策略（策略模式）', () => {
   it('注册表：内置策略已自注册；未知策略抛错并提示可用项', () => {

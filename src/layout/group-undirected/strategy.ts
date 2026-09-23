@@ -11,9 +11,10 @@
  *     见 compound.ts）；
  *   - 布局一条流水线：[递归布局每个子组的内部] → [质点网格粗布局 + 膨胀压实]
  *     → [力场弛豫微调] → [坐标系修正] → [量测子组内部块]；
- *   - 单元半径 = 组内部块的包围圆半径 + 包裹边距 —— 粗布局压实与弛豫斥力
- *     都以 getBoundRadius() 为口径，把组当作"巨大号的节点"解算，组内成员
- *     被该包围圆完全覆盖，因此跨层级无重叠由同一套力学不变量保证；
+ *   - 子组内部布局完成即把单元真实形状刷新为成员实占（外接矩形 + 包裹
+ *     边距，refreshGroupUnitShape 统一口径）—— 粗布局压实与弛豫碰撞都以
+ *     该形状的力学外接矩形解算，把组当作"巨大号的节点"，组内成员被完全
+ *     覆盖，跨层级无重叠由同一套力学不变量保证；
  *   - 全部层级完成后做一次自顶向下的平移映射：把组内部块平移到单元的
  *     最终位置（纯平移，不缩放 —— 内部块占用与单元预留口径一致）。
  *
@@ -29,7 +30,6 @@
  */
 
 import type { GraphStore } from '../../graph/store.js';
-import type { LayoutElement } from '../../graph/store.js';
 import { coarsePlacement } from '../force-undirected/coarse.js';
 import { deriveParams, type DerivedParams, type ForceContext } from '../force-undirected/forces.js';
 import { RelaxationSolver, type SolverOptions } from '../force-undirected/solver.js';
@@ -38,7 +38,7 @@ import { createCoordinateSystem, type CoordinateNode, type CoordinateSystem } fr
 import { registerStrategy } from '../strategy.js';
 import type { LayoutStrategy, ResolvedLayoutOptions } from '../strategy.js';
 import type { RunOptions, RunResult } from '../../types.js';
-import { buildGroupForest, buildLevelView, type GroupTreeNode, type LevelView } from './compound.js';
+import { buildGroupForest, buildLevelView, refreshGroupUnitShape, measureBlockCenter, type GroupTreeNode, type LevelView } from './compound.js';
 
 /** 每层级弛豫的迭代预算安全网（与 force-undirected 同口径）。 */
 const DEFAULT_MAX_ITERATIONS = 4000;
@@ -92,14 +92,11 @@ export class GroupUndirectedStrategy implements LayoutStrategy {
     isTop: boolean,
   ): void {
     // ── 深度优先：先布局每个子组的内部（成员坐标在其内部帧最终确定），
-    //    随即量测内部块并设置单元半径（父层的压实与弛豫按该半径解算）──
+    //    随即把子组单元的真实形状刷新为成员实占（统一形状口径）——
+    //    父层的压实与弛豫直接读单元的力学外接矩形 ──
     for (const g of childGroups) {
       this.layoutLevel(g.memberIndices, g.children, false);
-      const block = measureBlock(this.store, g);
-      g.block = block;
-      if (block) {
-        g.unit.r = Math.max(g.unit.baseR, block.r + g.padding);
-      }
+      refreshGroupUnitShape(this.store, g);
     }
 
     const view = buildLevelView(this.store, memberPool, childGroups);
@@ -201,12 +198,21 @@ export class GroupUndirectedStrategy implements LayoutStrategy {
   }
 
   /**
-   * 自顶向下平移映射：把 g 的内部块平移到单元的最终位置（单元本身是
-   * 映射锚点，不平移）。块中心用当前坐标重新量测 —— 子组的成员与容器
-   * 已被父组的平移带动，父子平移在差值中自然抵消，恰好只施加一次净平移；
-   * hidden 子组的伪单元不在 store 中、父组平移带不到它，显式随父组平移。
+   * 平移映射（自底向上）：先深层——把子组的内部块对齐到子组单元位置；
+   * 后本层——把整块（含子组子树与子组容器）平移到本组单元的最终位置。
+   *
+   * 顺序是正确性的关键：深层成员（如 hidden 伪单元的成员）在内部帧中
+   * 从未跟随子组单元移动，必须先被映射到子组单元锚点上，本层的整块
+   * 平移才能以"正确的相对构型"一次对齐到单元位置（整体平移不改变块
+   * 中心与成员的相对关系，父子两级对齐同时成立）。若自顶向下，本层对齐
+   * 会被深层映射的净平移破坏 —— 成员块中心漂移出容器矩形（矩形口径下
+   * 直接表现为成员出界，旧圆口径被半径富余吸收而未暴露）。
+   *
+   * hidden 子组的伪单元不在 store.elements 中、父组平移带不到它：本层
+   * 平移后显式随父组平移，深层映射才能以它为锚。
    */
   private settleGroup(g: GroupTreeNode): void {
+    for (const c of g.children) this.settleGroup(c);
     const center = measureBlockCenter(this.store, g);
     if (center) {
       const dx = g.unit.x - center.cx;
@@ -217,8 +223,6 @@ export class GroupUndirectedStrategy implements LayoutStrategy {
         el.x += dx;
         el.y += dy;
       }
-      // hidden 子组的伪单元不在 store.elements 中，父组平移带不到它：
-      // 显式随父组平移，深层映射才能以它为锚。
       for (const c of g.children) {
         if (!c.container) {
           c.unit.x += dx;
@@ -226,7 +230,6 @@ export class GroupUndirectedStrategy implements LayoutStrategy {
         }
       }
     }
-    for (const c of g.children) this.settleGroup(c);
   }
 
   // ── LayoutStrategy（流水线构造期一次完成，grid-undirected 先例）─────
@@ -276,39 +279,6 @@ export class GroupUndirectedStrategy implements LayoutStrategy {
   get stage(): 3 {
     return 3;
   }
-}
-
-/** 量测组内部块：子树成员当前坐标（内部帧）的包围盒 → 包围圆。 */
-function measureBlock(
-  store: GraphStore,
-  g: GroupTreeNode,
-): { cx: number; cy: number; r: number } | null {
-  if (g.subtreeIndices.length === 0) return null;
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  for (const idx of g.subtreeIndices) {
-    const el: LayoutElement | undefined = store.elements[idx];
-    if (!el) continue;
-    minX = Math.min(minX, el.x - el.r);
-    minY = Math.min(minY, el.y - el.r);
-    maxX = Math.max(maxX, el.x + el.r);
-    maxY = Math.max(maxY, el.y + el.r);
-  }
-  const cx = (minX + maxX) / 2;
-  const cy = (minY + maxY) / 2;
-  const r = Math.hypot(maxX - minX, maxY - minY) / 2;
-  return { cx, cy, r };
-}
-
-/** 量测组内部块的当前中心（映射期用：成员已被父组平移，中心需现算）。 */
-function measureBlockCenter(
-  store: GraphStore,
-  g: GroupTreeNode,
-): { cx: number; cy: number } | null {
-  const block = measureBlock(store, g);
-  return block ? { cx: block.cx, cy: block.cy } : null;
 }
 
 registerStrategy('group-undirected', (store, options) => new GroupUndirectedStrategy(store, options));

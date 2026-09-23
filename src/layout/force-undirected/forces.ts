@@ -1,7 +1,8 @@
 /**
  * 力场计算 —— 算法的物理核心。
  *
- * 所有节点对之间（核力式斥力 + 引力），g 为表面间隙（中心距 − 两包围圆半径）：
+ * 所有节点对之间（核力式斥力 + 引力），g 为表面间隙（统一形状口径：
+ * 圆-圆 = 中心距 − 半径和，其余组合 = 外接矩形 AABB 间隙/负穿透深度）：
  *   斥力（作用域 g < R = 2L）
  *        E_r = k_r·mᵢmⱼ/2 · (1/g − 1/R)²      F_r = k_r·mᵢmⱼ·(1/g − 1/R)/g²
  *     —— 接触/近距时陡增（g→0 主项回到 k_r/g³ 的核力行为），
@@ -345,6 +346,27 @@ function bondTerm(
   };
 }
 
+/**
+ * 两元素表面间隙 —— 碰撞检测的唯一口径（统一形状计算，2026-09-23 起）：
+ *   - 圆-圆：d − r₁ − r₂（圆的自然表面间隙，保持圆粒子物理不变）；
+ *   - 其余组合（矩形容器、rect/ellipse 节点及混合对）：外接矩形（AABB）
+ *     口径 —— 分离时 s = 两矩形表面间最短距离，重叠时 s = 负的浅轴穿透
+ *     深度（接触弹簧沿浅轴推离）。
+ * AABB 的 s 是方向的函数而非中心距的一元函数，径向力是其梯度的主项近似
+ * （与椭圆 SDF 同级的几何近似）；接触弹簧在穿透区保底推离，防重叠不变量
+ * 由同一势函数承担。BH 聚合块（applyCellInteraction）保持等效圆口径
+ * —— 远场聚合块本就是质点近似，斥力在作用域边界已趋于零。
+ */
+function surfaceGap(a: LayoutElement, b: LayoutElement, dx: number, dy: number, d: number): number {
+  if (a.shape.kind === 'circle' && b.shape.kind === 'circle') {
+    return d - a.r - b.r;
+  }
+  const sx = Math.abs(dx) - a.hw - b.hw;
+  const sy = Math.abs(dy) - a.hh - b.hh;
+  if (sx > 0 || sy > 0) return Math.hypot(Math.max(sx, 0), Math.max(sy, 0));
+  return -Math.min(-sx, -sy);
+}
+
 /** 一对节点之间的核力式相互作用，返回势能贡献。 */
 function applyNodePair(ctx: ForceContext, i: number, j: number, kind: PairKind): number {
   // 世界分块：跨世界对零力零能量（容器对成员无力、外部对内部无影响，
@@ -367,7 +389,7 @@ function applyNodePair(ctx: ForceContext, i: number, j: number, kind: PairKind):
     ux = dx / d;
     uy = dy / d;
   }
-  const s = d - ni.r - nj.r;
+  const s = surfaceGap(ni, nj, dx, dy, d);
   const m = ni.mass * nj.mass;
   // 跳数斥力衰减：h=1 邻接不衰减，逐跳乘 decay^(h-1)，无关系对乘 floor。
   let scale = ctx.hopScale ? ctx.hopScale[i * ctx.elements.length + j] : 1;
@@ -431,8 +453,9 @@ function applyEdgeAttraction(ctx: ForceContext, edgeIndex: number): number {
   const d = Math.hypot(dx, dy);
   const m = na.mass * nb.mass;
   const mul = ctx.edgeKaMul[edgeIndex];
-  // 橡皮筋弹力：交叉收缩 μ_e 放大劲度（收缩力量更大，收敛更果断）
-  const att = bondTerm(p.kt * mul, m, d - na.r - nb.r, p.gFloor);
+  // 橡皮筋弹力：交叉收缩 μ_e 放大劲度（收缩力量更大，收敛更果断）；
+  // 弹簧长度从外接矩形表面起算（与碰撞同一间隙口径）。
+  const att = bondTerm(p.kt * mul, m, surfaceGap(na, nb, dx, dy, d), p.gFloor);
   const ux = d > 1e-9 ? dx / d : 0;
   const uy = d > 1e-9 ? dy / d : 0;
   na.fx -= att.f * ux;

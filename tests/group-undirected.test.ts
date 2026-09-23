@@ -17,6 +17,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { assertAllFinite, minSurfaceGap } from './helpers.js';
 import {
   ForceLayout,
   GraphStore,
@@ -31,28 +32,6 @@ import type { GraphSpec as Spec } from '../src/types.js';
 // ── 通用工具 ────────────────────────────────────────────────
 
 /** 物理节点两两最小表面间隙（nodeViews 只含物理节点，天然不含容器）。 */
-function minSurfaceGap(layout: ForceLayout): number {
-  const nodes = layout.nodeViews;
-  let min = Infinity;
-  for (let i = 0; i < nodes.length; i++) {
-    for (let j = i + 1; j < nodes.length; j++) {
-      const gap =
-        Math.hypot(nodes[i]!.x - nodes[j]!.x, nodes[i]!.y - nodes[j]!.y) -
-        nodes[i]!.r -
-        nodes[j]!.r;
-      if (gap < min) min = gap;
-    }
-  }
-  return min;
-}
-
-function assertAllFinite(layout: ForceLayout): void {
-  for (const [id, p] of layout.positions) {
-    expect(Number.isFinite(p.x), `x of ${String(id)}`).toBe(true);
-    expect(Number.isFinite(p.y), `y of ${String(id)}`).toBe(true);
-  }
-}
-
 /** 两点平均两两距离（模块化验收用）。 */
 function meanPairDistance(points: Array<{ x: number; y: number }>): number {
   let sum = 0;

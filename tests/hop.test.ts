@@ -7,20 +7,9 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { minSurfaceGap } from './helpers.js';
 import { ForceLayout } from '../src/index.js';
 import { buildHopScale } from '../src/layout/force-undirected/hops.js';
-
-function minSurfaceGap(layout: ForceLayout): number {
-  const nodes = layout.nodeViews;
-  let min = Infinity;
-  for (let i = 0; i < nodes.length; i++) {
-    for (let j = i + 1; j < nodes.length; j++) {
-      const gap = Math.hypot(nodes[i].x - nodes[j].x, nodes[i].y - nodes[j].y) - nodes[i].r - nodes[j].r;
-      if (gap < min) min = gap;
-    }
-  }
-  return min;
-}
 
 describe('跳数斥力衰减', () => {
   it('矩阵：邻接 σ=1，h=2 乘 decay，无关系乘 floor；decay≥1 停用', () => {

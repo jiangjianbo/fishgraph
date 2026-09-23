@@ -13,32 +13,13 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { assertAllFinite, minSurfaceGap } from './helpers.js';
 import { ForceLayout } from '../src/index.js';
 import { countEdgeCrossings } from '../src/layout/force-undirected/crossings.js';
 import { MERMAID_GRAPH } from './mermaid.graph.js';
 import type { GraphSpec, NodeId } from '../src/types.js';
 
 // ── 通用工具 ────────────────────────────────────────────────
-
-function minSurfaceGap(layout: ForceLayout): number {
-  const nodes = layout.nodeViews;
-  let min = Infinity;
-  for (let i = 0; i < nodes.length; i++) {
-    for (let j = i + 1; j < nodes.length; j++) {
-      const gap =
-        Math.hypot(nodes[i].x - nodes[j].x, nodes[i].y - nodes[j].y) - nodes[i].r - nodes[j].r;
-      if (gap < min) min = gap;
-    }
-  }
-  return min;
-}
-
-function assertAllFinite(layout: ForceLayout): void {
-  for (const p of layout.positions.values()) {
-    expect(Number.isFinite(p.x), `x not finite: ${p.x}`).toBe(true);
-    expect(Number.isFinite(p.y), `y not finite: ${p.y}`).toBe(true);
-  }
-}
 
 /** 连通随机图：随机生成树 + 额外边（确定性 LCG）。 */
 function connectedRandomGraph(n: number, extraRatio: number, seed: number): GraphSpec {

@@ -17,6 +17,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { assertAllFinite, minSurfaceGap } from './helpers.js';
 import { ForceLayout, estimateLabelBox } from '../src/index.js';
 import type { GraphSpec, NodeId } from '../src/types.js';
 
@@ -75,25 +76,6 @@ function equilibriumGap(L: number, stiffness: number): number {
     else lo = mid;
   }
   return (lo + hi) / 2;
-}
-
-function minSurfaceGap(layout: ForceLayout): number {
-  const nodes = layout.nodeViews;
-  let min = Infinity;
-  for (let i = 0; i < nodes.length; i++) {
-    for (let j = i + 1; j < nodes.length; j++) {
-      const gap = Math.hypot(nodes[i].x - nodes[j].x, nodes[i].y - nodes[j].y) - nodes[i].r - nodes[j].r;
-      if (gap < min) min = gap;
-    }
-  }
-  return min;
-}
-
-function assertAllFinite(layout: ForceLayout): void {
-  for (const p of layout.positions.values()) {
-    expect(Number.isFinite(p.x)).toBe(true);
-    expect(Number.isFinite(p.y)).toBe(true);
-  }
 }
 
 interface RingInfo {

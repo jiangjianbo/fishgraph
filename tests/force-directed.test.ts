@@ -11,6 +11,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { minSurfaceGap } from './helpers.js';
 import { ForceLayout } from '../src/index.js';
 import { computeLevels } from '../src/layout/force-directed/levels.js';
 
@@ -32,18 +33,6 @@ function flowGraph() {
     { source: 10, target: 11 }, // 独立分量
   ];
   return { nodes, edges };
-}
-
-function minSurfaceGap(layout: ForceLayout): number {
-  const nodes = layout.nodeViews;
-  let min = Infinity;
-  for (let i = 0; i < nodes.length; i++) {
-    for (let j = i + 1; j < nodes.length; j++) {
-      const gap = Math.hypot(nodes[i].x - nodes[j].x, nodes[i].y - nodes[j].y) - nodes[i].r - nodes[j].r;
-      if (gap < min) min = gap;
-    }
-  }
-  return min;
 }
 
 function assertNoOverlap(layout: ForceLayout): void {

@@ -66,7 +66,7 @@ src/
 │   │   └── spatialgrid.ts    #   均匀空间网格（避让候选对加速）
 │   └── circle/
 │       └── strategy.ts       # 圆形策略（接缝验证用的最小算法），见 doc/layout-circle.md
-├── geometry.ts               # 向量、点到线段投影、形状 SDF、包围半径
+├── geometry.ts               # 向量、点到线段投影、形状 SDF、包围半径、外接矩形半尺寸、形状包含测试、连线端点形状贴合
 ├── label.ts                  # 文字包围盒估算与最小面积回绕（纯数据，无力学）
 └── rng.ts                    # mulberry32 可播种 PRNG、确定性抖动方向
 ```
@@ -219,7 +219,11 @@ classDiagram
         +id: ElementId
         +x y: 坐标
         +fx fy: 合力累加
-        +r: 有效包围半径
+        +shape: 真实形状（容器 = 成员实占动态矩形）
+        +declaredShape: 声明形状快照（钳制上界）
+        +labelOutset: 文字盒外扩（仅力学）
+        +hw hh: 力学外接矩形半尺寸
+        +r: 等效包围圆（派生只读）
         +fixed: boolean
         +getBoundRadius()
     }
@@ -306,7 +310,7 @@ classDiagram
 | 结构 | 定义处 | 所有权与写入方 |
 |---|---|---|
 | `GraphSpec` / `NodeSpec` / `EdgeSpec` / `GroupSpec` / `SubgraphSpec` / `HiddenGroupSpec` / `ShapeSpec`（`ElementId = string \| number`） | `types.ts` | 用户输入，构建后库不再修改 |
-| `LayoutNode` / `LayoutSubgraphNode` / `ClusterConstraint` / `InternalEdge` | `graph/store.ts` | 底座拥有；算法按约定写坐标 x/y 与派生量（如容器的有效半径），不得自建第二份图数据 |
+| `LayoutNode` / `LayoutSubgraphNode` / `ClusterConstraint` / `InternalEdge` | `graph/store.ts` | 底座拥有；算法按约定写坐标 x/y 与统一形状刷新（`updateBoundsFromChildren` / `refreshGroupUnitShape`），不得自建第二份图数据或第二套尺寸口径 |
 | `CoordinateNode` | `layout/coordinates.ts` | 策略在布局完成后构造的一次性修正视图，`refine` 就地修改，结果由策略写回 store |
 | `NodeView` | `types.ts` | store 的只读投影（实时引用），消费方只读 |
 
@@ -322,12 +326,15 @@ classDiagram
 
 | 形状 | 字段 | 布局内部处理 |
 |---|---|---|
-| `circle` | `r` | 默认形状（省略 shape 时 r = 10）；包围圆即自身 |
-| `ellipse` | `rx` / `ry` | 节点-节点力取长轴为包围圆半径；避让用径向近似 SDF |
-| `rect` | `w` / `h` | 包围圆取半对角线；避让用精确 SDF |
+| `circle` | `r` | 默认形状（省略 shape 时 r = 10）；包围圆即自身，圆-圆对走圆表面间隙 |
+| `ellipse` | `rx` / `ry` | 节点-节点碰撞走外接矩形（AABB）间隙；等效圆取长轴；避让用径向近似 SDF |
+| `rect` | `w` / `h` | 节点-节点碰撞走外接矩形（AABB）间隙（容器即此口径）；等效圆取半对角线；避让用精确 SDF |
 
-双轨制：**节点-节点力用包围圆**（快、各向同性），**边/文字避让用精确 SDF**
-（不虚占空间）。节点文字不改变形状，但会让有效包围半径 `r` 在弛豫末期变大
+统一形状口径（2026-09-23 起）：节点-节点碰撞间隙**按形状分发** —— 圆-圆
+用圆表面间隙（各向同性、粒子物理不变），其余组合（矩形容器、rect/ellipse
+及混合对）用**外接矩形（AABB）表面间隙**（分离 = 最短表面距离，重叠 =
+负浅轴穿透，接触弹簧推离）；边/文字避让仍用 SDF / 等效圆。节点文字不改
+变真实形状，但通过 `labelOutset` 让力学外接矩形与等效半径 `r` 变大。
 （力导向的阶段 3）。
 
 **轴 2 · 元素角色（底座物化，用户不可直接声明）**
@@ -336,7 +343,7 @@ classDiagram
 |---|---|---|
 | free | 默认 | 普通节点 |
 | member | 出现在某个 `GroupSpec.members`（subgraphs 或 hiddenGroups） | 组成员，`store.hubOfMember(i)` 给出所属容器的物理下标 |
-| hub | `SubgraphSpec` 由底座物化为 `LayoutSubgraphNode`（`isSubgraph = true`） | subgraph 容器：**参与物理碰撞的大节点**（质量 = 成员数 + 1，半径按成员几何 + padding 自适应），外部连线以 group.id 为端点；渲染层从 `subgraphViews` 作为背景层读取 |
+| hub | `SubgraphSpec` 由底座物化为 `LayoutSubgraphNode`（`isSubgraph = true`） | subgraph 容器：**参与物理碰撞的大节点**（质量归一 = 1；真实形状 = 成员实占包围盒 + padding 的动态矩形，与渲染、力学 AABB、连线贴合同源），外部连线以 group.id 为端点；渲染层从 `subgraphViews` 作为背景层读取 |
 
 hidden-group 没有 hub：它物化为 `ClusterConstraint`（成员下标 + 质心简谐
 束缚）——只施力、不入图、不参与碰撞。
@@ -389,7 +396,7 @@ member 还可按连线细分（`GroupRoles`）：**entry / exit**（与组外有
 ```text
 GraphSpec ──GraphStore 构造（物化）──▶ 节点/边/邻接 + 校验
    │
-   ├─ subgraphs ─────▶ 物化为 LayoutSubgraphNode 容器节点（质量 = 成员数 + 1）
+   ├─ subgraphs ─────▶ 物化为 LayoutSubgraphNode 容器节点（质量归一 = 1，形状 = 成员实占动态矩形）
    │                   此后外部连线以 group.id 为端点，映射到容器
    ├─ hiddenGroups ──▶ 物化为 ClusterConstraint（质心简谐束缚，不入图）
    └─ 全部构建完成后 ──▶ rebuildGroupIndices()：派生成员物理下标 / memberSet
@@ -504,8 +511,9 @@ index 里一行 import，**不修改任何既有模块**。坐标系接缝同构
 `HiddenGroupSpec`（无边界的聚类约束）都继承抽象 `GroupSpec`，由 `GraphSpec`
 的两个数组分开承载——运行时不再出现「if 有无 shape」的分支。
 底座层（`graph/store.ts`）：subgraph 物化为 `LayoutSubgraphNode`（Compound
-Node，参与物理碰撞，迭代末 `updateBoundsFromChildren()` 按成员几何 + padding
-重算半径），hidden-group 物化为 `ClusterConstraint`（`applyForces()` 质心
+Node，参与物理碰撞，关键时机 `updateBoundsFromChildren()` 把真实形状刷新为
+成员实占包围盒 + padding 的动态矩形——渲染/碰撞/贴合共用），hidden-group
+物化为 `ClusterConstraint`（`applyForces()` 质心
 束缚钩子，不入图）。**如何消费物化结果是各算法自己的事**——力导向实现斥力
 豁免、包含墙、组内精修，circle 把容器当普通节点、完全忽略分组语义。
 成员归属派生只被 `rebuildGroupIndices()` 一处维护，增删节点后自动重算。
@@ -551,6 +559,7 @@ Node，参与物理碰撞，迭代末 `updateBoundsFromChildren()` 按成员几�
 | 6 | 坐标修正必须发生在「布局完成之后」，且换坐标系不需要动算法 | 修正做成布局末端的单向管线挂点，注册名选择 | 策略末尾调用 `cs.refine()`；`coordinateSystem` 是与 `algorithm` 平级的独立选项，二者正交组合 |
 | 7 | 力导向的组内精修要「冻结组外、只弛豫组内」 | 底座必须提供「哪些节点属于哪个组」的权威查询，算法不能自己维护第二份分组数据 | `GraphStore.subgraphNodes` / `clusterConstraints` / `hubOfMember()` + `groupRoles()`（入口/出口/内部角色） |
 | 8 | 力导向的斥力/弹力平衡间隙全部以「表面间隙」和 `naturalLength` 为标定锚 | 公共参数语义必须与算法共享：`naturalLength` 是**表面间距**而非中心距，作用域、网格间距、初值尺度都从它派生 | `LayoutOptions.naturalLength` 的语义写进类型注释，成为跨算法公共标尺（circle 的环半径也按它取量级） |
+| 9 | 元素形状尺寸**只允许一处计算**，碰撞与连线贴合消费同一形状（2026-09-23） | 多头口径（声明 shape / 布局期半径 / 终局实占）会让渲染矩形、碰撞范围与连线端点互相错位 —— 容器矩形可盖住外部节点、连线不贴边。真实形状 `shape`（容器 = 成员实占动态矩形）是唯一来源；碰撞 = 圆-圆圆间隙、其余组合外接矩形（AABB）表面间隙；连线端点渲染时按形状贴合求交（`rayShapeExit`） | `LayoutElement.shape/declaredShape/labelOutset/hw/hh` 与派生 `r`；`geometry.halfExtentsOf/rayShapeExit/shapeContains`；`forces.surfaceGap`；实占量测与动态矩形构造的共享件 `elementsAABB`/`setShapeFromMemberBounds`（容器、hidden 伪单元、世界分块对齐共用）；demo 边裁剪、容器绘制与命中测试读同一 `shape` |
 | 9 | circle 要「显式定位的节点不动」（`placed` 标记）；力导向的 BFS 初值也把它当锚点 | 「用户显式给了初始位置」必须是底座数据而不是算法猜测 | `GraphStore` 构建时记录 `LayoutNode.placed`，所有初始化逻辑统一尊重它 |
 | 10 | 力导向的重特性需要在大图上自动停用（决策 7） | 特性开关与预算回退发生在**策略内部**，门面与接口不感知 | 参数语义（如 `hopRepulsionDecay` 设 1 关闭）写进公共选项；降级细节留在算法文档 |
 

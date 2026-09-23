@@ -111,6 +111,57 @@ export function boundingRadius(shape: ShapeSpec): number {
   }
 }
 
+export interface HalfExtents {
+  /** 形状外接矩形的半宽。 */
+  hw: number;
+  /** 形状外接矩形的半高。 */
+  hh: number;
+}
+
+/** 形状的外接矩形半尺寸（碰撞检测 AABB 口径的唯一计算来源）。 */
+export function halfExtentsOf(shape: ShapeSpec): HalfExtents {
+  switch (shape.kind) {
+    case 'circle':
+      return { hw: shape.r, hh: shape.r };
+    case 'ellipse':
+      return { hw: shape.rx, hh: shape.ry };
+    case 'rect':
+      return { hw: shape.w / 2, hh: shape.h / 2 };
+  }
+}
+
+/** 点 (x, y) 是否落在形状内（中心 cx/cy）—— 命中测试的唯一计算来源。 */
+export function shapeContains(
+  shape: ShapeSpec,
+  cx: number, cy: number,
+  x: number, y: number,
+): boolean {
+  return shapeSdf(shape, x - cx, y - cy).dist <= 0;
+}
+
+/**
+ * 从形状中心沿单位方向 (ux, uy) 到形状边界的距离（连线端点形状贴合的唯一
+ * 计算来源）：连线端点 = 中心 + 方向 × 返回值，恰好落在形状轮廓上。
+ */
+export function rayShapeExit(shape: ShapeSpec, ux: number, uy: number): number {
+  switch (shape.kind) {
+    case 'circle':
+      return shape.r;
+    case 'ellipse': {
+      // 椭圆射线交点：t = 1 / sqrt((ux/rx)² + (uy/ry)²)。
+      const q = (ux * ux) / (shape.rx * shape.rx) + (uy * uy) / (shape.ry * shape.ry);
+      return 1 / Math.sqrt(Math.max(q, 1e-12));
+    }
+    case 'rect': {
+      const hw = shape.w / 2;
+      const hh = shape.h / 2;
+      const tx = Math.abs(ux) > 1e-12 ? hw / Math.abs(ux) : Infinity;
+      const ty = Math.abs(uy) > 1e-12 ? hh / Math.abs(uy) : Infinity;
+      return Math.min(tx, ty);
+    }
+  }
+}
+
 export const DEFAULT_SHAPE: ShapeSpec = { kind: 'circle', r: 10 };
 
 export interface SegmentPair {

@@ -98,7 +98,7 @@ score = 张力项 − RING_BONUS × 环周长项
 | 引擎件 | 位置 | 用途 |
 |---|---|---|
 | `RelaxationSolver` | 本目录 `solver.ts` | 信任域 + 回溯线搜索弛豫 |
-| `computeForcesExact / BH` | 本目录 `forces.ts` | 力场全栈（橡皮筋、跳数衰减斥力、避让、交叉罚、文字） |
+| `computeForcesExact / BH` | 本目录 `forces.ts` | 力场全栈（橡皮筋、跳数衰减斥力、避让、交叉罚、文字）；节点对表面间隙按统一形状口径分发——圆-圆用圆间隙，其余组合（矩形容器、rect/ellipse 及混合对）用外接矩形 AABB 间隙（2026-09-23 起，见 `surfaceGap`） |
 | `deriveParams` | 本目录 `forces.ts` | 从 `LayoutOptions` 派生物理参数 |
 | `buildHopScale` | 本目录 `hops.ts` | 跳数斥力衰减矩阵 |
 | `createCoordinateSystem` | `layout/coordinates.ts` | 布局后坐标系修正（free/grid） |

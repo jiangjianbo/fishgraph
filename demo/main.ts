@@ -1,5 +1,5 @@
-import { ForceLayout, estimateLabelBox } from '../src/index.js';
-import type { GraphSpec, LayoutOptions, NodeId, SubgraphView } from '../src/index.js';
+import { ForceLayout, estimateLabelBox, halfExtentsOf, rayShapeExit, shapeContains } from '../src/index.js';
+import type { GraphSpec, LayoutOptions, NodeId, ShapeSpec, SubgraphView } from '../src/index.js';
 
 // ── 示例图 ────────────────────────────────────────────────
 
@@ -308,15 +308,26 @@ function eventPos(ev: MouseEvent): [number, number] {
   return [ev.clientX - rect.left, ev.clientY - rect.top];
 }
 
-/** 点是否落在容器形状内（dx/dy 为相对容器中心的偏移）。 */
+/** 点是否落在容器形状内（dx/dy 为相对容器中心的偏移；几何口径统一走 geometry）。 */
 function pointInSubgraph(v: SubgraphView, dx: number, dy: number): boolean {
-  switch (v.shape.kind) {
-    case 'rect':
-      return Math.abs(dx) <= v.shape.w / 2 && Math.abs(dy) <= v.shape.h / 2;
-    case 'circle':
-      return Math.hypot(dx, dy) <= v.shape.r;
-    case 'ellipse':
-      return (dx / v.shape.rx) ** 2 + (dy / v.shape.ry) ** 2 <= 1;
+  return shapeContains(v.shape, 0, 0, dx, dy);
+}
+
+/** 按形状声明描出轮廓路径（画布特化；尺寸 = 声明尺寸 × 相机缩放）。 */
+function shapePath(
+  g: CanvasRenderingContext2D,
+  shape: ShapeSpec,
+  sx: number, sy: number,
+  k: number, cornerRadius: number,
+): void {
+  if (shape.kind === 'circle') {
+    g.arc(sx, sy, shape.r * k, 0, Math.PI * 2);
+  } else if (shape.kind === 'ellipse') {
+    g.ellipse(sx, sy, shape.rx * k, shape.ry * k, 0, 0, Math.PI * 2);
+  } else {
+    const w = shape.w * k;
+    const h = shape.h * k;
+    g.roundRect(sx - w / 2, sy - h / 2, w, h, cornerRadius);
   }
 }
 
@@ -524,16 +535,11 @@ function drawView(): void {
   for (const nd of hubs) {
     const [sx, sy] = worldToScreen(nd.x, nd.y);
     const sh = nd.shape;
-    const w = (sh.kind === 'rect' ? sh.w : sh.kind === 'ellipse' ? sh.rx * 2 : sh.r * 2) * cam.k;
-    const h = (sh.kind === 'rect' ? sh.h : sh.kind === 'ellipse' ? sh.ry * 2 : sh.r * 2) * cam.k;
+    const he = halfExtentsOf(sh);
+    const w = he.hw * 2 * cam.k;
+    const h = he.hh * 2 * cam.k;
     g.beginPath();
-    if (sh.kind === 'circle') {
-      g.arc(sx, sy, sh.r * cam.k, 0, Math.PI * 2);
-    } else if (sh.kind === 'ellipse') {
-      g.ellipse(sx, sy, sh.rx * cam.k, sh.ry * cam.k, 0, 0, Math.PI * 2);
-    } else {
-      g.roundRect(sx - w / 2, sy - h / 2, w, h, Math.min(10, h / 4));
-    }
+    shapePath(g, sh, sx, sy, cam.k, Math.min(10, h / 4));
     g.fillStyle = '#f1f5f9';
     g.fill();
     g.strokeStyle = '#94a3b8';
@@ -549,7 +555,8 @@ function drawView(): void {
   }
 
 
-  // 边：剪到起点/终点轮廓，末端画箭头；中点画白底文字
+  // 边：两端按各自真实形状贴合求交（圆/矩形/椭圆轮廓的精确出射点），
+  // 末端画箭头；中点画白底文字
   for (const e of layout.edgeViews) {
     const a = edgeEnds[e.sourceIndex];
     const b = edgeEnds[e.targetIndex];
@@ -558,8 +565,9 @@ function drawView(): void {
     const d = Math.hypot(dx, dy) || 1;
     const ux = dx / d;
     const uy = dy / d;
-    const t0 = a.r * 0.9;
-    const t1 = d - b.r * 0.9 - 3;
+    // 形状贴合：端点 = 中心 + 方向 × (中心到形状边界的距离)，与渲染轮廓一致
+    const t0 = rayShapeExit(a.shape, ux, uy);
+    const t1 = d - rayShapeExit(b.shape, -ux, -uy) - 3;
     if (t1 <= t0) continue;
     const x0 = a.x + ux * t0;
     const y0 = a.y + uy * t0;
@@ -606,16 +614,9 @@ function drawView(): void {
   for (const nd of nv) {
     const [sx, sy] = worldToScreen(nd.x, nd.y);
     const sh = nd.shape;
+    const he = halfExtentsOf(sh);
     g.beginPath();
-    if (sh.kind === 'circle') {
-      g.arc(sx, sy, sh.r * cam.k, 0, Math.PI * 2);
-    } else if (sh.kind === 'ellipse') {
-      g.ellipse(sx, sy, sh.rx * cam.k, sh.ry * cam.k, 0, 0, Math.PI * 2);
-    } else {
-      const w = sh.w * cam.k;
-      const h = sh.h * cam.k;
-      g.roundRect(sx - w / 2, sy - h / 2, w, h, Math.min(8, h / 4));
-    }
+    shapePath(g, sh, sx, sy, cam.k, Math.min(8, (he.hh * 2 * cam.k) / 4));
     g.fillStyle = nd.fixed ? '#fef9c3' : '#e0f2fe';
     g.fill();
     g.strokeStyle = '#0284c7';

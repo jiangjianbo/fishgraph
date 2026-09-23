@@ -260,11 +260,11 @@ describe('force-undirected 世界分块', () => {
 });
 
 describe('force-undirected 弛豫边界钳制（交互拖拽连带场景）', () => {
-  /** 成员是否完全落在所属容器边界内（含有效半径 margin）。 */
+  /** 成员是否完全落在所属容器声明边界内（钳制口径，含有效半径 margin）。 */
   function insideBox(l: ForceLayout, id: ElementId): boolean {
     const hub = l.containerOf(id)!;
     const v = l.nodeViews.find((n) => n.id === id)!;
-    const s = shapeSdf(hub.shape, v.x - hub.x, v.y - hub.y);
+    const s = shapeSdf(hub.declaredShape, v.x - hub.x, v.y - hub.y);
     return s.dist <= -v.r + 1e-6;
   }
 

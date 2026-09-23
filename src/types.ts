@@ -256,8 +256,12 @@ export interface NodeView {
   id: ElementId;
   x: number;
   y: number;
-  /** 有效包围半径（阶段 3 含节点文字）。 */
-  r: number;
+  /** 等效包围圆半径（统一形状的派生值：hypot(外接矩形半宽, 半高)，含文字外扩）。 */
+  readonly r: number;
+  /** 力学外接矩形（AABB）半宽（形状半尺寸 + 文字外扩，统一计算）。 */
+  readonly hw: number;
+  /** 力学外接矩形（AABB）半高。 */
+  readonly hh: number;
   shape: ShapeSpec;
   label?: string | null;
   fixed: boolean;
@@ -277,9 +281,12 @@ export interface SubgraphView {
   id: ElementId;
   x: number;
   y: number;
-  /** 有效包围半径（包裹全部成员 + padding 后自适应）。 */
-  r: number;
+  /** 等效包围圆半径（统一形状的派生值；真实形状见 shape —— 成员实占动态矩形）。 */
+  readonly r: number;
+  /** 真实形状（成员实占包围盒 + padding 的动态矩形）。 */
   shape: ShapeSpec;
+  /** 声明形状快照（成员钳制上界与初始分布画布）。 */
+  declaredShape: ShapeSpec;
   label?: string | null;
   /** 成员包裹内边距。 */
   padding: number;

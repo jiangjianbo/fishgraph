@@ -20,9 +20,10 @@ import {
   LayoutElement,
   type InternalEdge,
   type LayoutSubgraphNode,
+  elementsAABB,
 } from '../../graph/store.js';
 import type { GraphStore } from '../../graph/store.js';
-import type { ElementId, HiddenGroupSpec, ShapeSpec, SubgraphSpec } from '../../types.js';
+import type { ElementId, HiddenGroupSpec, SubgraphSpec } from '../../types.js';
 
 /** 组树节点：一个复合单元及其嵌套结构（布局期间的可变状态）。 */
 export interface GroupTreeNode {
@@ -42,29 +43,58 @@ export interface GroupTreeNode {
   readonly containerIndex: number;
   /** 成员包裹内边距（subgraph.padding；hidden 为 0）。 */
   readonly padding: number;
-  /**
-   * 内部布局完成后的块包围盒（成员在内部帧的包围圆：中心 + 半径）。
-   * layoutLevel 递归回填；父层据此设置单元半径。
-   */
-  block: { cx: number; cy: number; r: number } | null;
+}
+
+/**
+ * 量测组内部块并把单元真实形状刷新为成员实占（统一形状口径的组侧入口）：
+ * 子树成员外接矩形（AABB）的并集 + padding → 单元 shape（动态矩形）。
+ * subgraph 容器走 updateBoundsFromChildren（同一计算）；hidden 伪单元
+ * 不进 store，就地量测赋 shape。返回块的包围盒中心（映射期锚点）；
+ * 子树为空返回 null。
+ */
+export function refreshGroupUnitShape(
+  store: GraphStore,
+  g: GroupTreeNode,
+): { cx: number; cy: number } | null {
+  if (g.container) {
+    // subgraph 容器：直接成员口径（memberIndices 可含子组容器本体）
+    g.container.updateBoundsFromChildren(store.elements);
+    return measureBlockCenter(store, g);
+  }
+  // hidden 伪单元：子树口径（成员不在 store，形状就地刷新）
+  const bounds = elementsAABB(store.elements, g.subtreeIndices);
+  if (!bounds) return null;
+  g.unit.setShapeFromMemberBounds(bounds, g.padding);
+  return measureBlockCenter(store, g);
+}
+
+/** 量测组内部块中心：子树成员外接矩形并集的几何中心（映射期现算）。 */
+export function measureBlockCenter(
+  store: GraphStore,
+  g: GroupTreeNode,
+): { cx: number; cy: number } | null {
+  const bounds = elementsAABB(store.elements, g.subtreeIndices);
+  if (!bounds) return null;
+  return { cx: (bounds.minX + bounds.maxX) / 2, cy: (bounds.minY + bounds.maxY) / 2 };
 }
 
 /**
  * hidden-group 的布局期伪单元：不注册进 store、不参与渲染，
- * 仅供层级力场把它当作一个"巨大号的节点"解算。
+ * 仅供层级力场把它当作一个"巨大号的节点"解算。力学强度与容器
+ * 同一口径：质量归一 = 1（2026-09-22 起斥力与体积/成员数无关，
+ * 两种复合单元必须一致，否则就是同一规则的两种答案）。
  */
 export class GroupUnitElement extends LayoutElement {
-  constructor(id: ElementId, mass: number) {
-    const shape: ShapeSpec = { kind: 'circle', r: 1 };
+  constructor(id: ElementId) {
     super({
       id,
       x: 0,
       y: 0,
       fixed: false,
-      shape,
+      shape: { kind: 'circle', r: 1 },
       label: null,
       placed: false,
-      mass,
+      mass: 1,
     });
   }
 }
@@ -90,7 +120,7 @@ export function buildGroupForest(store: GraphStore): GroupTreeNode[] {
   for (const spec of store.subgraphs) {
     decls.push({
       spec,
-      container: store.elementById(spec.id) as LayoutSubgraphNode,
+      container: store.subgraphById(spec.id),
       padding: spec.padding ?? 2,
       indices: spec.members
         .map((m) => store.indexOf(m))
@@ -143,7 +173,7 @@ export function buildGroupForest(store: GraphStore): GroupTreeNode[] {
 
   const nodes: GroupTreeNode[] = decls.map((d) => {
     const unit =
-      d.container ?? new GroupUnitElement(d.spec.id, d.indices.length + 1);
+      d.container ?? new GroupUnitElement(d.spec.id);
     return {
       id: d.spec.id,
       memberIndices: d.indices,
@@ -153,7 +183,6 @@ export function buildGroupForest(store: GraphStore): GroupTreeNode[] {
       container: d.container,
       containerIndex: d.container ? store.indexOf(d.spec.id) : -1,
       padding: d.padding,
-      block: null,
     };
   });
   for (let i = 0; i < n; i++) {

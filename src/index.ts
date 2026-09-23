@@ -21,6 +21,9 @@ export {
 } from './graph/store.js';
 export { detectHiddenGroups, type HiddenGroup } from './graph/groups.js';
 
+// 几何原语（统一形状口径：外接矩形碰撞、连线端点形状贴合）
+export { halfExtentsOf, rayShapeExit, shapeContains, type HalfExtents } from './geometry.js';
+
 // 坐标系（布局完成后的坐标修正策略）
 export {
   createCoordinateSystem,

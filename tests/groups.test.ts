@@ -358,7 +358,8 @@ describe('subgraph 交互约束（拖拽钳制与整体平移）', () => {
     const box = layout.subgraphViews.find((v) => v.id === 'C')!;
     const a = layout.nodeViews.find((v) => v.id === 'a')!;
     const p = layout.clampToContainer('a', 500, 0);
-    const hw = (box.shape as { kind: 'rect'; w: number }).w / 2;
+    // 钳制上界 = 声明形状（成员实占的动态矩形由成员决定，不能用于钳制自身）
+    const hw = (box.declaredShape as { kind: 'rect'; w: number }).w / 2;
     expect(p.x).toBeLessThanOrEqual(box.x + hw - a.r);
     expect(p.y).toBe(0);
     // 容器内的点保持不动

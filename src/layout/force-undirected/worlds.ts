@@ -20,6 +20,7 @@
  */
 
 import type { GraphStore } from '../../graph/store.js';
+import { elementsAABB } from '../../graph/store.js';
 import type { InternalEdge } from '../../graph/store.js';
 import { clampPointToShape } from '../../geometry.js';
 
@@ -96,7 +97,7 @@ export function clampMembersToContainers(store: GraphStore, partition: WorldPart
         if (world[i] !== hubIdx) continue;
         const el = store.elements[i];
         if (!el) continue;
-        const p = clampPointToShape(g.shape, g.x, g.y, el.x, el.y, el.r);
+        const p = clampPointToShape(g.declaredShape, g.x, g.y, el.x, el.y, el.r);
         el.x = p.x;
         el.y = p.y;
       }
@@ -122,21 +123,10 @@ export function alignMembersToContainers(store: GraphStore, partition: WorldPart
     for (let i = 0; i < world.length; i++) {
       if (world[i] === hubIdx) members.push(i);
     }
-    if (members.length === 0) continue;
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const i of members) {
-      const el = store.elements[i];
-      if (!el) continue;
-      minX = Math.min(minX, el.x - el.r);
-      minY = Math.min(minY, el.y - el.r);
-      maxX = Math.max(maxX, el.x + el.r);
-      maxY = Math.max(maxY, el.y + el.r);
-    }
-    const dx = g.x - (minX + maxX) / 2;
-    const dy = g.y - (minY + maxY) / 2;
+    const bounds = elementsAABB(store.elements, members);
+    if (!bounds) continue;
+    const dx = g.x - (bounds.minX + bounds.maxX) / 2;
+    const dy = g.y - (bounds.minY + bounds.maxY) / 2;
     for (const i of members) {
       const el = store.elements[i];
       if (!el) continue;

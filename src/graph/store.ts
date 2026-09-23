@@ -15,7 +15,7 @@
  */
 
 import { estimateLabelBox } from '../label.js';
-import { DEFAULT_SHAPE, boundingRadius, clampPointToShape } from '../geometry.js';
+import { DEFAULT_SHAPE, boundingRadius, clampPointToShape, halfExtentsOf } from '../geometry.js';
 import type {
   EdgeSpec,
   ElementId,
@@ -49,11 +49,17 @@ export interface ElementInit {
  * LayoutElement —— 布局引擎视角的抽象元素（多态基类）。
  *
  * 物理节点（LayoutNode）与 subgraph 容器（LayoutSubgraphNode）的统一口径：
- * 引擎只关心 x/y 与 getBoundRadius()，把容器当作"巨大号的节点"一起解算
- * 碰撞与排斥。力累加器与有效半径放在基类，因为两类元素都参与力场迭代。
+ * 引擎只关心 x/y 与统一形状。形状尺寸**只有一处计算来源**（2026-09-23 起）：
+ *   - shape：真实形状（渲染、连线贴合、命中、成员钳制共用）——普通节点为
+ *     声明形状；subgraph 容器为成员实占包围盒 + padding 的动态矩形；
+ *   - labelOutset：文字盒外扩（applyNodeLabelSizes 统一计算，仅参与力学）；
+ *   - hw/hh：力学外接矩形（AABB）半尺寸 = 形状半尺寸 + labelOutset，
+ *     碰撞检测唯一口径；
+ *   - r：等效包围圆半径 = hypot(hw, hh)，只作"尺度"语义的派生值
+ *     （BH 聚合、避让软墙、网格吸附占位），不再是可赋值状态。
  */
 export abstract class LayoutElement {
-  /** 判别符：是否为 subgraph 容器节点（子类覆盖为 true）。 */
+  /** 判别符：是否为 subgraph 容器节点（容器子类覆盖为 true；收窄用 isSubgraphNode 守卫）。 */
   readonly isSubgraph: boolean = false;
   readonly id: ElementId;
   x: number;
@@ -63,14 +69,17 @@ export abstract class LayoutElement {
   fy = 0;
   /** 固定元素：不受力移动，但仍对其他元素施力。 */
   fixed: boolean;
-  /** 有效包围半径（节点文字/成员包裹会使它变大）。 */
-  r: number;
-  /** 形状声明的初始包围半径（不含文字/成员外扩）。 */
+  /** 真实形状（渲染/贴合/命中/钳制共用；容器为动态实占矩形）。 */
+  shape: ShapeSpec;
+  /** 声明形状快照（容器成员钳制上界；普通节点与 shape 相同）。 */
+  readonly declaredShape: ShapeSpec;
+  /** 文字盒外扩量（仅参与力学 AABB；applyNodeLabelSizes 统一写入）。 */
+  labelOutset = 0;
+  /** 真实形状的声明包围半径（无文字外扩的尺度参考）。 */
   readonly baseR: number;
-  readonly shape: ShapeSpec;
-  label: string | null;
+  readonly label: string | null;
   placed: boolean;
-  /** 引力质量（容器 = 成员数 + 1：外部视角的"大节点"惯性更大）。 */
+  /** 引力质量。 */
   mass: number;
   /** 网格布局（grid-undirected）物化的 AABB 物理宽（px）；连续布局不设置。 */
   w?: number;
@@ -82,17 +91,49 @@ export abstract class LayoutElement {
     this.x = init.x;
     this.y = init.y;
     this.fixed = init.fixed;
-    this.r = boundingRadius(init.shape);
-    this.baseR = this.r;
     this.shape = init.shape;
+    this.declaredShape = init.shape;
+    this.baseR = boundingRadius(init.shape);
     this.label = init.label;
     this.placed = init.placed;
     this.mass = init.mass;
   }
 
-  /** 有效包围半径（布局引擎与渲染共用的唯一半径口径）。 */
+  /** 力学外接矩形（AABB）半宽：形状半尺寸 + 文字外扩（统一计算，只读）。 */
+  get hw(): number {
+    return halfExtentsOf(this.shape).hw + this.labelOutset;
+  }
+
+  /** 力学外接矩形（AABB）半高：形状半尺寸 + 文字外扩（统一计算，只读）。 */
+  get hh(): number {
+    return halfExtentsOf(this.shape).hh + this.labelOutset;
+  }
+
+  /**
+   * 等效包围圆半径（"尺度"语义的派生值）：声明形状的包围圆半径 +
+   * 文字外扩。circle 精确等于 shape.r（含文字增量与旧行为逐位一致），
+   * rect = 半对角线，ellipse = 长轴 —— 粒子的尺度量（BH 聚合、避让
+   * 软墙、网格吸附）不因碰撞口径改为外接矩形而改变。
+   */
+  get r(): number {
+    return boundingRadius(this.shape) + this.labelOutset;
+  }
+
   getBoundRadius(): number {
     return this.r;
+  }
+
+  /**
+   * 复合单元口径（subgraph 容器与 hidden 伪单元共用）：把真实形状刷新为
+   * 成员实占包围盒 + padding 的动态矩形 —— "实占 → 动态矩形"的唯一构造，
+   * 渲染/碰撞/贴合随 shape 自动跟随。
+   */
+  setShapeFromMemberBounds(bounds: ElementAABB, padding: number): void {
+    this.shape = {
+      kind: 'rect',
+      w: (bounds.maxX - bounds.minX) + 2 * padding,
+      h: (bounds.maxY - bounds.minY) + 2 * padding,
+    };
   }
 }
 
@@ -115,13 +156,15 @@ export class LayoutNode extends LayoutElement {
 /**
  * LayoutSubgraphNode —— subgraph 容器（Compound Node）。
  *
- * 有物理实体：引擎把它当作一个节点与外部元素解算碰撞与排斥；半径 =
- * 成员实占 + padding（updateBoundsFromChildren，世界分块种入与终局
- * 对齐时刷新），声明的 shape 只用于渲染与成员钳制，不参与力学占位。
+ * 有物理实体：引擎把它当作一个节点与外部元素解算碰撞与排斥；真实形状 =
+ * 成员实占包围盒 + padding 的动态矩形（updateBoundsFromChildren，世界分块
+ * 种入与终局对齐、分组层级量测时刷新），与力学外接矩形、渲染矩形、连线
+ * 贴合同出一处。声明的形状只作成员钳制上界（declaredShape）与成员初始
+ * 分布画布，不参与力学占位。
  * 结构上支持嵌套（children 可含其它容器 id）。
  */
 export class LayoutSubgraphNode extends LayoutElement {
-  readonly isSubgraph = true;
+  readonly isSubgraph = true as const;
   /** 成员元素 id（声明序快照）。 */
   readonly children: ElementId[];
   /** 成员元素下标（物化派生；增删元素后由 store 重建）。 */
@@ -149,19 +192,49 @@ export class LayoutSubgraphNode extends LayoutElement {
   }
 
   /**
-   * 按成员几何刷新容器半径（成员实占口径，2026-09-22 起）：
-   * 包围全部成员（中心距 + 成员半径的最大值）再外扩 padding。
-   * 不再以声明形状的 baseR 为下限——容器本体的力学占位与外部元素
-   * 的斥力平衡距离跟随成员实占，声明的空白画布不参与力学。
+   * 按成员几何刷新容器真实形状（成员实占口径的唯一计算入口）：
+   * 全部成员外接矩形的并集，四周各外扩 padding。刷新后 shape 即渲染
+   * 矩形、力学 AABB 与连线贴合的共同口径 —— 容器画多大，碰撞与贴线
+   * 就按多大算，不再存在第二套尺寸。
    */
   updateBoundsFromChildren(elements: readonly LayoutElement[]): void {
-    let maxD = 0;
-    for (const idx of this.memberIndices) {
-      const nd = elements[idx];
-      maxD = Math.max(maxD, Math.hypot(nd.x - this.x, nd.y - this.y) + nd.r);
-    }
-    this.r = maxD + this.padding;
+    const bounds = elementsAABB(elements, this.memberIndices);
+    if (!bounds) return;
+    this.setShapeFromMemberBounds(bounds, this.padding);
   }
+}
+
+/** 类型守卫：元素是否为 subgraph 容器（判别联合收窄）。 */
+export function isSubgraphNode(el: LayoutElement): el is LayoutSubgraphNode {
+  return el.isSubgraph;
+}
+
+/** 元素集合的实占包围盒（各元素力学外接矩形的并集；空集合返回 null）。 */
+export interface ElementAABB {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
+/** 按元素下标集合求力学外接矩形（AABB）并集 —— 容器/伪单元实占量测的唯一实现。 */
+export function elementsAABB(
+  elements: readonly LayoutElement[],
+  indices: readonly number[],
+): ElementAABB | null {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const idx of indices) {
+    const el = elements[idx];
+    if (!el) continue;
+    minX = Math.min(minX, el.x - el.hw);
+    minY = Math.min(minY, el.y - el.hh);
+    maxX = Math.max(maxX, el.x + el.hw);
+    maxY = Math.max(maxY, el.y + el.hh);
+  }
+  return minX === Infinity ? null : { minX, minY, maxX, maxY };
 }
 
 /**
@@ -391,14 +464,15 @@ export class GraphStore {
   }
 
   /**
-   * 把成员坐标钳制进所属容器：成员包围圆完全落在容器边界内
-   * （margin = 成员有效半径）；非成员原样返回。
+   * 把成员坐标钳制进所属容器：成员包围圆完全落在容器**声明形状**内
+   * （钳制上界不随成员实占收缩 —— 实占矩形由成员决定，用它钳制自己
+   * 没有约束意义）；非成员原样返回。
    */
   clampToContainer(id: ElementId, x: number, y: number): { x: number; y: number } {
     const el = this.elementById(id);
     const box = this.containerOf(id);
     if (!box) return { x, y };
-    return clampPointToShape(box.shape, box.x, box.y, x, y, el.r);
+    return clampPointToShape(box.declaredShape, box.x, box.y, x, y, el.r);
   }
 
   /**
@@ -454,12 +528,13 @@ export class GraphStore {
     // 物理节点/容器缓存与全量数组保持同序子集关系
     let ni = 0;
     for (const el of this.elements) {
-      if (!el.isSubgraph) this.nodes[ni++] = el as LayoutNode;
+      // LayoutNode 无基类之外的成员，isSubgraph=false 的收窄类型结构兼容
+      if (!el.isSubgraph) this.nodes[ni++] = el;
     }
     this.nodes.length = ni;
     let si = 0;
     for (const el of this.elements) {
-      if (el.isSubgraph) this.subgraphNodes[si++] = el as LayoutSubgraphNode;
+      if (isSubgraphNode(el)) this.subgraphNodes[si++] = el;
     }
     this.subgraphNodes.length = si;
     this.rebuildAdjacency();
@@ -518,20 +593,23 @@ export class GraphStore {
     }
   }
 
-  /** 节点文字使有效包围半径变大（布局用包围圆，渲染仍可用原形状）。 */
+  /**
+   * 节点文字盒外扩（统一计算入口）：把文字包围盒折算成 labelOutset，
+   * 只参与力学 AABB（hw/hh），不改变真实形状 —— 渲染仍画声明形状，
+   * 文字多少通过力学占位把邻居撑开。容器不吃文字盒（真实形状由
+   * 成员实占全权管理）。
+   */
   applyNodeLabelSizes(enabled: boolean): void {
     const fs = this.labelFontSize;
     const pad = this.labelPadding;
     for (const nd of this.elements) {
-      // 容器的 r 由 updateBoundsFromChildren（成员实占）全权管理，
-      // 不吃文字盒、也不回落 baseR 声明值。
-      if (nd.isSubgraph) continue;
-      if (!enabled || nd.label === null) {
-        nd.r = nd.baseR;
+      if (nd.isSubgraph || !enabled || nd.label === null) {
+        nd.labelOutset = 0;
         continue;
       }
       const box = estimateLabelBox(nd.label, fs, pad);
-      nd.r = Math.max(nd.baseR, Math.hypot(box.hw, box.hh) + 2);
+      const outset = Math.hypot(box.hw, box.hh) + 2 - nd.baseR;
+      nd.labelOutset = Math.max(outset, 0);
     }
   }
 
@@ -541,21 +619,9 @@ export class GraphStore {
    * 注意不含 subgraph 容器的成员包裹（容器按声明形状参与网格布局）。
    */
   nodeBoxSize(el: LayoutElement): { w: number; h: number } {
-    let w: number;
-    let h: number;
-    switch (el.shape.kind) {
-      case 'circle':
-        w = h = 2 * el.shape.r;
-        break;
-      case 'ellipse':
-        w = 2 * el.shape.rx;
-        h = 2 * el.shape.ry;
-        break;
-      case 'rect':
-        w = el.shape.w;
-        h = el.shape.h;
-        break;
-    }
+    const he = halfExtentsOf(el.shape);
+    let w = 2 * he.hw;
+    let h = 2 * he.hh;
     if (el.label !== null) {
       const box = estimateLabelBox(el.label, this.labelFontSize, this.labelPadding);
       w = Math.max(w, 2 * box.hw);
@@ -594,6 +660,13 @@ export class GraphStore {
     const index = this.idToIndex.get(id);
     if (index === undefined) throw new Error(`unknown node id: ${String(id)}`);
     return index;
+  }
+
+  /** 按 id 取 subgraph 容器（非容器 id 抛错）——分组层取容器的语义化入口。 */
+  subgraphById(id: ElementId): LayoutSubgraphNode {
+    const el = this.elementById(id);
+    if (!isSubgraphNode(el)) throw new Error(`node ${String(id)} is not a subgraph container`);
+    return el;
   }
 
   // ── 视图 ────────────────────────────────────────────────
