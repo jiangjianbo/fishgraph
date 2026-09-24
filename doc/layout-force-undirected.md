@@ -132,6 +132,36 @@ score = 张力项 − RING_BONUS × 环周长项
   （实测 hop/平衡类小图用例 4000 步边界）；真实多边图不受影响
   （mermaid ~2560 步收敛）。相关理论构型测试显式关闭本选项。
 
+**同顶点连线角向均布力项**（`applyAngleBalance`，opt-in，默认关，
+`angleBalance` 正值开启、推荐 0.5 起步）：同顶点线间的「张开斥力」——
+
+- 势 `E(θ) = kAngSpread·(1 − sin(θ/2))`，θ 为同一顶点两入射边的夹角
+  （`atan2(|cross|, dot)` ∈ [0,π]，θ→0/π 数值良态）：θ→0 完全重叠时
+  能量最高且梯度有限非零（斥力最大），θ→π 完全张开时能量与梯度双双
+  光滑归零 —— 「角度越小斥力越大」。
+- **只在共享顶点的相邻线对之间发生**（Σ_v C(deg,2) 对，`adj` 邻接直接
+  给出；度 <2 的顶点自动跳过）。
+- 力 = −∇E 的精确梯度：a、b 两端各受把边往分开方向转的切向力
+  （∂θ/∂p = [sgn(cross)·dot·q⊥ − |cross|·q]/(|p|²|q|²)，**|cross| 的梯度
+  带 sign(cross)，漏掉则 cross<0 的线对不保守**），反作用合到顶点 v，
+  三点合力恒为零。能量随力一并返回（`ctx.energy += applyAngleBalance(ctx)`），
+  力 = −∇E 纪律与线搜索兼容（中心差分验收：`tests/angle-balance-gradcheck.test.ts`）。
+- 强度标尺与**默认关闭的原因**：`kAngSpread = 12.5·balance·k_a/L`，
+  θ=45°、臂长 L 的切向力 ≈ 5.8·balance 力单位。该力的平衡态对链是
+  「拉直」、对拥挤线对是「撑开」，**任何非零强度都会**系统性拉直组内
+  折叠链（hidden-group 跨度超预算）、重排卫星节点的切向布局（S4 弱引力
+  物理被强扭矩改写）、大图走向新的终局构型（mermaid 边穿节点）——
+  实测 balance = 0.05/0.2/0.5/1 全部破坏上述契约，强度只影响快慢不改变
+  终点，故不存在安全的非零默认值（与 `edgeAngleAlignment` 同款 opt-in）。
+- 与形状契约的关系：星形米字（星 8）在 balance ≈ 8 时确能护住粗放置
+  产出的完美扇形通过弛豫，但同强度扭歪星 4 十字 —— **canonical 星形
+  由流水线主导**（粗放置已产出完美 45°×8 扇形 → 弛豫 ~13 步剪切 →
+  refine 锁格），力层标定窗口不存在；修复方向是弛豫保形或吸附层角向
+  判定（见 `tests/shape-baseline.test.ts` star8/star3 todo 证据链）。
+  角向势主要做切向功，与弹簧（径向）正交，不挤压半径方向的平衡。
+- 挂接在 `computeForcesExact` 与 `computeForcesBH` 的阶段 ≥1 边循环之后
+  （两路同一函数，天然一致）。
+
 迭代预算的安全网 `DEFAULT_MAX_ITERATIONS = 4000`（正常路径由收敛判据
 自适应提前停）。实测收敛步数：
 
@@ -162,7 +192,8 @@ score = 张力项 − RING_BONUS × 环周长项
 
 ## 6. 参数与纯度
 
-- 消费 `naturalLength`（格子与间隙的长度标尺）、力学全家桶
+- 消费 `naturalLength`（邻面间隙**格数**：力学与粗放置的长度标尺，
+  内部乘 `cellScale` 换算 px）、力学全家桶
   （accuracy/gravity/交叉/避让……，直接透传给复用引擎）、
   `coordinateSystem`；
 - **不消费分组语义**：`subgraphs` 容器作为普通大节点参与布局；
@@ -209,7 +240,7 @@ score = 张力项 − RING_BONUS × 环周长项
 | `score(v, gx, gy, neighbors, neighborIndices)` | 候选格评分（越小越优） | 张力 − 环周长奖励 |
 | `isDeadlock(v, bestScore, min, cnt, bestCell)` | 是否触发插列 | 无空格或张力超阈值 |
 | `deadlock(grid, anchor)` | 死锁解法 | 四方向最小移动插行列 |
-| `placeSeed(grid, v)`（可选） | 新分量种子的落格 | 贴已放置区域右缘 |
+| `placeSeed(grid, v)`（可选） | 新分量种子的落格 | 紧凑落格：外扩一圈内贴靠得分最高（2×边邻接+1×角邻接）的空格，平局取离质心最近 |
 
 `coarsePlacement` 的 `heuristics` 参数缺省为 `undirectedHeuristics(adjacency)`
 ——无向行为零回归；有向算法传入 `directedHeuristics(...)`（见

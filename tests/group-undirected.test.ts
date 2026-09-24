@@ -155,7 +155,7 @@ describe('前提验证：force-undirected 引擎可在 group 内部节点上运�
     const L = 120;
     const params = deriveParams(
       {
-        naturalLength: L,
+        naturalLength: L / 20, // 格数：S=20 时 L_px = 120 不变
         weakGravityRatio: 0.2,
         edgeNodeRepulsion: 3,
         edgeTension: 1,
@@ -165,6 +165,7 @@ describe('前提验证：force-undirected 引擎可在 group 内部节点上运�
         lineAvoidance: false,
       },
       subElements.length,
+      20, // 格单位比例尺：测试自定 S=20，L/20 格 → 120px 不变
     );
     const ctx: ForceContext = {
       elements: subElements,
@@ -235,7 +236,7 @@ describe('group-undirected（深度优先递归分组布局）', () => {
           { id: 'sub', shape: { kind: 'rect', w: 300, h: 220 }, members: ['in1', 'in2', 'in3'] },
         ],
       },
-      { algorithm: 'group-undirected', naturalLength: 120, accuracy: 'exact', seed: 7 },
+      { algorithm: 'group-undirected', naturalLength: 6, accuracy: 'exact', seed: 7 },
     );
     layout.run();
     assertAllFinite(layout);
@@ -284,7 +285,7 @@ describe('group-undirected（深度优先递归分组布局）', () => {
           { id: 'g2', members: [4, 5, 6, 7] },
         ],
       },
-      { algorithm: 'group-undirected', naturalLength: 120, accuracy: 'exact', seed: 11 },
+      { algorithm: 'group-undirected', naturalLength: 6, accuracy: 'exact', seed: 11 },
     );
     layout.run();
     assertAllFinite(layout);
@@ -318,7 +319,7 @@ describe('group-undirected（深度优先递归分组布局）', () => {
           { id: 'outer', shape: { kind: 'rect', w: 400, h: 320 }, members: ['m1', 'm2', 'm3', 'inner'] },
         ],
       },
-      { algorithm: 'group-undirected', naturalLength: 120, accuracy: 'exact', seed: 3 },
+      { algorithm: 'group-undirected', naturalLength: 6, accuracy: 'exact', seed: 3 },
     );
     layout.run();
     assertAllFinite(layout);
@@ -373,7 +374,7 @@ describe('group-undirected（深度优先递归分组布局）', () => {
         ],
         hiddenGroups: [{ id: 'hg', members: ['h1', 'h2', 'h3'] }],
       },
-      { algorithm: 'group-undirected', naturalLength: 120, accuracy: 'exact', seed: 5 },
+      { algorithm: 'group-undirected', naturalLength: 6, accuracy: 'exact', seed: 5 },
     );
     layout.run();
     assertAllFinite(layout);
@@ -404,7 +405,7 @@ describe('group-undirected（深度优先递归分组布局）', () => {
     const run = (): ForceLayout => {
       const layout = new ForceLayout(build(), {
         algorithm: 'group-undirected',
-        naturalLength: 120,
+        naturalLength: 6,
         accuracy: 'exact',
         seed: 42,
       });
@@ -434,7 +435,7 @@ describe('group-undirected（深度优先递归分组布局）', () => {
     const run = (algorithm: string): ForceLayout => {
       const layout = new ForceLayout(graph, {
         algorithm,
-        naturalLength: 120,
+        naturalLength: 6,
         accuracy: 'exact',
         gravity: 'pairwise',
         seed: 42,
@@ -470,7 +471,7 @@ describe('group-undirected（深度优先递归分组布局）', () => {
           { id: 'sub', shape: { kind: 'rect', w: 300, h: 200 }, members: ['m1', 'm2', 'm3'] },
         ],
       },
-      { algorithm: 'group-undirected', naturalLength: 120, accuracy: 'exact', seed: 9 },
+      { algorithm: 'group-undirected', naturalLength: 6, accuracy: 'exact', seed: 9 },
     );
     layout.run();
     assertAllFinite(layout);
@@ -517,7 +518,7 @@ describe('group-undirected（深度优先递归分组布局）', () => {
     expect(hiddenGroups.length).toBeGreaterThan(0);
     const layout = new ForceLayout(
       { ...graph, hiddenGroups },
-      { algorithm: 'group-undirected', naturalLength: 120, accuracy: 'exact', seed: 13 },
+      { algorithm: 'group-undirected', naturalLength: 6, accuracy: 'exact', seed: 13 },
     );
     layout.run();
     assertAllFinite(layout);
@@ -533,7 +534,7 @@ describe('group-undirected：从简单到复杂的最小用例', () => {
   /** 最小声明参数（固定确定性）。 */
   const opts = (seed: number) => ({
     algorithm: 'group-undirected',
-    naturalLength: L,
+    naturalLength: L / 20, // 格数：S=20 → 120px
     accuracy: 'exact' as const,
     seed,
   });

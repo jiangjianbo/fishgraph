@@ -58,10 +58,11 @@ export class GridUndirectedStrategy implements LayoutStrategy {
     this.store.applyNodeLabelSizes(true);
 
     // 阶段 1：质点拓扑粗布局（与 force-undirected 同源）。
+    // naturalLength 为格数，粗布局格胞 = 格数 × 比例尺（px 中间量）。
     const { grid, posOf, cell, order } = coarseGridPlacement(
       elements,
       adj,
-      this.options.naturalLength,
+      this.options.naturalLength * this.store.cellScale,
     );
     void grid; // 占用语义由 ExpansionGrid 接管
 

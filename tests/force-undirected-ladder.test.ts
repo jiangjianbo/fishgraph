@@ -53,7 +53,7 @@ function dist(a: { x: number; y: number }, b: { x: number; y: number }): number 
 
 /** 坐标到最近格胞中心 (i+0.5)·G 的残差（0 = 恰在中心）。 */
 function centerResidual(v: number, G: number): number {
-  const r = (((v - G / 2) % G) + G) % G;
+  const r = ((v % G) + G) % G;
   return Math.min(r, G - r);
 }
 
@@ -65,14 +65,14 @@ function chebCells(a: { x: number; y: number }, b: { x: number; y: number }, G: 
   );
 }
 
-/** 全部节点坐标有限且落在格胞中心上（网格不变量的根基）。 */
+/** 全部节点坐标有限且落在格点上（网格不变量的根基）。 */
 function expectAllOnGrid(layout: ForceLayout, ids: readonly NodeId[]): void {
   const G = latticeOf(layout);
   for (const id of ids) {
     const p = pos(layout, id);
     expect(Number.isFinite(p.x) && Number.isFinite(p.y), `节点 ${id} 坐标有限`).toBe(true);
-    expect(centerResidual(p.x, G), `节点 ${id} x=${p.x} 吸附格胞中心`).toBeLessThan(EPS);
-    expect(centerResidual(p.y, G), `节点 ${id} y=${p.y} 吸附格胞中心`).toBeLessThan(EPS);
+    expect(centerResidual(p.x, G), `节点 ${id} x=${p.x} 吸附格点`).toBeLessThan(EPS);
+    expect(centerResidual(p.y, G), `节点 ${id} y=${p.y} 吸附格点`).toBeLessThan(EPS);
   }
 }
 
@@ -89,7 +89,7 @@ function expectDistinctCells(layout: ForceLayout, ids: readonly NodeId[]): void 
 }
 
 describe('force-undirected 渐进阶梯（n=1→5 微型图，默认网格路径）', () => {
-  it('L1 单节点：收敛且吸附格胞中心，格距 = 请求值', () => {
+  it('L1 单节点：收敛且吸附格点，格距 = 请求值', () => {
     // 检出目标：吸附层在 n=1（无任何边/无斥力对）时 NaN、崩溃或漏吸附；
     // 单点无最近邻，格距自适应必须透传请求值 120 而不是 NaN/0。
     const layout = run({ nodes: [{ id: 'a' }], edges: [] });
@@ -109,11 +109,11 @@ describe('force-undirected 渐进阶梯（n=1→5 微型图，默认网格路径
   });
 
   it('L2 同格双 fixed：先占格、冲突外扩、自由点避开', () => {
-    // 检出目标：格胞占用消解路径（就近格被占 → 拒绝 → 环形外扩搜索）。
+    // 检出目标：格点占用消解路径（就近格被占 → 拒绝 → 环形外扩搜索）。
     // 稀疏图弛豫终态间距 ≥1 格，占用冲突从不触发；只有把两个 fixed 节点
-    // 放进同一格胞（10px 近距）才能强迫冲突：f1 就近格胞 (0,0) 空闲则
-    // 吸附其中心 (G/2, G/2)，f2 就近格胞被占必须外扩到相邻格，自由点 m
-    // 再避开两者。
+    // 放进同一格点近旁（10px 近距）才能强迫冲突：f1 就近格点 (0,0) 空闲
+    // 则原位吸附（格点相位已退役，fixed 本就坐在格点上），f2 就近格点被占
+    // 必须外扩到相邻格，自由点 m 再避开两者。
     const spec = {
       nodes: [
         { id: 'f1', x: 0, y: 0, fixed: true },
@@ -128,8 +128,9 @@ describe('force-undirected 渐进阶梯（n=1→5 微型图，默认网格路径
     expectDistinctCells(layout, ['f1', 'f2', 'm']);
     const G = latticeOf(layout);
     const f1 = pos(layout, 'f1');
-    expect(f1.x, 'f1 就近格胞 (0,0) 空闲应吸其中心 x').toBeCloseTo(G / 2, 6);
-    expect(f1.y, 'f1 就近格胞 (0,0) 空闲应吸其中心 y').toBeCloseTo(G / 2, 6);
+    // 格点相位（半格已退役）：f1 声明在 (0,0)，恰为格点，原位不动。
+    expect(f1.x, 'f1 就近格点 (0,0) 空闲应原位吸附 x').toBeCloseTo(0, 6);
+    expect(f1.y, 'f1 就近格点 (0,0) 空闲应原位吸附 y').toBeCloseTo(0, 6);
     expect(chebCells(f1, pos(layout, 'f2'), G), 'f2 外扩后仍在 f1 相邻格（切比雪夫 1）').toBeLessThanOrEqual(1);
   });
 

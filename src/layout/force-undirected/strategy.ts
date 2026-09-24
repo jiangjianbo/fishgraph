@@ -77,7 +77,7 @@ export class ForceUndirectedStrategy implements LayoutStrategy {
     this.store.refreshLabelBoxes();
     // 文字尺寸先物化进有效半径：粗布局的膨胀按最终包围尺寸计算。
     this.store.applyNodeLabelSizes(true);
-    this.params = deriveParams(options, store.elements.length);
+    this.params = deriveParams(options, store.elements.length, store.cellScale);
     // 世界分块在粗布局前构建：粗布局按提升拓扑放置（成员聚块、容器聚外），
     // 随后种入容器。
     if (store.subgraphNodes.length > 0) {
@@ -159,6 +159,7 @@ export class ForceUndirectedStrategy implements LayoutStrategy {
     return {
       maxStep: Math.max(1e-3, this.options.maxStepRatio * L),
       initStep: L * 0.05,
+      // 收敛数值容差与单位无关，保持绝对 px。
       minStep: 1e-3,
       forceEps: Math.min(0.02, Math.max(1.5e-3, 0.5 / L)),
       calmNeeded: 5,
@@ -174,7 +175,7 @@ export class ForceUndirectedStrategy implements LayoutStrategy {
       options.unrelatedRepulsion !== this.options.unrelatedRepulsion;
     const csChanged = options.coordinateSystem !== this.options.coordinateSystem;
     this.options = options;
-    const newParams = deriveParams(options, this.store.elements.length);
+    const newParams = deriveParams(options, this.store.elements.length, this.store.cellScale);
     // 原地更新，保证 ctx.params 引用稳定
     Object.assign(this.params, newParams);
     this.ctx.gravity = options.gravity;
@@ -217,7 +218,7 @@ export class ForceUndirectedStrategy implements LayoutStrategy {
     // 估计的最近邻随之变大，格距越抬越高（实测 12 节点图 124 → 512）。
     // 重建（图结构/重新弛豫）时重置，拖拽不改变力学平衡故保留。
     this.gridLattice = null;
-    this.params = deriveParams(this.options, this.store.elements.length);
+    this.params = deriveParams(this.options, this.store.elements.length, this.store.cellScale);
     Object.assign(this.ctx.params, this.params);
     this.store.refreshLabelBoxes();
     this.store.applyNodeLabelSizes(true);
@@ -346,15 +347,18 @@ export class ForceUndirectedStrategy implements LayoutStrategy {
       }
       if (count > 0) caps.push(zoneLatticeCap(minHw, minHh, count));
     }
+    // 格单位语义：gridSize/naturalLength 都是格数，吸附格距 = 格数 × 比例
+    // 尺。格距自适应：力学平衡间距大于请求格距时抬格距（就近量化才能每
+    // 点一格、无量化洞），但对容器容量上限取小（包含性优先于量化均匀）；
+    // 自适应值量化到基准格整数倍 —— 格点坐标 / 比例尺 ∈ ℤ 是格单位存储
+    // 的前置条件。只在首次修正时估计（rebuild 重置）：吸附/流向约束会拉
+    // 伸布局，吸附态上重复估计最近邻会正反馈抬高格距，不动点不成立。
+    const S = this.store.cellScale;
     const requested =
-      this.options.gridSize > 0 ? this.options.gridSize : this.options.naturalLength;
-    // 格距自适应：力学平衡间距大于请求格距时抬格距（就近量化才能每点
-    // 一格、无量化洞），但对容器容量上限取小（包含性优先于量化均匀）。
-    // 只在首次修正时估计（rebuild 重置）：吸附/流向约束会拉伸布局，
-    // 吸附态上重复估计最近邻会正反馈抬高格距，不动点不成立。
+      (this.options.gridSize > 0 ? this.options.gridSize : this.options.naturalLength) * S;
     let lattice = this.gridLattice;
     if (lattice === null) {
-      lattice = resolveRefineLattice(requested, nodes, caps);
+      lattice = Math.max(1, Math.round(resolveRefineLattice(requested, nodes, caps) / S)) * S;
       this.gridLattice = lattice;
     }
     // 质量感知吸附：全部边供穿越否决，流向约束由接缝提供（有向算法）
@@ -363,7 +367,13 @@ export class ForceUndirectedStrategy implements LayoutStrategy {
       source: elements[e.sourceIndex]!.id,
       target: elements[e.targetIndex]!.id,
     }));
-    this.cs.refine(nodes, { lattice, edges, zones, flow: this.refineFlow() ?? undefined });
+    this.cs.refine(nodes, {
+      lattice,
+      edges,
+      zones,
+      flow: this.refineFlow() ?? undefined,
+      cellScale: S,
+    });
     for (let i = 0; i < nodes.length; i++) {
       targets[i]!.x = nodes[i]!.x;
       targets[i]!.y = nodes[i]!.y;

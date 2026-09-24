@@ -66,6 +66,8 @@ export interface DerivedParams {
   obstacleR: number;
   /** 接触弹簧的作用距离（间隙小于它进入重叠推离区），随布局尺度缩放。 */
   gFloor: number;
+  /** 标签软墙的作用余量下限：max(2, S/60)，S ≤ 120 时即旧 2px。 */
+  labelMarginFloor: number;
   /** 近程防穿越墙强度（不随跳数衰减）：k_near = ½k_r。 */
   nearK: number;
   /** 近程防穿越墙作用域：g_near = 0.6L。 */
@@ -78,6 +80,8 @@ export interface DerivedParams {
   lineAvoid: boolean;
   /** 连线方向对齐强度（能量/力的绝对系数，已含 edgeAngleAlignment 倍率）。 */
   kAng: number;
+  /** 同顶点连线角向均布强度（能量/力的绝对系数，已含 angleBalance 倍率）。 */
+  kAngSpread: number;
 }
 
 /**
@@ -156,10 +160,15 @@ export function deriveParams(
     crossingEnergy: number;
     lineAvoidance: number | boolean;
     edgeAngleAlignment?: number;
+    angleBalance?: number;
   },
   nodeCount: number,
+  cellScale: number,
 ): DerivedParams {
-  const L = Math.max(opts.naturalLength, 1e-3);
+  // 格单位力学：naturalLength 语义 = 邻面间隙的**格数**（初始化分级的
+  // 基准格）；内部 px 计算统一经各向同性比例尺 S 换算 —— px 只是中间量。
+  const S = Math.max(cellScale, 1e-9);
+  const L = Math.max(opts.naturalLength, 1e-3) * S;
   const ka = 1;
   // 斥力作用域：间隙达到 2L 时斥力光滑归零（脱离接触后迅速消失）。
   const repR = 2 * L;
@@ -184,6 +193,13 @@ export function deriveParams(
   // 水平/垂直（θ=0°/90°）= 0 最低，±45° = 2 稍高，中间角度（22.5°/67.5°）= 3 更高；
   // 稳定方向 0°/45°/90°。kAng 直接以力单位 k_a 计（45° 边罚 2×strength）。
   const kAng = Math.max(opts.edgeAngleAlignment ?? 0, 0) * ka;
+  // 同顶点连线角向均布：每对入射边的张开斥力势 E(θ) = kAngSpread·(1−sin(θ/2))。
+  // 强度标尺：θ=45°、臂长 L 的线对切向力 ≈ 5.8·balance 力单位；要翻过
+  // 「兄弟节点斥力墙」（星形 45° 拥挤对、叶距 ≈ 0.77L 时墙力 ≈ 4.6 力单位）
+  // 需 balance ≳ 8。注意该力的平衡态对链是「拉直」——任何非零强度都会
+  // 系统性拉直折叠链、重排卫星切向（强度只影响快慢），故只能 opt-in。
+  // 角向势主要做切向功，与弹簧（径向）正交，不挤压半径方向的平衡。
+  const kAngSpread = Math.max(opts.angleBalance ?? 0, 0) * 12.5 * (ka / L);
   const kw = ka * Math.max(opts.weakGravityRatio, 1e-6);
   // 橡皮筋刚度 k_b = τ·k_a/L³：F = k_b·g 随线长线性增强（连线越长拉力越大），
   // τ=1 时与截断斥力的平衡间隙恰为 naturalLength（k_r(1/L−1/2L)/L² = k_b·L）。
@@ -208,6 +224,7 @@ export function deriveParams(
     dee,
     lineAvoid,
     kAng,
+    kAngSpread,
     kw,
     kt,
     ken,
@@ -215,8 +232,12 @@ export function deriveParams(
     kharm,
     kcent: opts.centroidStrength * (ka / (L * L)),
     forceUnit: ka / (L * L),
-    obstacleR: Math.max(6, 0.15 * L),
-    gFloor: Math.max(0.5, 0.01 * L),
+    // 物理余量下限：绝对 px 地板 ∨ 格单位比例尺项 取大（沿用库内既有
+    // 惯例，如 max(6, 0.15L)）—— S ≤ 120 时与旧 px 行为逐位一致，
+    // 大格图（S ≫ 120）随比例尺增长不失效。
+    obstacleR: Math.max(6, S * 0.05, 0.15 * L),
+    gFloor: Math.max(0.5, S / 240, 0.01 * L),
+    labelMarginFloor: Math.max(2, S / 60),
   };
 }
 
@@ -436,6 +457,64 @@ function applyEdgeAngleAlignment(ctx: ForceContext, na: LayoutElement, nb: Layou
   nb.fx -= fx;
   nb.fy -= fy;
   return kAng * (2 - Math.cos(4 * theta) - Math.cos(8 * theta));
+}
+
+/** 同顶点连线角向均布（线间角向斥力，严格保守的内力）：
+ *  同一顶点 v 的每对入射边 (v→a, v→b) 之间有一个「张开斥力」，势
+ *  E(θ) = kAngSpread·(1 − sin(θ/2))，θ 为两线夹角（atan2(|cross|,dot)∈[0,π]）：
+ *  θ→0 完全重叠时能量最高且梯度有限非零（斥力最大），θ→π 完全张开时
+ *  能量与梯度双双光滑归零 —— 「角度越小斥力越大」。力 = −∇E 的精确梯度
+ *  （∂θ/∂p = [dot·q⊥ − |cross|·q]/(|p|²|q|²]，数值上在 θ→0/π 均良态）：
+ *  a、b 两端各受把边往分开方向转的切向力，反作用合到顶点 v，三点合力恒零。
+ *  只在共享顶点的相邻线对之间发生（Σ_v C(deg,2) 对），度 <2 自动跳过。 */
+function applyAngleBalance(ctx: ForceContext): number {
+  const k = ctx.params.kAngSpread;
+  if (k <= 0) return 0;
+  const { elements, adj } = ctx;
+  let energy = 0;
+  for (let c = 0; c < elements.length; c++) {
+    const neighbors = adj[c];
+    if (neighbors.size < 2) continue;
+    const vc = elements[c];
+    const list = Array.from(neighbors);
+    for (let x = 0; x < list.length; x++) {
+      const va = elements[list[x]];
+      const px = va.x - vc.x;
+      const py = va.y - vc.y;
+      const pp = px * px + py * py;
+      if (pp < 1e-18) continue; // 退化边（自环/重合）：无方向可言
+      for (let y = x + 1; y < list.length; y++) {
+        const vb = elements[list[y]];
+        const qx = vb.x - vc.x;
+        const qy = vb.y - vc.y;
+        const qq = qx * qx + qy * qy;
+        if (qq < 1e-18) continue;
+        const cross = px * qy - py * qx;
+        const dot = px * qx + py * qy;
+        const ac = Math.abs(cross);
+        // sgn(cross)：θ = atan2(|cross|,dot)，|·| 的梯度带 sign(cross) ——
+        // 漏掉它则 cross<0 的线对力不保守（力 ≠ −∇E，线搜索被破坏）。
+        const sgn = cross >= 0 ? 1 : -1;
+        const theta = Math.atan2(ac, dot);
+        energy += k * (1 - Math.sin(theta / 2));
+        // g = −dE/dθ = k/2·cos(θ/2) ≥ 0；invRR = 1/(|p|²|q|²)
+        const g = k * 0.5 * Math.cos(theta / 2);
+        const invRR = 1 / (pp * qq);
+        // ∂θ/∂pa = (sgn·dot·q⊥ − ac·q)·invRR；∂θ/∂pb = (−sgn·dot·p⊥ − ac·p)·invRR
+        const dax = (sgn * dot * qy - ac * qx) * invRR;
+        const day = (sgn * dot * -qx - ac * qy) * invRR;
+        const dbx = (sgn * dot * -py - ac * px) * invRR;
+        const dby = (sgn * dot * px - ac * py) * invRR;
+        va.fx += g * dax;
+        va.fy += g * day;
+        vb.fx += g * dbx;
+        vb.fy += g * dby;
+        vc.fx -= g * (dax + dbx);
+        vc.fy -= g * (day + dby);
+      }
+    }
+  }
+  return energy;
 }
 
 /** BH 模式：沿边累加相邻节点的引力 + 线性张力（斥力已由四叉树负责）。
@@ -688,7 +767,7 @@ function applyLabelNodeInteraction(ctx: ForceContext, nodeIdx: number, e: Intern
   const midY = (a.y + b.y) / 2;
   const sdf = shapeSdf({ kind: 'rect', w: e.labelHw * 2, h: e.labelHh * 2 }, c.x - midX, c.y - midY);
   const hRaw = sdf.dist - c.r;
-  const margin = Math.max(2, p.L * 0.04);
+  const margin = Math.max(p.labelMarginFloor, p.L * 0.04);
   if (hRaw > margin) return 0;
   // 不钳制 hRaw：穿透越深推力越大，能量 ½·klbl·(margin−hRaw)²/margin 一致。
   const gapToWall = margin - hRaw;
@@ -720,6 +799,9 @@ export function computeForcesExact(ctx: ForceContext): number {
       ctx.energy += applyEdgeAttraction(ctx, ei);
     }
     ctx.energy += ctx.crossPenaltyEnergy;
+    // 同顶点连线角向均布：相邻线对之间的张开斥力（夹角越小斥力越大，
+    // 只在共享顶点的线对之间 —— 星形/扇形连线趋向等分圆周）
+    ctx.energy += applyAngleBalance(ctx);
     // 线间避让斥力：交叉在力学上直接被挤开（原则 8 的力学支撑，opt-in）
     if (ctx.params.lineAvoid && ctx.edges.length > 1) {
       const grid = new SpatialGrid(Math.max(ctx.params.dee * 2, 1));
@@ -805,13 +887,14 @@ export function computeForcesBH(ctx: ForceContext): number {
     });
   }
 
-  // 2. 沿边累加相邻弹力（按 μ_e 缩放）+ 交叉能量罚
+  // 2. 沿边累加相邻弹力（按 μ_e 缩放）+ 交叉能量罚 + 同顶点线间角向斥力
   if (ctx.stage >= 1) {
     refreshCrossingTerms(ctx);
     for (let ei = 0; ei < ctx.edges.length; ei++) {
       ctx.energy += applyEdgeAttraction(ctx, ei);
     }
     ctx.energy += ctx.crossPenaltyEnergy;
+    ctx.energy += applyAngleBalance(ctx);
   }
 
   // 3. 避让：网格给出候选（边/标签 × 节点），内部再按影响半径过滤

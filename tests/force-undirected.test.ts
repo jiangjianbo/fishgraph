@@ -195,7 +195,7 @@ describe('force-undirected：质点网格粗布局流水线', () => {
     () => {
       const layout = new ForceLayout(MERMAID_GRAPH, {
         algorithm: 'force-undirected',
-        naturalLength: 120,
+        naturalLength: 6,
         seed: 42,
         edgeNodeRepulsion: 40,
         // identity：零穿越断言测弛豫引擎质量，与终点网格化修正解耦

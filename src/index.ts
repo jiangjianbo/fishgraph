@@ -56,6 +56,9 @@ export { GridSpaceContext } from './layout/space/grid-context.js';
 export { gridRouteAStar, type GridRouteOptions } from './layout/space/grid-route.js';
 export type { Bounds, Box, Point, SpaceContext } from './layout/space/types.js';
 
+// 尺寸分级（格单位架构 · 初始化：px 盒 → 整数格占用）
+export { GRADE_TOLERANCE, gradeAxis, gradeBoxes, type AxisGrades, type BoxSize, type GradeBasis } from './layout/grade.js';
+
 export type {
   AccuracyMode,
   EdgeSpec,

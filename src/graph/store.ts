@@ -15,6 +15,7 @@
  */
 
 import { estimateLabelBox } from '../label.js';
+import { GRADE_TOLERANCE, gradeBoxes } from '../layout/grade.js';
 import { DEFAULT_SHAPE, boundingRadius, clampPointToShape, halfExtentsOf } from '../geometry.js';
 import type {
   EdgeSpec,
@@ -85,6 +86,11 @@ export abstract class LayoutElement {
   w?: number;
   /** 网格布局（grid-undirected）物化的 AABB 物理高（px）；连续布局不设置。 */
   h?: number;
+  /** 占用格宽（整数，≥1）：初始化分级（refreshGrades）按盒宽独立聚类写入；
+   *  格单位架构的尺寸主权 —— 布局与存储只认格数，px 仅为中间量。 */
+  gw = 1;
+  /** 占用格高（整数，≥1）：初始化分级（refreshGrades）按盒高独立聚类写入。 */
+  gh = 1;
 
   protected constructor(init: ElementInit) {
     this.id = init.id;
@@ -355,6 +361,16 @@ export class GraphStore {
   private idToIndex = new Map<ElementId, number>();
   private labelFontSize = 12;
   private labelPadding = 4;
+  /** 分级基准格宽（px，内存中间量 —— 存储/序列化不含 px，refreshGrades 写入）。 */
+  gradeCellW = 1;
+  /** 分级基准格高（px，内存中间量，可与 gradeCellW 不同 —— 矩形格）。 */
+  gradeCellH = 1;
+  /** 格单位各向同性比例尺（px/格）：矩形基准格的几何平均（保面积换算）。
+   *  格单位力学的单位换算出口 —— 力学常数以格为单位定义，内部 px 计算
+   *  统一经此缩放；px 只是中间量，本值由初始化分级决定。 */
+  get cellScale(): number {
+    return Math.sqrt(this.gradeCellW * this.gradeCellH);
+  }
 
   constructor(graph: GraphSpec) {
     graph.nodes.forEach((spec) => this.insertNode(spec));
@@ -622,18 +638,23 @@ export class GraphStore {
    * 节点文字盒外扩（统一计算入口）：把文字包围盒折算成 labelOutset，
    * 只参与力学 AABB（hw/hh），不改变真实形状 —— 渲染仍画声明形状，
    * 文字多少通过力学占位把邻居撑开。容器不吃文字盒（真实形状由
-   * 成员实占全权管理）。
+   * 成员实占全权管理）。外扩余量随格单位比例尺缩放（S/60 ≈ 2px @ S=120）。
    */
   applyNodeLabelSizes(enabled: boolean): void {
+    // 先分级再算外扩：分级输入是 nodeBoxSize（形状声明与文字盒的较大者），
+    // 不依赖 labelOutset，顺序无回环；这样外扩用的是本次最新的比例尺。
+    this.refreshGrades();
     const fs = this.labelFontSize;
     const pad = this.labelPadding;
+    // 文字外扩余量：绝对 px 地板 ∨ 比例尺项取大（S ≤ 120 与旧 2px 一致）。
+    const outsetFloor = Math.max(2, this.cellScale / 60);
     for (const nd of this.elements) {
       if (nd.isSubgraph || !enabled || nd.label === null) {
         nd.labelOutset = 0;
         continue;
       }
       const box = estimateLabelBox(nd.label, fs, pad);
-      const outset = Math.hypot(box.hw, box.hh) + 2 - nd.baseR;
+      const outset = Math.hypot(box.hw, box.hh) + outsetFloor - nd.baseR;
       nd.labelOutset = Math.max(outset, 0);
     }
   }
@@ -653,6 +674,23 @@ export class GraphStore {
       h = Math.max(h, 2 * box.hh);
     }
     return { w, h };
+  }
+
+  /**
+   * 尺寸分级（格单位架构 · 初始化）：以 nodeBoxSize（含文字物化的物理盒）
+   * 做宽/高独立容差聚类，写入各元素占用格数 gw/gh 与基准格 gradeCellW/H。
+   * 挂在 applyNodeLabelSizes 统一入口之后 —— 盒尺寸的全部变化源（标签
+   * 度量、形状、文字开关）都已被该入口消费。与布局无关，行为零影响。
+   */
+  refreshGrades(tolerance: number = GRADE_TOLERANCE): void {
+    const basis = gradeBoxes(this.elements.map((el) => this.nodeBoxSize(el)), tolerance);
+    this.gradeCellW = basis.cellW;
+    this.gradeCellH = basis.cellH;
+    for (let i = 0; i < this.elements.length; i++) {
+      const el = this.elements[i]!;
+      el.gw = basis.gw[i]!;
+      el.gh = basis.gh[i]!;
+    }
   }
 
   // ── 交互（拖拽支持）─────────────────────────────────────

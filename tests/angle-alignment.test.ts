@@ -16,7 +16,7 @@ function twoNodeLayout(deg: number, strength: number, x0 = 0, y0 = 0): ForceLayo
     },
     {
       accuracy: 'exact',
-      naturalLength: 100,
+      naturalLength: 5,
       edgeAngleAlignment: strength,
       labelCollision: false,
       gravity: 'pairwise',

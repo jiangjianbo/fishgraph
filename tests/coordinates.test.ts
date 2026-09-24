@@ -17,9 +17,9 @@ import {
 import type { GraphSpec } from '../src/types.js';
 import type { CoordinateNode } from '../src/layout/coordinates.js';
 
-/** 坐标到最近格胞中心 (i+0.5)·G 的残差（0 = 恰在中心）。 */
+/** 坐标到最近格点 g·G 的残差（0 = 恰在格点上；半格相位已退役）。 */
 function centerResidual(v: number, G: number): number {
-  const r = (((v - G / 2) % G) + G) % G;
+  const r = ((v % G) + G) % G;
   return Math.min(r, G - r);
 }
 
@@ -32,7 +32,7 @@ function chainGraph(n = 8): GraphSpec {
 describe('grid 坐标系（布局后网格化）', () => {
   it('默认即网格化：不指定 coordinateSystem 时坐标同样吸附格点', () => {
     const layout = new ForceLayout(chainGraph(8), {
-      naturalLength: 120,
+      naturalLength: 6,
       accuracy: 'exact',
       gravity: 'pairwise',
       seed: 4,
@@ -40,7 +40,7 @@ describe('grid 坐标系（布局后网格化）', () => {
     const r = layout.run({ maxIterations: 6000 });
     expect(r.converged).toBe(true);
     // 实际格距由布局暴露（L2 自适应：max(请求值, 力学平衡最近邻)），
-    // 节点全部坐在格胞中心 (i+0.5)·lattice 上。
+    // 节点全部坐在格点 g·lattice 上（坐标即整数格下标 × 格距）。
     const lattice = layout.gridLattice;
     expect(lattice, '网格化后应暴露实际格距').not.toBeNull();
     const views = layout.nodeViews;
@@ -56,7 +56,7 @@ describe('grid 坐标系（布局后网格化）', () => {
     const layout = new ForceLayout(chainGraph(8), {
       algorithm: 'force-directed',
       direction: 'TB',
-      naturalLength: 120,
+      naturalLength: 6,
       accuracy: 'exact',
       gravity: 'pairwise',
       seed: 4,
@@ -73,12 +73,12 @@ describe('grid 坐标系（布局后网格化）', () => {
   });
 
   it('所有节点吸附到格点；节点间不重叠；fixed 也吸附', () => {    const layout = new ForceLayout(chainGraph(8), {
-      naturalLength: 120,
+      naturalLength: 6,
       accuracy: 'exact',
       gravity: 'pairwise',
       seed: 4,
       coordinateSystem: 'grid',
-      gridSize: 60,
+      gridSize: 3,
     });
     const r = layout.run({ maxIterations: 6000 });
     expect(r.converged).toBe(true);
@@ -103,12 +103,12 @@ describe('grid 坐标系（布局后网格化）', () => {
   it('确定性：两次运行逐位相同', () => {
     const run = () => {
       const layout = new ForceLayout(chainGraph(6), {
-        naturalLength: 120,
+        naturalLength: 6,
         accuracy: 'exact',
         gravity: 'pairwise',
         seed: 9,
         coordinateSystem: 'grid',
-        gridSize: 60,
+        gridSize: 3,
       });
       layout.run({ maxIterations: 6000 });
       return layout.nodeViews.map((v) => `${v.x},${v.y}`).join('|');
@@ -128,12 +128,12 @@ describe('grid 坐标系（布局后网格化）', () => {
     };
     const layout = new ForceLayout(graph, {
       algorithm: 'group-undirected',
-      naturalLength: 120,
+      naturalLength: 6,
       accuracy: 'exact',
       gravity: 'pairwise',
       seed: 6,
       coordinateSystem: 'grid',
-      gridSize: 60,
+      gridSize: 3,
     });
     layout.run({ maxIterations: 6000 });
     const hub = layout.positions.get('sub')!;
@@ -160,7 +160,7 @@ describe('注册表', () => {
       },
     }));
     const layout = new ForceLayout(chainGraph(4), {
-      naturalLength: 120,
+      naturalLength: 6,
       accuracy: 'exact',
       gravity: 'pairwise',
       seed: 2,

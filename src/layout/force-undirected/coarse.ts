@@ -180,9 +180,10 @@ export interface CoarseHeuristics {
   /** 死锁解法：以最近邻居格为锚整体推开已放置节点，返回挤出的新格。 */
   deadlock(grid: PointGrid, anchor: Cell): Cell;
   /**
-   * 新分量种子的落格（可选）。缺省 placeOrphan：贴已放置区域右缘外侧。
-   * 有向算法覆写它把种子放到自己的层级行上 —— 否则微调期的流动弹簧
-   * 要把种子从任意落点硬拉回层级，拉不到位就在上游行卡住（逆流）。
+   * 新分量种子的落格（可选）。缺省 placeOrphan：紧凑落格（贴靠已放置
+   * 区域最紧的空格）。有向算法覆写它把种子放到自己的层级行上 —— 否则
+   * 微调期的流动弹簧要把种子从任意落点硬拉回层级，拉不到位就在上游
+   * 行卡住（逆流）。
    */
   placeSeed?(grid: PointGrid, v: number): Cell;
 }
@@ -310,13 +311,59 @@ function placeWithHeuristics(
 }
 
 /** 放置孤立节点/新分量首节点：贴着已放置区域右边缘外侧，从顶行向下找空格。 */
+/**
+ * 无已放置邻居的元素落格（新分量种子、完全孤立节点）。
+ *
+ * 紧凑落格：在已放置区域外扩一圈的范围内，选「贴靠最紧」的空格 ——
+ * 贴靠得分 = 2×边邻接 + 1×角邻接（边共享比角接触更紧凑）；平局取离
+ * 区域质心切比雪夫距离最近者，再平局按 (gx, gy) 升序保证确定性。
+ *
+ * 旧口径「贴已放置区域右缘外侧」会把全部孤立节点排成一行：线形是
+ * 弛豫动力学的横向鞍点（横向扰动无恢复力），力学位形无法自行展开，
+ * 布局被锁死在一条直线上。3 个不相关节点应成品字、4 个应成器字
+ * （tests/shape-baseline.test.ts 基线）。
+ */
 export function placeOrphan(grid: PointGrid): Cell {
   if (grid.occ.size === 0) return { gx: 0, gy: 0 };
-  const gx = grid.maxGx + 1;
-  for (let gy = grid.minGy; gy <= grid.maxGy; gy++) {
-    if (!grid.has(gx, gy)) return { gx, gy };
+  const cx = (grid.minGx + grid.maxGx) / 2;
+  const cy = (grid.minGy + grid.maxGy) / 2;
+  let best: Cell | null = null;
+  let bestTouch = -1;
+  let bestRing = Infinity;
+  let bestManhattan = Infinity;
+  for (let gy = grid.minGy - 1; gy <= grid.maxGy + 1; gy++) {
+    for (let gx = grid.minGx - 1; gx <= grid.maxGx + 1; gx++) {
+      if (grid.has(gx, gy)) continue;
+      // 8 邻接贴靠计分：边共享（4 邻）权重 2，角接触权重 1
+      let touch = 0;
+      if (grid.has(gx - 1, gy)) touch += 2;
+      if (grid.has(gx + 1, gy)) touch += 2;
+      if (grid.has(gx, gy - 1)) touch += 2;
+      if (grid.has(gx, gy + 1)) touch += 2;
+      if (grid.has(gx - 1, gy - 1)) touch += 1;
+      if (grid.has(gx + 1, gy - 1)) touch += 1;
+      if (grid.has(gx - 1, gy + 1)) touch += 1;
+      if (grid.has(gx + 1, gy + 1)) touch += 1;
+      const ring = Math.max(Math.abs(gx - cx), Math.abs(gy - cy));
+      const manhattan = Math.abs(gx - cx) + Math.abs(gy - cy);
+      const better =
+        touch > bestTouch ||
+        (touch === bestTouch &&
+          (ring < bestRing ||
+            (ring === bestRing &&
+              (manhattan < bestManhattan ||
+                (manhattan === bestManhattan &&
+                  best !== null &&
+                  (gx < best.gx || (gx === best.gx && gy < best.gy)))))));
+      if (better) {
+        best = { gx, gy };
+        bestTouch = touch;
+        bestRing = ring;
+        bestManhattan = manhattan;
+      }
+    }
   }
-  return { gx, gy: grid.maxGy + 1 };
+  return best!;
 }
 
 /**

@@ -50,7 +50,7 @@ describe('force-directed：有向图布局', () => {
     const layout = new ForceLayout(flowGraph(), {
       algorithm: 'force-directed',
       direction: 'TB',
-      naturalLength: 120,
+      naturalLength: 6,
       accuracy: 'exact',
       seed: 42,
     });
@@ -88,7 +88,7 @@ describe('force-directed：有向图布局', () => {
       {
         algorithm: 'force-directed',
         direction: 'TB',
-        naturalLength: 120,
+        naturalLength: 6,
         accuracy: 'exact',
         seed: 7,
       },
@@ -111,7 +111,7 @@ describe('force-directed：有向图布局', () => {
     const layout = new ForceLayout(flowGraph(), {
       algorithm: 'force-directed',
       direction: 'LR',
-      naturalLength: 120,
+      naturalLength: 6,
       accuracy: 'exact',
       seed: 42,
     });
@@ -133,7 +133,7 @@ describe('force-directed：有向图布局', () => {
     const layout = new ForceLayout(flowGraph(), {
       algorithm: 'force-directed',
       direction: 'TB',
-      naturalLength: 120,
+      naturalLength: 6,
       seed: 42,
     });
     layout.run();
@@ -165,7 +165,7 @@ describe('force-directed：有向图布局', () => {
     }
     const tree = new ForceLayout(
       { nodes: treeNodes, edges: treeEdges },
-      { algorithm: 'force-directed', naturalLength: 120, seed: 42 },
+      { algorithm: 'force-directed', naturalLength: 6, seed: 42 },
     );
     expect(tree.run({ maxIterations: 6000 }).converged).toBe(true);
     assertNoOverlap(tree);
@@ -175,7 +175,7 @@ describe('force-directed：有向图布局', () => {
         nodes: [{ id: 'hub' }, ...Array.from({ length: 16 }, (_, i) => ({ id: `s${i}` }))],
         edges: Array.from({ length: 16 }, (_, i) => ({ source: 'hub', target: `s${i}` })),
       },
-      { algorithm: 'force-directed', naturalLength: 100, seed: 42 },
+      { algorithm: 'force-directed', naturalLength: 5, seed: 42 },
     );
     expect(star.run({ maxIterations: 6000 }).converged).toBe(true);
     assertNoOverlap(star);
@@ -187,7 +187,7 @@ describe('force-directed：有向图布局', () => {
       const layout = new ForceLayout(flowGraph(), {
         algorithm: 'force-directed',
         direction: 'TB',
-        naturalLength: 120,
+        naturalLength: 6,
         accuracy: 'exact',
         seed: 9,
       });

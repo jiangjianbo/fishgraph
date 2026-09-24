@@ -68,9 +68,9 @@ function branchOf(
 /** demo 同参：力导向无向图 + 自然长度/网格 120 + 边-节点斥力 3。 */
 function fuLayout(spec: GraphSpec, seed: number): ForceLayout {
   return new ForceLayout(spec, {
-    naturalLength: 120,
+    naturalLength: 6,
     edgeNodeRepulsion: 3,
-    gridSize: 120,
+    gridSize: 6,
     accuracy: 'exact',
     gravity: 'pairwise',
     seed,

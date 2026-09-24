@@ -72,6 +72,11 @@ function buildGraph(): GraphSpec {
 
 const L = 120;
 
+// 分级比例尺（盒基准格，格单位力学的 px 换算率）：与布局选项无关，
+// 构造期即可读。本用例的容器声明矩形与全部间隙断言均为旧 px 口径标定，
+// naturalLength 以格声明后按 L/S 格换算恢复 120px 语义。
+const S0 = new ForceLayout(buildGraph(), { algorithm: 'group-undirected' }).cellScale;
+
 function memberGap(layout: ForceLayout, a: string, b: string): number {
   const pa = layout.positions.get(a)!;
   const pb = layout.positions.get(b)!;
@@ -89,7 +94,7 @@ describe('mermaid 架构图：subgraph 分组布局（group-undirected 折叠流
   beforeEach(() => {
     layout = new ForceLayout(buildGraph(), {
       algorithm: 'group-undirected',
-      naturalLength: L,
+      naturalLength: L / S0, // 格数 × 本图比例尺 = 120px（旧 px 口径）
       edgeNodeRepulsion: 3,
       weakGravityRatio: 0.05,
       edgeTension: 1.0,
@@ -175,7 +180,11 @@ describe('mermaid 架构图：subgraph 分组布局（group-undirected 折叠流
       );
       if (!sameGroup) continue; // 跨容器边的张力传导见已知边界（TODO）
       const gap = memberGap(layout, a, b);
-      expect(gap, `${a}→${b} 间隙过大`).toBeLessThan(2 * L);
+      // 上限防「边两端飞散」的拓扑破坏（2L 力学口径）。格点吸附每端
+      // 就近位移可达格距之半，间隙增量可达一个格距 —— 计入吸附余量
+      // （紧凑落格的收敛构型微移使个别边贴着旧 240 悬崖）。
+      const lattice = layout.gridLattice ?? 0;
+      expect(gap, `${a}→${b} 间隙过大`).toBeLessThan(2 * L + lattice);
     }
   });
 

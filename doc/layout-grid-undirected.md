@@ -31,7 +31,7 @@ grid 流水线消费放置产物进入膨胀。
 
 `coarseGridPlacement(elements, adj, naturalLength)` 返回
 `{ grid, posOf, cell, order }`：每格一节点的 `PointGrid`、每元素的格坐标、
-格距（= `naturalLength`，`gridSize > 0` 时可后续接入）、放置顺序。
+格距（= `naturalLength` 格数 × `cellScale` 比例尺）、放置顺序。
 度数优先连通生长 + 环形扩搜评分（曼哈顿张力 − 环周长奖励）+ 死锁插行列，
 **100% 不死锁**、全固定规则。连线不占位——只有文字例外（第一期尚未
 实现虚拟文本节点，见 §7）。

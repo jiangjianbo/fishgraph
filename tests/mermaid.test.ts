@@ -218,10 +218,18 @@ describe('mermaid 流程图（用户样本）', () => {
     // 软墙必须坚决生效才能守住"零线穿节点"。
     // identity 坐标系：断言的是弛豫引擎的方向/穿越/间隙质量，与终点
     // 网格化修正解耦（格点口径由 coordinates.test.ts 覆盖）。
+    // 旧 px 口径恢复：naturalLength 以格声明，除以本图分级比例尺换回
+    // 120px 语义（本图声明盒较大、比例尺 ≈56px，6 格会放大约 2.8 倍，
+    // 间隙上限 800 等 px 断言全部失配）。比例尺与布局选项无关，构造期
+    // 即可读。
+    const scale0 = new ForceLayout(MERMAID_GRAPH, {
+      algorithm: 'force-directed',
+      direction: 'TB',
+    }).cellScale;
     const options = {
       algorithm: 'force-directed',
       direction: 'TB',
-      naturalLength: 120,
+      naturalLength: 120 / scale0,
       seed: 42,
       // edgeNodeRepulsion 40：跳数衰减(0.7)让图更紧凑，软墙需同步加强
       // 才能守住"零线穿节点"（20 会被挤压穿透，40 实测零穿透且收敛）。

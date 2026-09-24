@@ -3,7 +3,7 @@ import { ForceLayout } from '../src/index.js';
 import type { GraphSpec } from '../src/types.js';
 import { estimateLabelBox } from '../src/label.js';
 
-const CELL = 100; // naturalLength 即格距
+const CELL = 100; // 粗布局格胞 px 值（断言用）；naturalLength 以格数传入
 
 /** 无向链图。 */
 function chain(n: number): GraphSpec {
@@ -29,7 +29,7 @@ describe('grid-undirected（grid-first 纯网格流水线）', () => {
   it('注册为可切换策略；run 即完成（零迭代收敛）', () => {
     const layout = new ForceLayout(chain(4), {
       algorithm: 'grid-undirected',
-      naturalLength: CELL,
+      naturalLength: CELL / 20,
       labelCollision: false,
     });
     expect(layout.strategyName).toBe('grid-undirected');
@@ -42,7 +42,7 @@ describe('grid-undirected（grid-first 纯网格流水线）', () => {
   it('网格解成行成列：节点中心坐标差为格宽整数倍，且物化 w/h', () => {
     const layout = new ForceLayout(chain(5), {
       algorithm: 'grid-undirected',
-      naturalLength: CELL,
+      naturalLength: CELL / 20,
       labelCollision: false,
     });
     layout.run();
@@ -81,7 +81,7 @@ describe('grid-undirected（grid-first 纯网格流水线）', () => {
     };
     const layout = new ForceLayout(spec, {
       algorithm: 'grid-undirected',
-      naturalLength: CELL,
+      naturalLength: CELL / 20,
     });
     layout.run();
     const boxes = [...layout.nodeViews].map(aabb);
@@ -95,7 +95,7 @@ describe('grid-undirected（grid-first 纯网格流水线）', () => {
   it('文字物化：带文字节点的 AABB 覆盖文字盒（格化向上取整）', () => {
     const layout = new ForceLayout(
       { nodes: [{ id: 0, label: '字'.repeat(40) }, { id: 1 }], edges: [{ source: 0, target: 1 }] },
-      { algorithm: 'grid-undirected', naturalLength: CELL },
+      { algorithm: 'grid-undirected', naturalLength: CELL / 20 },
     );
     layout.run();
     const [a] = layout.nodeViews;
@@ -111,7 +111,7 @@ describe('grid-undirected（grid-first 纯网格流水线）', () => {
     const run = (margin: number) => {
       const layout = new ForceLayout(chain(4), {
         algorithm: 'grid-undirected',
-        naturalLength: CELL,
+        naturalLength: CELL / 20,
         labelCollision: false,
         channelMargin: margin,
       });
@@ -148,7 +148,7 @@ describe('grid-undirected（grid-first 纯网格流水线）', () => {
           { source: 1, target: 2 },
         ],
       },
-      { algorithm: 'grid-undirected', naturalLength: CELL, channelMargin: 1 },
+      { algorithm: 'grid-undirected', naturalLength: CELL / 20, channelMargin: 1 },
     );
     layout.run();
     const [a, b] = [...layout.nodeViews].map(aabb);
@@ -172,7 +172,7 @@ describe('grid-undirected（grid-first 纯网格流水线）', () => {
     };
     const layout = new ForceLayout(spec, {
       algorithm: 'grid-undirected',
-      naturalLength: CELL,
+      naturalLength: CELL / 20,
       channelMargin: 2,
     });
     layout.run();
@@ -213,7 +213,7 @@ describe('grid-undirected（grid-first 纯网格流水线）', () => {
     const run = () => {
       const layout = new ForceLayout(chain(6), {
         algorithm: 'grid-undirected',
-        naturalLength: CELL,
+        naturalLength: CELL / 20,
         channelMargin: 2,
       });
       layout.run();
@@ -231,7 +231,7 @@ describe('grid-undirected（grid-first 纯网格流水线）', () => {
   it('图结构变化后 rebuild 重放整条流水线', () => {
     const layout = new ForceLayout(chain(3), {
       algorithm: 'grid-undirected',
-      naturalLength: CELL,
+      naturalLength: CELL / 20,
     });
     layout.run();
     layout.addNode({ id: 3 });
@@ -247,7 +247,7 @@ describe('grid-undirected（grid-first 纯网格流水线）', () => {
   it('切换布局算法后旧策略产物（waypoints/物化 w/h）失效清除', () => {
     const layout = new ForceLayout(chain(5), {
       algorithm: 'grid-undirected',
-      naturalLength: CELL,
+      naturalLength: CELL / 20,
       labelCollision: false,
     });
     layout.run();

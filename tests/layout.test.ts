@@ -138,7 +138,7 @@ describe('物理平衡（核力式斥力 vs 引力 + 线性张力）', () => {
     const gStar = equilibriumGap(L, 0.1); // ≈ 92.7 → 中心距 ≈ 112.7
     const layout = new ForceLayout(
       { nodes: [{ id: 'a' }, { id: 'b' }], edges: [{ source: 'a', target: 'b' }] },
-      { naturalLength: L, edgeTension: 0.1, gravity: 'pairwise', accuracy: 'exact', seed: 1, edgeAngleAlignment: 0, coordinateSystem: identity },
+      { naturalLength: L / 20, edgeTension: 0.1, gravity: 'pairwise', accuracy: 'exact', seed: 1, edgeAngleAlignment: 0, coordinateSystem: identity },
     );
     const r = layout.run({ maxIterations: 3000 });
     expect(r.converged).toBe(true);
@@ -150,7 +150,7 @@ describe('物理平衡（核力式斥力 vs 引力 + 线性张力）', () => {
   it('edgeTension=0 时橡皮筋松弛：间隙退到斥力作用域边缘（2L）', () => {
     const layout = new ForceLayout(
       { nodes: [{ id: 'a' }, { id: 'b' }], edges: [{ source: 'a', target: 'b' }] },
-      { naturalLength: L, edgeTension: 0, gravity: 'pairwise', accuracy: 'exact', seed: 1, edgeAngleAlignment: 0 },
+      { naturalLength: L / 20, edgeTension: 0, gravity: 'pairwise', accuracy: 'exact', seed: 1, edgeAngleAlignment: 0 },
     );
     const r = layout.run({ maxIterations: 3000 });
     expect(r.converged).toBe(true);
@@ -165,7 +165,7 @@ describe('物理平衡（核力式斥力 vs 引力 + 线性张力）', () => {
     // 陌生人仍比朋友远，且远程斥力基本消失（覆盖面积趋小）。
     const layout = new ForceLayout(
       { nodes: [{ id: 'a' }, { id: 'b' }], edges: [] },
-      { naturalLength: L, weakGravityRatio: 0.2, gravity: 'pairwise', accuracy: 'exact', seed: 1, coordinateSystem: identity },
+      { naturalLength: L / 20, weakGravityRatio: 0.2, gravity: 'pairwise', accuracy: 'exact', seed: 1, coordinateSystem: identity },
     );
     const r = layout.run({ maxIterations: 6000 });
     expect(r.converged).toBe(true);
@@ -184,7 +184,7 @@ describe('物理平衡（核力式斥力 vs 引力 + 线性张力）', () => {
           { source: 1, target: 3 },
         ],
       },
-      { naturalLength: L, gravity: 'pairwise', accuracy: 'exact', seed: 7, edgeAngleAlignment: 0, coordinateSystem: identity },
+      { naturalLength: L / 20, gravity: 'pairwise', accuracy: 'exact', seed: 7, edgeAngleAlignment: 0, coordinateSystem: identity },
     );
     const r = layout.run({ maxIterations: 3000 });
     expect(r.converged).toBe(true);
@@ -210,7 +210,7 @@ describe('边-节点避让', () => {
         ],
         edges: [{ source: 'A', target: 'B' }],
       },
-      { naturalLength: 140, edgeNodeRepulsion: 3, accuracy: 'exact', seed: 3, coordinateSystem: identity },
+      { naturalLength: 7, edgeNodeRepulsion: 3, accuracy: 'exact', seed: 3, coordinateSystem: identity },
     );
     layout.run({ maxIterations: 3000 });
     const A = layout.positions.get('A')!;
@@ -294,7 +294,7 @@ describe('Barnes-Hut 与精确解一致性', () => {
   });
 
   it('BH 布局中等规模图：收敛、无 NaN、边长合理', () => {
-    const layout = new ForceLayout(randomGraph(200, 0.03, 2024), { naturalLength: 100, seed: 8, coordinateSystem: identity });
+    const layout = new ForceLayout(randomGraph(200, 0.03, 2024), { naturalLength: 5, seed: 8, coordinateSystem: identity });
     const r = layout.run({ maxIterations: 3000 });
     expect(r.converged).toBe(true);
     assertAllFinite(layout);
@@ -317,7 +317,7 @@ describe('规模：节点数量从少到多', () => {
     it(`n=${n}：收敛、无 NaN、无重叠、边长合理`, () => {
       const graph = connectedRandomGraph(n, 0.1, 1000 + n);
       const layout = new ForceLayout(graph, {
-        naturalLength: 100,
+        naturalLength: 5,
         accuracy: n <= 100 ? 'exact' : 'barnes-hut',
         seed: n,
         coordinateSystem: identity,
@@ -339,7 +339,7 @@ describe('规模：节点数量从少到多', () => {
 
   it('n=2000 压力测试：有限时间内完成，无 NaN、无重叠', () => {
     const graph = connectedRandomGraph(2000, 0.05, 9999);
-    const layout = new ForceLayout(graph, { naturalLength: 100, accuracy: 'barnes-hut', seed: 2000 });
+    const layout = new ForceLayout(graph, { naturalLength: 5, accuracy: 'barnes-hut', seed: 2000 });
     const r = layout.run({ maxIterations: 800 });
     assertAllFinite(layout);
     expect(r.iterations).toBeGreaterThan(0);
@@ -507,7 +507,7 @@ describe('场景 S3：两圆连线 + 1~4 个离散圆（品字/菱形等）', ()
   it('extra=0：两圆保持自然边长（键合物理，pairwise 模式）', () => {
     const layout = new ForceLayout(
       { nodes: [{ id: 0 }, { id: 1 }], edges: [{ source: 0, target: 1 }] },
-      { naturalLength: 120, gravity: 'pairwise', accuracy: 'exact', seed: 5 },
+      { naturalLength: 6, gravity: 'pairwise', accuracy: 'exact', seed: 5 },
     );
     const r = layout.run({ maxIterations: 3000 });
     expect(r.converged).toBe(true);
@@ -560,7 +560,7 @@ describe('场景 S4：方形节点 1 对多连线，圆贴合四个边（pairwis
     const edges = Array.from({ length: k }, (_, i) => ({ source: 'sq', target: `c${i}` }));
     return new ForceLayout(
       { nodes, edges },
-      { naturalLength: 120, gravity: 'pairwise', accuracy: 'exact', seed: 5 },
+      { naturalLength: 6, gravity: 'pairwise', accuracy: 'exact', seed: 5 },
     );
   }
 
@@ -622,7 +622,7 @@ describe('场景 S5：边文字撑开距离 + 长文字按最小面积回绕', (
     const build = (chars: number) =>
       new ForceLayout(
         { nodes: [{ id: 0 }, { id: 1 }], edges: [{ source: 0, target: 1, label: '字'.repeat(chars) }] },
-        { accuracy: 'exact', seed: 5, naturalLength: 40, labelFontSize: 12, labelPadding: 4, coordinateSystem: identity },
+        { accuracy: 'exact', seed: 5, naturalLength: 2, labelFontSize: 12, labelPadding: 4, coordinateSystem: identity },
       );
     const d = (chars: number) => {
       const l = build(chars);
@@ -662,14 +662,14 @@ describe('公共 API', () => {
         nodes: [{ id: 'a' }, { id: 'b' }, { id: 'c', fixed: true, x: 0, y: 0 }],
         edges: [{ source: 'a', target: 'b' }],
       },
-      { naturalLength: 100, gravity: 'pairwise', accuracy: 'exact', seed: 1 },
+      { naturalLength: 5, gravity: 'pairwise', accuracy: 'exact', seed: 1 },
     );
     layout.fix('c');
     layout.run({ maxIterations: 2000 });
     // fixed 的语义是「弛豫中不动、吸附时优先注册占用」，网格化仍会把
-    // 它吸附到就近格胞中心：(0,0) 的就近格胞是格 (0,0)，中心 = (G/2, G/2)。
-    const G = layout.gridLattice!;
-    expect(layout.positions.get('c')!).toEqual({ x: G / 2, y: G / 2 });
+    // 它吸附到就近格点：半格相位已退役，格点 = g·lattice，(0,0) 的就近
+    // 格是格 (0,0)，坐标即原点。
+    expect(layout.positions.get('c')!).toEqual({ x: 0, y: 0 });
 
     expect(() => new ForceLayout({ nodes: [{ id: 'x' }, { id: 'x' }], edges: [] })).toThrow(/duplicate/);
     expect(() => new ForceLayout({ nodes: [{ id: 'x' }], edges: [{ source: 'x', target: 'ghost' }] })).toThrow(
@@ -680,11 +680,11 @@ describe('公共 API', () => {
   it('updateOptions 保留坐标继续弛豫', () => {
     const layout = new ForceLayout(
       { nodes: [{ id: 'a' }, { id: 'b' }], edges: [{ source: 'a', target: 'b' }] },
-      { naturalLength: 100, gravity: 'pairwise', accuracy: 'exact', seed: 1 },
+      { naturalLength: 5, gravity: 'pairwise', accuracy: 'exact', seed: 1 },
     );
     layout.run({ maxIterations: 3000 });
     const before = pairDistance(layout, 'a', 'b');
-    layout.updateOptions({ naturalLength: 200 });
+    layout.updateOptions({ naturalLength: 10 });
     layout.run({ maxIterations: 3000 });
     const after = pairDistance(layout, 'a', 'b');
     const g100 = equilibriumGap(100, 1);
@@ -702,7 +702,7 @@ describe('公共 API', () => {
         ],
         edges: [{ source: 'a', target: 'b' }],
       },
-      { naturalLength: 150, accuracy: 'exact', seed: 1 },
+      { naturalLength: 7.5, accuracy: 'exact', seed: 1 },
     );
     layout.run({ maxIterations: 3000 });
     const views = layout.nodeViews;

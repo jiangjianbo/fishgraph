@@ -62,7 +62,7 @@ describe('交叉收缩力：线间避让斥力与能量罚', () => {
         ],
       },
       {
-        naturalLength: 120,
+        naturalLength: 6,
         accuracy: 'exact',
         gravity: 'pairwise',
         seed: 5,

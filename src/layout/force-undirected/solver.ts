@@ -18,7 +18,8 @@ export interface SolverOptions {
   maxStep: number;
   /** stepSize 初始值（px）。 */
   initStep: number;
-  /** 试探步长下限：低于它时重置步长（能量面在数值精度下已无法下降）。 */
+  /** 试探步长下限：低于它时重置步长（能量面在数值精度下已无法下降）。
+   *  数值容差与单位无关，保持绝对 px。 */
   minStep: number;
   /**
    * 收敛判据：力残差 max|F|/forceUnit 低于该值视为已达平衡

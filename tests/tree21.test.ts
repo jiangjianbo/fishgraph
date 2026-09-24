@@ -33,10 +33,17 @@ function treeGraph() {
 
 describe('验收：树 21 节点有向布局（force-directed，TB）', () => {
   it('全部边顺流而下、层级行不倒挂、无重叠、交叉不退化', () => {
+    // 旧 px 口径恢复：naturalLength 以格声明，除以本图分级比例尺换回
+    // 120px 语义（节点带标签、比例尺 > 20px，固定格数会整体放大几何，
+    // 收敛与层级断言全部失配）。
+    const scale0 = new ForceLayout(treeGraph(), {
+      algorithm: 'force-directed',
+      direction: 'TB',
+    }).cellScale;
     const layout = new ForceLayout(treeGraph(), {
       algorithm: 'force-directed',
       direction: 'TB',
-      naturalLength: 120,
+      naturalLength: 120 / scale0,
       edgeNodeRepulsion: 3,
       weakGravityRatio: 0.05,
       edgeTension: 1.0,

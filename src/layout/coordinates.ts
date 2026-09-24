@@ -60,6 +60,11 @@ export interface RefineParams {
   /** 吸附间距（格点间距，px）。 */
   lattice: number;
   /**
+   * 格单位比例尺（px/格，来自初始化分级）：格点物理余量（cellUsable/
+   * crossOk 的 r+2px）按 S/60 缩放。缺省按 lattice/60 处理（格距=1 格时等价）。
+   */
+  cellScale?: number;
+  /**
    * 全部连接关系（供质量感知吸附）：候选格优先选择不使关联边穿过
    * 第三方节点的格点。缺省按无边处理（只保证不重叠）。
    */
@@ -195,18 +200,20 @@ function cellUsable(
   nodes: CoordinateNode[],
   placed: number[],
   skipIndex: number | null,
+  marginFloor: number,
 ): boolean {
   const key = `${gx},${gy}`;
   const holder = occ.get(key);
   if (holder !== undefined && holder !== skipIndex) return false;
-  // 格胞中心相位：格索引 g 的实际坐标是 (g + 0.5)·lattice（节点坐在
-  // 格子正中，格线从节点之间穿过），不是格线交点 g·lattice。
-  const x = (gx + 0.5) * lattice;
-  const y = (gy + 0.5) * lattice;
+  // 格点相位：格索引 g 的实际坐标就是 g·lattice —— 坐标即整数格下标
+  // （除以格单位比例尺后为整数），格线从格点正中穿过（2026-09-23 起
+  // 半格相位退役，格单位存储要求坐标为格下标本身）。
+  const x = gx * lattice;
+  const y = gy * lattice;
   for (const pi of placed) {
     if (pi === skipIndex) continue;
     const other = nodes[pi];
-    const need = other.r + r + 2;
+    const need = other.r + r + marginFloor;
     if (Math.hypot(other.x - x, other.y - y) < need) return false;
   }
   return true;
@@ -230,8 +237,11 @@ function gridSystem(): CoordinateSystem {
       // 导致各层吸到不同网格，平移映射后离格）；不重叠由占用表 + 逐对
       // 距离检查（cellUsable）保证，与格距无关。
       const lattice = Math.max(params.lattice, 1e-6);
-      // 格胞中心：格索引 g 的实际坐标（见 cellUsable 内同式）
-      const cellCenter = (g: number): number => (g + 0.5) * lattice;
+      // 格单位比例尺：格点物理余量的缩放基准（缺省按格距=1 格折算）；
+      // 余量 = 绝对 px 地板 ∨ 比例尺项取大（S ≤ 120 与旧 2px 一致）。
+      const marginFloor = Math.max(2, Math.max(params.cellScale ?? lattice, 1e-9) / 60);
+      // 格点坐标：格索引 g 的实际坐标（见 cellUsable 内同式）
+      const cellCenter = (g: number): number => g * lattice;
       // 就近格胞索引：实坐标所在格胞 [iL, (i+1)L) 的 i
       const cellIndexOf = (x: number): number => Math.floor(x / lattice);
 
@@ -448,13 +458,13 @@ function gridSystem(): CoordinateSystem {
             }
             if (crossBudget-- <= 0) return true;
             // 点到线段距离不足 = 穿越。裕量取 max(半径+余量, 半格)：
-            // r+2 保物理圆不穿，半格保台面不被打扰 —— 与 throughOk
-            // 同一口径，「节点先落、边后定」路径才不漏检（否则斥力
-            // 成果仍会被后定的边抹掉）。
+            // 半径+余量（S/60 ≈ 2px @ S=120）保物理圆不穿，半格保台面
+            // 不被打扰 —— 与 throughOk 同一口径，「节点先落、边后定」
+            // 路径才不漏检（否则斥力成果仍会被后定的边抹掉）。
             const c = closestPointOnSegment(nd3.x, nd3.y, px, py, q.x, q.y);
             const dx = nd3.x - c.x;
             const dy = nd3.y - c.y;
-            const need = Math.max(nd3.r + 2, lattice / 2);
+            const need = Math.max(nd3.r + marginFloor, lattice / 2);
             if (dx * dx + dy * dy < need * need) return false;
           }
           // 边-边交叉：关联边（候选点→对端）与非邻接边严格相交 = 交叉
@@ -514,7 +524,7 @@ function gridSystem(): CoordinateSystem {
         if (zoneBlocked(i, cellCenter(gx), cellCenter(gy))) return -1;
 
         const skip = nd.region ? idx.get(nd.region.anchorId) ?? null : null;
-        if (!cellUsable(gx, gy, lattice, nd.r, occ, nodes, placed, skip)) return -1;
+        if (!cellUsable(gx, gy, lattice, nd.r, occ, nodes, placed, skip, marginFloor)) return -1;
         if (flow && !dirOk(i, gx, gy)) return 2;
         const px = cellCenter(gx);
         const py = cellCenter(gy);
@@ -617,14 +627,14 @@ function gridSystem(): CoordinateSystem {
         let gx = cellIndexOf(nd.x);
         let gy = cellIndexOf(nd.y);
         // subgraph 成员：目标格钳制在锚点（hub 新位置）附近的包含区内
-        //（格索引级钳制：格胞中心 (i+0.5)L 落在净空 [lo,hi] 内 ⇔
-        // i ∈ [lo/L−0.5, hi/L−0.5]，先取格区间再夹取）
+        //（格点相位：坐标 = g·L，落在净空 [lo,hi] 内 ⇔ g ∈ [lo/L, hi/L]，
+        // 先取格区间再夹取）
         if (nd.region) {
           const c = anchorPos(nd);
-          const loX = Math.ceil((c.x - nd.region.hw) / lattice - 0.5 - 1e-9);
-          const hiX = Math.floor((c.x + nd.region.hw) / lattice - 0.5 + 1e-9);
-          const loY = Math.ceil((c.y - nd.region.hh) / lattice - 0.5 - 1e-9);
-          const hiY = Math.floor((c.y + nd.region.hh) / lattice - 0.5 + 1e-9);
+          const loX = Math.ceil((c.x - nd.region.hw) / lattice - 1e-9);
+          const hiX = Math.floor((c.x + nd.region.hw) / lattice + 1e-9);
+          const loY = Math.ceil((c.y - nd.region.hh) / lattice - 1e-9);
+          const hiY = Math.floor((c.y + nd.region.hh) / lattice + 1e-9);
           gx = Math.min(Math.max(gx, loX), hiX);
           gy = Math.min(Math.max(gy, loY), hiY);
         }

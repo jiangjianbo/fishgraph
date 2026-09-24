@@ -224,6 +224,7 @@ const sliders = {
   kt: $<HTMLInputElement>('kt'),
   cs: $<HTMLInputElement>('cs'),
   hd: $<HTMLInputElement>('hd'),
+  ab: $<HTMLInputElement>('ab'),
 };
 const outs = {
   L: $<HTMLOutputElement>('Lv'),
@@ -232,6 +233,7 @@ const outs = {
   kt: $<HTMLOutputElement>('ktv'),
   cs: $<HTMLOutputElement>('csv'),
   hd: $<HTMLOutputElement>('hdv'),
+  ab: $<HTMLOutputElement>('abv'),
 };
 const labelCollision = $<HTMLInputElement>('lc');
 const gsSlider = $<HTMLInputElement>('gs');
@@ -247,6 +249,7 @@ function optionsFromUi(): LayoutOptions {
     edgeTension: Number(sliders.kt.value) / 10,
     crossingShrink: Number(sliders.cs.value) / 100,
     hopRepulsionDecay: Number(sliders.hd.value) / 100,
+    angleBalance: Number(sliders.ab.value) / 10,
     gridSize: Number(gsSlider.value),
     labelCollision: labelCollision.checked,
     gravity: gravitySel.value as LayoutOptions['gravity'],
@@ -262,6 +265,7 @@ function syncOutputs(): void {
   outs.kt.value = (Number(sliders.kt.value) / 10).toFixed(1);
   outs.cs.value = (Number(sliders.cs.value) / 100).toFixed(2);
   outs.hd.value = (Number(sliders.hd.value) / 100).toFixed(2);
+  outs.ab.value = (Number(sliders.ab.value) / 10).toFixed(1);
   gsOut.value = gsSlider.value;
 }
 
@@ -547,12 +551,13 @@ function drawView(): void {
   g.clearRect(0, 0, viewCanvas.clientWidth, viewCanvas.clientHeight);
   if (!layout) return;
 
-  // 淡色网格背景（吸附参考线）：格线画在格胞边界 i·lattice 上，
-  // 节点吸附在格胞中心 (i+0.5)·lattice —— 格线从节点之间穿过。
-  // 间距读布局实际使用的格距（自适应后可能与滑杆值不同），未修正时
-  // 回退滑杆值。
+  // 淡色网格背景（吸附参考线）：格点相位已退役，节点吸附在格点
+  // g·lattice 上，格线穿过节点中心。间距读布局实际使用的格距
+  // （自适应后可能与滑杆值不同），未修正时回退滑杆格数 × 比例尺。
   {
-    const lattice = layout.gridLattice ?? (Number(gsSlider.value) || 120);
+    const gsCells = Number(gsSlider.value);
+    const lattice =
+      layout.gridLattice ?? (gsCells > 0 ? gsCells : 6) * layout.cellScale;
     const [wx0, wy0] = screenToWorld(0, 0);
     const [wx1, wy1] = screenToWorld(viewCanvas.clientWidth, viewCanvas.clientHeight);
     const startX = Math.floor(wx0 / lattice) * lattice;

@@ -45,7 +45,10 @@ const DEFAULTS = {
   algorithm: 'force-undirected',
   // 有向图流动方向（算法：force-directed 消费，默认自顶向下）
   direction: 'TB' as const,
-  naturalLength: 120,
+  // 自然边长（格）：相邻节点表面的平衡间隙 = 6 格。一格 = 分级基准盒
+  // （grade.ts 宽高独立聚类的几何平均比例尺）；默认 6 格在典型均匀圆点图
+  // （盒 20px）下与旧 px 口径（120px）等距，格单位力学见 types.ts。
+  naturalLength: 6,
   // pairwise 弱引力比例：陌生人的平衡间隙 g = 1/(k_w/k_r + 1/2L)，饱和于斥力作用域。
   weakGravityRatio: 0.2,
   edgeNodeRepulsion: 3,
@@ -61,6 +64,13 @@ const DEFAULTS = {
   // （E(θ)=kAng·[(1−cos4θ)+(1−cos8θ)]）。稀疏图（链/树/流程图）想要排列感时
   // 显式设置正值开启（推荐 0.1：排列感可测量；全连接小图仍由弹簧主导）。
   edgeAngleAlignment: 0,
+  // 同顶点连线角向均布（opt-in，默认关）：同一节点的相邻线对之间有张开
+  // 斥力，夹角越小斥力越大（E = k·(1−sin(θ/2))，θ→π 归零），顶点连线趋向
+  // 等分圆周（4 线十字、3 线品字、2 线拉直）。推荐 0.5 起步。
+  // 注意：该力的平衡态对链是「拉直」、对拥挤线对是「撑开」，会系统性
+  // 增大组内链跨度、重排卫星节点的切向布局（实测任何非零强度都会，
+  // 强度只影响快慢），需要组内紧凑/既有切向物理的图慎开。
+  angleBalance: 0,
   // 隐藏组聚集强度：hidden-group 成员向组质心的简谐束缚（越大越紧凑）
   groupCohesion: 3,
   // 走线通道宽度（格，算法：grid-undirected）：通道约束压实后相邻节点
@@ -68,7 +78,7 @@ const DEFAULTS = {
   channelMargin: 1,
   // 坐标系（布局完成后的坐标修正策略）：'grid' 网格化吸附（唯一内置）
   coordinateSystem: 'grid' as const,
-  // 网格间距；0 = 跟随 naturalLength
+  // 网格间距（格）；0 = 跟随 naturalLength
   gridSize: 0,
   // 跳数斥力衰减：相距 h 跳的节点斥力乘 0.7^(h-1)；跳数>3 与不同分量的节点对乘 0.35
   // —— 无直接或间接关系的节点几乎互不推挤（防重叠接触弹簧不衰减）。
@@ -106,6 +116,14 @@ export class ForceLayout {
   /** 当前策略名（LayoutOptions.algorithm）。 */
   get strategyName(): string {
     return this.strategy.name;
+  }
+
+  /**
+   * 格单位比例尺（px/格）：初始化分级基准盒的几何平均。布局坐标 ÷ 本值
+   * = 整数格下标（格单位存储口径）；渲染映射 px = 格 × 本值。
+   */
+  get cellScale(): number {
+    return this.store.cellScale;
   }
 
   /** 运行时切换布局算法：图数据保留，位置由新策略重新初始化。 */

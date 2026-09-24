@@ -119,7 +119,7 @@ describe('分组布局', () => {
     };
     const layout = new ForceLayout(graph, {
       algorithm: 'group-undirected',
-      naturalLength: 120,
+      naturalLength: 6,
       accuracy: 'exact',
       gravity: 'pairwise',
       seed: 3,
@@ -161,7 +161,7 @@ describe('分组布局', () => {
     };
     const layout = new ForceLayout(graph, {
       algorithm: 'group-undirected',
-      naturalLength: 120,
+      naturalLength: 6,
       accuracy: 'exact',
       gravity: 'pairwise',
       seed: 7,
@@ -229,7 +229,7 @@ describe('外部直连容器内成员（group-undirected：包含与连通）', 
           { id: 'sub', shape: { kind: 'rect' as const, w: 400, h: 300 }, members: ['m1'] },
         ],
       },
-      { algorithm: 'group-undirected', naturalLength: 120, accuracy: 'exact', gravity: 'pairwise', seed: 21 },
+      { algorithm: 'group-undirected', naturalLength: 6, accuracy: 'exact', gravity: 'pairwise', seed: 21 },
     );
   }
 
@@ -260,13 +260,14 @@ describe('外部直连容器内成员（group-undirected：包含与连通）', 
     const d = Math.hypot(m1.x - sub.x, m1.y - sub.y);
     expect(d).toBeLessThan(300);
     // 跨容器边连通：m1—f1 间距有界 = 容器外层边弛豫（~自然长度）+
-    // 成员容器内偏移（<300，上一断言），合计数倍自然长度内（防发散量级）
-    expect(Math.hypot(m1.x - f1.x, m1.y - f1.y)).toBeLessThan(4 * 120);
+    // 成员容器内偏移（<300，上一断言），合计数倍自然长度内（防发散量级）；
+    // 外加一个格距的吸附容差（fixed 端点吸附平移最多一格）。
+    expect(Math.hypot(m1.x - f1.x, m1.y - f1.y)).toBeLessThan(4 * 6 * layout.cellScale + layout.gridLattice!);
     // 容器—外部固定点（filler）经容器边保持分离且间距有界
     const filler = layout.positions.get('filler')!;
     const dSubFiller = Math.hypot(sub.x - filler.x, sub.y - filler.y);
     expect(dSubFiller).toBeGreaterThan(0);
-    expect(dSubFiller).toBeLessThan(4 * 120);
+    expect(dSubFiller).toBeLessThan(4 * 6 * layout.cellScale + layout.gridLattice!);
   });
 });
 
@@ -287,7 +288,7 @@ describe('算法纯粹性：force 纯力导向 / group-undirected 分组', () =>
   function run(graph: GraphSpec, algorithm: string): ForceLayout {
     const layout = new ForceLayout(graph, {
       algorithm,
-      naturalLength: 120,
+      naturalLength: 6,
       accuracy: 'exact',
       gravity: 'pairwise',
       seed: 3,

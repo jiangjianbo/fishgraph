@@ -157,13 +157,13 @@ describe('force-undirected 世界分块', () => {
     const lattice = layout.gridLattice;
     expect(lattice, '网格化后应暴露实际格距').not.toBeNull();
     const centerResidual = (v: number, G: number): number => {
-      const r = (((v - G / 2) % G) + G) % G;
+      const r = ((v % G) + G) % G;
       return Math.min(r, G - r);
     };
     for (const id of ['in-a', 'in-b', 'in-c', 'sub', 'ext-1', 'ext-2']) {
       const n = pos.get(id)!;
-      expect(centerResidual(n.x, lattice!), `${id} x 在格胞中心上`).toBeLessThan(1e-6);
-      expect(centerResidual(n.y, lattice!), `${id} y 在格胞中心上`).toBeLessThan(1e-6);
+      expect(centerResidual(n.x, lattice!), `${id} x 在格点上`).toBeLessThan(1e-6);
+      expect(centerResidual(n.y, lattice!), `${id} y 在格点上`).toBeLessThan(1e-6);
     }
     // 成员在容器实占矩形内（容器画在容器节点位置、按成员实占贴合）
     const view = layout.subgraphViews.find((v) => v.id === 'sub')!;

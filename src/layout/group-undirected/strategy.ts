@@ -125,7 +125,7 @@ export class GroupUndirectedStrategy implements LayoutStrategy {
 
     // ── 阶段 1：质点网格粗布局 + 膨胀压实（单元占 1 格，压实按单元半径
     //    变距 —— 组的内部块被单元包围圆完全覆盖，跨层无重叠由构造保证）──
-    coarsePlacement(view.elements, view.adj, this.options.naturalLength, undefined, {
+    coarsePlacement(view.elements, view.adj, this.options.naturalLength * this.store.cellScale, undefined, {
       ignorePlaced: !isTop,
     });
 
@@ -206,26 +206,31 @@ export class GroupUndirectedStrategy implements LayoutStrategy {
       source: view.elements[e.sourceIndex]!.id,
       target: view.elements[e.targetIndex]!.id,
     }));
-    this.cs.refine(nodes, { lattice, edges, zones });
+    this.cs.refine(nodes, { lattice, edges, zones, cellScale: this.store.cellScale });
     for (let i = 0; i < nodes.length; i++) {
       view.elements[i]!.x = nodes[i]!.x;
       view.elements[i]!.y = nodes[i]!.y;
     }
   }
 
-  /** 请求格距（用户口径，自适应的下界）。 */
+  /** 请求格距（用户口径，格数 × 比例尺；自适应的下界）。 */
   private latticeOf(): number {
-    return this.options.gridSize > 0 ? this.options.gridSize : this.options.naturalLength;
+    return (
+      (this.options.gridSize > 0 ? this.options.gridSize : this.options.naturalLength) *
+      this.store.cellScale
+    );
   }
 
   /**
    * 本层实际吸附格距：首个调用（最深层弛豫终态）用中位最近邻间距做
    * 自适应并冻结，之后所有层与 settle 平移取整沿用同一值 —— 多层网格
-   * 一致性要求全流程同距。
+   * 一致性要求全流程同距。自适应值量化到基准格的整数倍：格点坐标
+   * 除以比例尺后必须是整数（格单位存储的前置条件）。
    */
   private currentLattice(nodes: readonly CoordinateNode[]): number {
     if (this.frozenLattice === null) {
-      this.frozenLattice = resolveRefineLattice(this.latticeOf(), nodes);
+      const S = this.store.cellScale;
+      this.frozenLattice = Math.max(1, Math.round(resolveRefineLattice(this.latticeOf(), nodes) / S)) * S;
       this.gridLattice = this.frozenLattice;
     }
     return this.frozenLattice;
@@ -233,7 +238,7 @@ export class GroupUndirectedStrategy implements LayoutStrategy {
 
   /** 每层独立派生力学参数（nodeCount 只影响按层归一化的 centroid 束缚）。 */
   private paramsOf(view: LevelView): DerivedParams {
-    return deriveParams(this.options, view.elements.length);
+    return deriveParams(this.options, view.elements.length, this.store.cellScale);
   }
 
   private solverOptions(params: DerivedParams): SolverOptions {
@@ -241,6 +246,7 @@ export class GroupUndirectedStrategy implements LayoutStrategy {
     return {
       maxStep: Math.max(1e-3, this.options.maxStepRatio * L),
       initStep: L * 0.05,
+      // 收敛数值容差与单位无关，保持绝对 px。
       minStep: 1e-3,
       forceEps: Math.min(0.02, Math.max(1.5e-3, 0.5 / L)),
       calmNeeded: 5,
@@ -288,10 +294,12 @@ export class GroupUndirectedStrategy implements LayoutStrategy {
       // （实测成员被推离 hub 后两容器矩形重叠）。硬回避对象只有物理节点。
       const hubs = new Set(this.store.subgraphNodes.map((sg) => sg.id));
       const others = this.store.elements.filter((el) => !own.has(el) && !hubs.has(el.id));
+      // 物理圆净空余量：绝对 px 地板 ∨ 比例尺项取大（S ≤ 120 与旧 2px 一致）。
+      const margin = Math.max(2, this.store.cellScale / 60);
       const overlaps = (ox: number, oy: number): boolean => {
         for (const m of subtree) {
           for (const o of others) {
-            if (Math.hypot(m.x + ox - o.x, m.y + oy - o.y) < m.r + o.r + 2) return true;
+            if (Math.hypot(m.x + ox - o.x, m.y + oy - o.y) < m.r + o.r + margin) return true;
           }
         }
         return false;
