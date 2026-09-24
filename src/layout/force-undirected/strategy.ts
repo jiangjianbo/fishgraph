@@ -27,9 +27,11 @@ import { RelaxationSolver, type SolverOptions } from './solver.js';
 import { buildHopScale } from './hops.js';
 import {
   createCoordinateSystem,
+  resolveRefineLattice,
+  zoneLatticeCap,
   type CoordinateNode,
   type CoordinateSystem,
-  type RefineEdge,
+  type RefineFlow,
   type RefineZone,
 } from '../coordinates.js';
 import { registerStrategy } from '../strategy.js';
@@ -65,6 +67,8 @@ export class ForceUndirectedStrategy implements LayoutStrategy {
   /** 终局对齐 + 坐标系修正是否已应用于当前收敛态（防逐帧路径重复执行）。 */
   private correctionApplied = false;
   readonly energyHistory: number[] = [];
+  /** 最近一次修正的实际格距（自适应放大后；渲染背景网格用）。 */
+  gridLattice: number | null = null;
 
   constructor(store: GraphStore, options: ResolvedLayoutOptions) {
     this.store = store;
@@ -146,7 +150,7 @@ export class ForceUndirectedStrategy implements LayoutStrategy {
    * 流动力）；有向派生算法覆写本方法返回正向边集合 + options.direction，
    * 让吸附的格点选择保持 target 严格不逆于 source 的行/列序。
    */
-  protected refineFlow(): { direction: 'TB' | 'LR'; edges: RefineEdge[] } | null {
+  protected refineFlow(): RefineFlow | null {
     return null;
   }
 
@@ -194,6 +198,10 @@ export class ForceUndirectedStrategy implements LayoutStrategy {
     this.solver.invalidate();
     // 参数变化后重新弛豫，收敛时需再做一次终局对齐与修正。
     this.correctionApplied = false;
+    // 参数变化可能改变力学平衡（如 naturalLength），格距估计随之失效，
+    // 本 episode 收敛时按新平衡重估（拖拽路径 invalidate 不重置 —— 坐标
+    // 变了平衡没变，重估被吸附污染的坐标只会正反馈漂移）。
+    this.gridLattice = null;
   }
 
   invalidate(): void {
@@ -204,6 +212,11 @@ export class ForceUndirectedStrategy implements LayoutStrategy {
 
   /** 图结构变化（增删节点/边）：重建世界分块、重新粗布局并重建求解器。 */
   rebuild(): void {
+    // 格距是「弛豫终态力学平衡」的估计：只在首次修正时估计一次。
+    // 逐帧重复估计会正反馈漂移 —— 吸附/流向约束把布局撑大后，再次
+    // 估计的最近邻随之变大，格距越抬越高（实测 12 节点图 124 → 512）。
+    // 重建（图结构/重新弛豫）时重置，拖拽不改变力学平衡故保留。
+    this.gridLattice = null;
     this.params = deriveParams(this.options, this.store.elements.length);
     Object.assign(this.ctx.params, this.params);
     this.store.refreshLabelBoxes();
@@ -309,10 +322,16 @@ export class ForceUndirectedStrategy implements LayoutStrategy {
     // 声明矩形装不下成员实体（净空 ≤ 0）时退回无约束，不虚构包含。
     // 全部容器同时登记为保留区：非成员的落格避让容器内部。
     const zones: RefineZone[] = [];
+    // 各容器的格距容量上限：净空内装得下全部有效成员格胞的最大格距
+    // （按最小净空成员算，格距超过它成员就得降级出区）。
+    const caps: number[] = [];
     for (const sg of this.store.subgraphNodes) {
       const rect = sg.declaredShape;
       if (rect.kind !== 'rect') continue;
       zones.push({ anchorId: sg.id, hw: rect.w / 2, hh: rect.h / 2 });
+      let minHw = Infinity;
+      let minHh = Infinity;
+      let count = 0;
       for (const mi of sg.memberIndices) {
         const el = targets[mi];
         const nd = nodes[mi];
@@ -321,10 +340,23 @@ export class ForceUndirectedStrategy implements LayoutStrategy {
         const hhIn = rect.h / 2 - el.hh;
         if (hwIn <= 0 || hhIn <= 0) continue;
         nd.region = { anchorId: sg.id, hw: hwIn, hh: hhIn };
+        minHw = Math.min(minHw, hwIn);
+        minHh = Math.min(minHh, hhIn);
+        count++;
       }
+      if (count > 0) caps.push(zoneLatticeCap(minHw, minHh, count));
     }
-    const lattice =
+    const requested =
       this.options.gridSize > 0 ? this.options.gridSize : this.options.naturalLength;
+    // 格距自适应：力学平衡间距大于请求格距时抬格距（就近量化才能每点
+    // 一格、无量化洞），但对容器容量上限取小（包含性优先于量化均匀）。
+    // 只在首次修正时估计（rebuild 重置）：吸附/流向约束会拉伸布局，
+    // 吸附态上重复估计最近邻会正反馈抬高格距，不动点不成立。
+    let lattice = this.gridLattice;
+    if (lattice === null) {
+      lattice = resolveRefineLattice(requested, nodes, caps);
+      this.gridLattice = lattice;
+    }
     // 质量感知吸附：全部边供穿越否决，流向约束由接缝提供（有向算法）
     const elements = this.store.elements;
     const edges = this.store.edges.map((e) => ({

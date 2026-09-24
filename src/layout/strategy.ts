@@ -58,6 +58,13 @@ export interface LayoutStrategy {
   /** 每个被接受步进后的总能量记录（供能量曲线；无则空数组）。 */
   readonly energyHistory: number[];
 
+  /**
+   * 最近一次网格坐标修正实际使用的吸附格距（格胞中心间距，已按力学
+   * 平衡间距自适应放大）；未执行修正或策略无网格概念时为 null。
+   * 渲染层画背景网格必须用它，背景格线才能与节点格胞对齐。
+   */
+  readonly gridLattice?: number | null;
+
   /** 策略内部调度进度（如分阶段弛豫的阶段号）。 */
   readonly stage: LayoutStage;
 

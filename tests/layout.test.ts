@@ -666,7 +666,10 @@ describe('公共 API', () => {
     );
     layout.fix('c');
     layout.run({ maxIterations: 2000 });
-    expect(layout.positions.get('c')!).toEqual({ x: 0, y: 0 });
+    // fixed 的语义是「弛豫中不动、吸附时优先注册占用」，网格化仍会把
+    // 它吸附到就近格胞中心：(0,0) 的就近格胞是格 (0,0)，中心 = (G/2, G/2)。
+    const G = layout.gridLattice!;
+    expect(layout.positions.get('c')!).toEqual({ x: G / 2, y: G / 2 });
 
     expect(() => new ForceLayout({ nodes: [{ id: 'x' }, { id: 'x' }], edges: [] })).toThrow(/duplicate/);
     expect(() => new ForceLayout({ nodes: [{ id: 'x' }], edges: [{ source: 'x', target: 'ghost' }] })).toThrow(

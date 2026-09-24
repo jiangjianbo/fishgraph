@@ -547,9 +547,12 @@ function drawView(): void {
   g.clearRect(0, 0, viewCanvas.clientWidth, viewCanvas.clientHeight);
   if (!layout) return;
 
-  // 淡色网格背景（网格化坐标的吸附参考线，间距 = 网格尺寸）
+  // 淡色网格背景（吸附参考线）：格线画在格胞边界 i·lattice 上，
+  // 节点吸附在格胞中心 (i+0.5)·lattice —— 格线从节点之间穿过。
+  // 间距读布局实际使用的格距（自适应后可能与滑杆值不同），未修正时
+  // 回退滑杆值。
   {
-    const lattice = Number(gsSlider.value) || 120;
+    const lattice = layout.gridLattice ?? (Number(gsSlider.value) || 120);
     const [wx0, wy0] = screenToWorld(0, 0);
     const [wx1, wy1] = screenToWorld(viewCanvas.clientWidth, viewCanvas.clientHeight);
     const startX = Math.floor(wx0 / lattice) * lattice;

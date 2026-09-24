@@ -36,6 +36,7 @@ import { RelaxationSolver, type SolverOptions } from '../force-undirected/solver
 import { buildHopScale } from '../force-undirected/hops.js';
 import {
   createCoordinateSystem,
+  resolveRefineLattice,
   type CoordinateNode,
   type CoordinateSystem,
   type RefineZone,
@@ -57,6 +58,15 @@ export class GroupUndirectedStrategy implements LayoutStrategy {
   /** 顶层弛豫求解器（能量/迭代观测口径；空图为 undefined）。 */
   private topSolver: RelaxationSolver | null = null;
   readonly energyHistory: number[] = [];
+  /**
+   * 本幕实际吸附格距（自适应后）。多层布局的网格一致性要求各层 refine
+   * 与 settle 平移取整同距 —— 在首个 refineLevel（最深层弛豫终态）冻结，
+   * 之后所有层与 settle 沿用；节点物化尺寸与力参数全局一致，各层平衡
+   * 间距同分布，首层估计即可代表全局。每幕 recompute 重置重估。
+   */
+  private frozenLattice: number | null = null;
+  /** 对外暴露的最近一次修正格距（LayoutStrategy.gridLattice）。 */
+  gridLattice: number | null = null;
 
   constructor(store: GraphStore, options: ResolvedLayoutOptions) {
     this.store = store;
@@ -68,6 +78,7 @@ export class GroupUndirectedStrategy implements LayoutStrategy {
   /** 整条递归流水线：组森林 → 自底向上逐层布局 → 自顶向下平移映射。 */
   private recompute(): void {
     this.energyHistory.length = 0;
+    this.frozenLattice = null;
     this.store.refreshLabelBoxes();
     this.store.applyNodeLabelSizes(true);
     const forest = buildGroupForest(this.store);
@@ -180,7 +191,7 @@ export class GroupUndirectedStrategy implements LayoutStrategy {
       r: el.r,
       fixed: el.fixed,
     }));
-    const lattice = this.latticeOf();
+    const lattice = this.currentLattice(nodes);
     // 质量感知吸附：本层提升边供穿越否决（无向算法不传方向约束）；
     // 子组声明矩形为保留区 —— 非成员单元的落格避让容器内部，容器
     // 矩形内只保留成员（成员由 settle 平移映射归位，不在本层吸附）。
@@ -202,9 +213,22 @@ export class GroupUndirectedStrategy implements LayoutStrategy {
     }
   }
 
-  /** 全局统一的吸附格距（各层与平移映射必须同距，网格一致才成立）。 */
+  /** 请求格距（用户口径，自适应的下界）。 */
   private latticeOf(): number {
     return this.options.gridSize > 0 ? this.options.gridSize : this.options.naturalLength;
+  }
+
+  /**
+   * 本层实际吸附格距：首个调用（最深层弛豫终态）用中位最近邻间距做
+   * 自适应并冻结，之后所有层与 settle 平移取整沿用同一值 —— 多层网格
+   * 一致性要求全流程同距。
+   */
+  private currentLattice(nodes: readonly CoordinateNode[]): number {
+    if (this.frozenLattice === null) {
+      this.frozenLattice = resolveRefineLattice(this.latticeOf(), nodes);
+      this.gridLattice = this.frozenLattice;
+    }
+    return this.frozenLattice;
   }
 
   /** 每层独立派生力学参数（nodeCount 只影响按层归一化的 centroid 束缚）。 */
@@ -247,9 +271,54 @@ export class GroupUndirectedStrategy implements LayoutStrategy {
     for (const c of g.children) this.settleGroup(c);
     const center = measureBlockCenter(this.store, g);
     if (center) {
-      const lattice = this.latticeOf();
-      const dx = Math.round((g.unit.x - center.cx) / lattice) * lattice;
-      const dy = Math.round((g.unit.y - center.cy) / lattice) * lattice;
+      const lattice = this.frozenLattice ?? this.latticeOf();
+      const rawDx = g.unit.x - center.cx;
+      const rawDy = g.unit.y - center.cy;
+      // 就近整格平移的残差（≤半格）会吃掉「单元半径覆盖成员偏移」的
+      // 构造裕度，映射后的深层成员可与本层已吸附的自由节点重叠（实测
+      // hidden 成员与自由节点同格胞）。重叠时在整格平移的邻近候选中
+      // 逐环搜最近的无重叠解 —— 仍是格距倍数平移（网格一致性保持），
+      // 块中心偏差最坏多出整格，换无重叠硬保证；无重叠时行为不变。
+      const subtree = g.subtreeIndices
+        .map((idx) => this.store.elements[idx])
+        .filter((el) => !!el);
+      const own = new Set(subtree);
+      // 容器本体是背景矩形：成员与（自己的或途经的）容器重叠是包含的
+      // 期望状态，不算碰撞 —— 推出去会撑大容器实占矩形、令容器互相侵占
+      // （实测成员被推离 hub 后两容器矩形重叠）。硬回避对象只有物理节点。
+      const hubs = new Set(this.store.subgraphNodes.map((sg) => sg.id));
+      const others = this.store.elements.filter((el) => !own.has(el) && !hubs.has(el.id));
+      const overlaps = (ox: number, oy: number): boolean => {
+        for (const m of subtree) {
+          for (const o of others) {
+            if (Math.hypot(m.x + ox - o.x, m.y + oy - o.y) < m.r + o.r + 2) return true;
+          }
+        }
+        return false;
+      };
+      let dx = Math.round(rawDx / lattice) * lattice;
+      let dy = Math.round(rawDy / lattice) * lattice;
+      if (overlaps(dx, dy)) {
+        let settled = false;
+        for (let ring = 1; ring <= 2 && !settled; ring++) {
+          let best: { x: number; y: number; d2: number } | null = null;
+          for (let ix = -ring; ix <= ring; ix++) {
+            for (let iy = -ring; iy <= ring; iy++) {
+              if (Math.max(Math.abs(ix), Math.abs(iy)) !== ring) continue;
+              const cx = dx + ix * lattice;
+              const cy = dy + iy * lattice;
+              if (overlaps(cx, cy)) continue;
+              const d2 = (cx - rawDx) ** 2 + (cy - rawDy) ** 2;
+              if (!best || d2 < best.d2) best = { x: cx, y: cy, d2 };
+            }
+          }
+          if (best) {
+            dx = best.x;
+            dy = best.y;
+            settled = true;
+          }
+        }
+      }
       for (const idx of g.subtreeIndices) {
         const el = this.store.elements[idx];
         if (!el) continue;

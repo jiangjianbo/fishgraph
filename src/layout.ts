@@ -243,6 +243,15 @@ export class ForceLayout {
     return this.strategy.converged;
   }
 
+  /**
+   * 最近一次网格修正实际使用的吸附格距（格胞中心间距，已按力学平衡
+   * 间距自适应放大）；未修正或策略无网格概念时为 null。渲染背景网格
+   * 必须用它，格线才能从节点之间穿过（节点坐在格胞正中）。
+   */
+  get gridLattice(): number | null {
+    return this.strategy.gridLattice ?? null;
+  }
+
   /** 策略内部调度进度（分阶段弛豫的阶段号）。 */
   get stage(): number {
     return this.strategy.stage;

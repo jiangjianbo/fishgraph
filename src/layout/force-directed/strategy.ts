@@ -25,7 +25,8 @@ import { registerStrategy, type ResolvedLayoutOptions } from '../strategy.js';
 import { ForceUndirectedStrategy } from '../force-undirected/strategy.js';
 import { coarsePlacement } from '../force-undirected/coarse.js';
 import type { ForceContext } from '../force-undirected/forces.js';
-import type { RefineEdge } from '../coordinates.js';
+import type { RefineEdge, RefineFlow } from '../coordinates.js';
+import type { NodeId } from '../../types.js';
 import { computeLevels } from './levels.js';
 import { directedHeuristics, orderLayers } from './directedCoarse.js';
 
@@ -102,11 +103,13 @@ export class ForceDirectedStrategy extends ForceUndirectedStrategy {
   }
 
   /** 接缝实现：有向算法的吸附格点选择按 options.direction 保持行/列序
-   *  严格不逆流。只约束正向边 —— 反馈边两端互相矛盾，约束会污染整个
-   *  环组件的格点搜索（run 期调用，子类字段已就绪）。 */
-  protected override refineFlow(): { direction: 'TB' | 'LR'; edges: RefineEdge[] } | null {
+   *  严格不逆流，且同层聚居同一格行/列（levels 携带粗布局的层级号 ——
+   *  仅靠边约束只保证"严格不逆"，分支会与邻层的叶抢行散落）。只约束
+   *  正向边 —— 反馈边两端互相矛盾，约束会污染整个环组件的格点搜索
+   *  （run 期调用，子类字段已就绪）。 */
+  protected override refineFlow(): RefineFlow | null {
     const store: GraphStore = this.store;
-    const { isForwardEdge } = computeLevels(store.elements.length, store.edges);
+    const { level, isForwardEdge } = computeLevels(store.elements.length, store.edges);
     const edges: RefineEdge[] = [];
     for (let k = 0; k < store.edges.length; k++) {
       if (!isForwardEdge[k]) continue;
@@ -116,7 +119,11 @@ export class ForceDirectedStrategy extends ForceUndirectedStrategy {
         target: store.elements[e.targetIndex]!.id,
       });
     }
-    return { direction: this.options.direction, edges };
+    const levels = new Map<NodeId, number>();
+    for (let i = 0; i < store.elements.length; i++) {
+      levels.set(store.elements[i]!.id, level[i] ?? -1);
+    }
+    return { direction: this.options.direction, edges, levels };
   }
 
   /** 方向切换（TB↔LR）等价于整体重排：退回 rebuild 流程。 */

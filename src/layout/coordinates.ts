@@ -17,7 +17,7 @@
  * 自定义坐标系（hex、polar 等）用 registerCoordinateSystem 注册即可。
  */
 
-import { segmentsProperlyIntersect } from '../geometry.js';
+import { closestPointOnSegment, segmentsProperlyIntersect } from '../geometry.js';
 import type { NodeId } from '../types.js';
 
 export interface CoordinateNode {
@@ -42,11 +42,18 @@ export interface RefineEdge {
 }
 
 /** 流向约束：吸附格点选择保持 flow.edges 的 target 严格不逆于 source
- *  （'TB' 格行 / 'LR' 格列）。只应携带流向边（有向算法的正向边）——
- *  反馈边两端互相矛盾，约束会污染整个环组件的搜索。 */
+ *  （'TB' 格行 / 'LR' 格列），且同层节点聚居同一格行/列（层级感）。
+ *  只应携带流向边（有向算法的正向边）——反馈边两端互相矛盾，约束会
+ *  污染整个环组件的搜索。 */
 export interface RefineFlow {
   direction: 'TB' | 'LR';
   edges: readonly RefineEdge[];
+  /**
+   * 节点 id → 层级号（与流向同方向递增；缺省或负值 = 无层级，不约束）。
+   * 提供时同层节点吸附到同一格行（TB）/格列（LR）—— 分支不与
+   * 邻层的叶抢行，层级结构在网格化后仍然可读。
+   */
+  levels?: ReadonlyMap<NodeId, number>;
 }
 
 export interface RefineParams {
@@ -107,6 +114,74 @@ export function listCoordinateSystems(): string[] {
 /** 网格坐标：格点键（格列, 格行）→ 已放置节点下标。 */
 type Occupancy = Map<string, number>;
 
+/**
+ * 容器容量格距上限：净空 hw×hh 内能装下 count 个格胞中心的最大格距。
+ * 格胞中心落在净空 [−hw,hw] 内的列数 = 2⌊hw/L⌋+1（行同理），列×行 ≥
+ * count 即可全部入区。返回 count=1 或净空非正时的 Infinity（无约束）。
+ */
+export function zoneLatticeCap(hw: number, hh: number, count: number): number {
+  if (count <= 1 || hw <= 0 || hh <= 0) return Infinity;
+  // 候选格距取 hw/m 与 hh/m（跨档临界值），从中取满足容量的最大者。
+  let best = 0;
+  const candidates = new Set<number>();
+  for (let m = 1; m <= 256; m++) {
+    candidates.add(hw / m);
+    candidates.add(hh / m);
+  }
+  for (const L of candidates) {
+    const cols = 2 * Math.floor(hw / L) + 1;
+    const rows = 2 * Math.floor(hh / L) + 1;
+    if (cols * rows >= count) best = Math.max(best, L);
+  }
+  return best;
+}
+
+/**
+ * 格距自适应：用户请求格距与弛豫终态力学平衡间距的稳健估计取大者。
+ * 力学平衡间距（节点尺寸 + 斥力/弹簧共同决定）大于格距时，就近量化
+ * 必然把总跨度撑大出"洞"（相邻节点落到隔一格，间距在 1L/2L 间跳变）；
+ * 格距抬到平衡间距以上后每个节点都能落在自己的格胞、量化应力趋零。
+ *
+ * 估计取最近邻间距的上中位：格距 ≥ 间距一半即保证相邻对不同格（实距
+ * < G/2 才会同格），间距 < 1.5·G 才会量化出两格"洞"，现实分布（±px 级
+ * 离散）距两界都有充足裕度。取中位而非最大/高分位，是因为单点离群
+ * （超大标签节点、孤立远点）只占最近邻样本至多一份，不应主导全局格距
+ * —— 多层折叠布局（group-undirected）的冻结样本常是单个层级（可能只
+ * 有几个元素），保守分位会把全部层级的格距抬爆（实测 mermaid 图 321 vs
+ * 中位 224）；无组图与折叠布局共用本估计，逐位一致也要求同一口径。
+ * 逐点分离不依赖格距 ≥ 最大间距：吸附的占用表 + 逐对距离检查兜底。
+ *
+ * caps：各 subgraph 容器的容量格距上限（zoneLatticeCap）。格距超过它
+ * 时容器净空装不下成员格胞，成员被迫按网格不变量降级出区 —— 包含性
+ * 承诺比量化均匀更优先，故自适应值先对 caps 取小再与请求值取大。
+ * caps 只依赖图结构（容器/成员实占），不影响吸附态的不动点性质。
+ */
+export function resolveRefineLattice(
+  requested: number,
+  nodes: readonly CoordinateNode[],
+  caps?: readonly number[],
+): number {
+  const n = nodes.length;
+  if (n < 2) return requested;
+  const nearest: number[] = [];
+  for (let i = 0; i < n; i++) {
+    let best = Infinity;
+    for (let j = 0; j < n; j++) {
+      if (j === i) continue;
+      const dx = nodes[j]!.x - nodes[i]!.x;
+      const dy = nodes[j]!.y - nodes[i]!.y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < best) best = d2;
+    }
+    if (Number.isFinite(best)) nearest.push(Math.sqrt(best));
+  }
+  if (nearest.length === 0) return requested;
+  nearest.sort((a, b) => a - b);
+  const median = nearest[Math.floor(nearest.length / 2)]!;
+  const cap = caps && caps.length > 0 ? Math.min(...caps) : Infinity;
+  return Math.max(requested, Math.min(median, cap));
+}
+
 /** 格点是否可用：未被占，且与全部已放节点距离 ≥ 半径和 + 余量。
  *  skipIndex：region 成员对自己的容器锚点（容器本体）豁免 —— 容器是
  *  背景矩形，成员画在其上，二者同格/重叠是期望状态；净空小于半格的
@@ -124,8 +199,10 @@ function cellUsable(
   const key = `${gx},${gy}`;
   const holder = occ.get(key);
   if (holder !== undefined && holder !== skipIndex) return false;
-  const x = gx * lattice;
-  const y = gy * lattice;
+  // 格胞中心相位：格索引 g 的实际坐标是 (g + 0.5)·lattice（节点坐在
+  // 格子正中，格线从节点之间穿过），不是格线交点 g·lattice。
+  const x = (gx + 0.5) * lattice;
+  const y = (gy + 0.5) * lattice;
   for (const pi of placed) {
     if (pi === skipIndex) continue;
     const other = nodes[pi];
@@ -136,10 +213,11 @@ function cellUsable(
 }
 
 /** 网格坐标：就近吸附 + 冲突消解 + 质量感知（方向行序、零穿越优先）。
- *  候选格分三层：layer0 = 不重叠且方向合格且无穿越；layer1 = 不重叠且
- *  方向合格；layer2 = 仅仅不重叠。就近格零损伤直接接受；有损时记分层
- *  兜底并逐环外扩搜 layer0，连续 qualityRings 环仍无则接受最近的有损格
- *  （layer1 优先于 layer2；最小位移仍优先于完全的质量达标）。
+ *  候选格分三层：layer0 = 不重叠且方向合格且无穿越（自己的边不穿第
+ *  三方、自己不穿他人已定的边）；layer1 = 不重叠且方向合格；layer2 =
+ *  仅仅不重叠。就近格零损伤直接接受；有损时记分层兜底并逐环外扩搜
+ *  layer0，连续 qualityRings 环仍无则接受最近的有损格（layer1 优先于
+ *  layer2；最小位移仍优先于完全的质量达标）。
  *  放置顺序类内 BFS 生长（固定 → 自由 → region 成员）：边由较晚放置的
  *  端点以两端最终位置做最终交叉检查。region 以锚点 **吸附后的新位置**
  *  为中心，成员跟随 hub 移动。 */
@@ -152,6 +230,10 @@ function gridSystem(): CoordinateSystem {
       // 导致各层吸到不同网格，平移映射后离格）；不重叠由占用表 + 逐对
       // 距离检查（cellUsable）保证，与格距无关。
       const lattice = Math.max(params.lattice, 1e-6);
+      // 格胞中心：格索引 g 的实际坐标（见 cellUsable 内同式）
+      const cellCenter = (g: number): number => (g + 0.5) * lattice;
+      // 就近格胞索引：实坐标所在格胞 [iL, (i+1)L) 的 i
+      const cellIndexOf = (x: number): number => Math.floor(x / lattice);
 
       const occ: Occupancy = new Map();
       const placed: number[] = [];
@@ -189,7 +271,11 @@ function gridSystem(): CoordinateSystem {
 
       /** 流向行序（严格）：nd 放到 (gx,gy) 后与已放的另一端比较不逆流
        *  （'TB'：target 格行 > source；'LR'：target 格列 > source ——
-       *  同行/同列的水平（垂直）边会抹掉流向语义，不允许）。 */
+       *  同行/同列的水平（垂直）边会抹掉流向语义，不允许）。携带
+       *  levels 时同层成员还须落在本层锚定行/列上：首见成员以落格
+       *  行（TB）/列（LR）锚定该层，其后同层候选偏离该行/列即视为
+       *  流向违反（layer 2）—— 分支与邻层的叶不抢行，层级可读。 */
+      const levelAxis = new Map<number, number>();
       const dirOk = (i: number, gx: number, gy: number): boolean => {
         for (const a of incoming[i]) {
           const c = cellOf.get(a);
@@ -200,6 +286,16 @@ function gridSystem(): CoordinateSystem {
           const c = cellOf.get(b);
           if (!c) continue;
           if (flow!.direction === 'TB' ? gy >= c.gy : gx >= c.gx) return false;
+        }
+        if (flow!.levels) {
+          const lv = flow!.levels.get(nodes[i]!.id) ?? -1;
+          const axis = levelAxis.get(lv);
+          if (
+            axis !== undefined &&
+            (flow!.direction === 'TB' ? gy !== axis : gx !== axis)
+          ) {
+            return false;
+          }
         }
         return true;
       };
@@ -259,6 +355,18 @@ function gridSystem(): CoordinateSystem {
               queue.push(j);
             }
           }
+        }
+        // 有层级约束时按层级升序落格（稳定排序，同层保持 BFS 序）：
+        // BFS 生长可能经短链先到达深层汇点（n5→n6 先于 n8→n9 链），
+        // 汇点先锚定层级行会把后来的浅层节点挤进「入边要更低、出边要
+        // 更高」的无解区间，只能逆流兜底；层级升序即流向拓扑序，深层
+        // 节点落格时其全部下层邻居已就位。无层级号（-1/缺省）殿后。
+        if (flow?.levels) {
+          const lv = (i: number): number => {
+            const l = flow.levels!.get(nodes[i]!.id);
+            return l !== undefined && l >= 0 ? l : Number.MAX_SAFE_INTEGER;
+          };
+          result.sort((a, b) => lv(a) - lv(b));
         }
         return result;
       };
@@ -339,17 +447,15 @@ function gridSystem(): CoordinateSystem {
               continue; // 包围盒剪枝
             }
             if (crossBudget-- <= 0) return true;
-            // 点到线段距离 < 半径 + 余量 = 穿越该节点
-            const vx = q.x - px;
-            const vy = q.y - py;
-            const len2 = vx * vx + vy * vy;
-            const t =
-              len2 > 0
-                ? Math.max(0, Math.min(1, ((nd3.x - px) * vx + (nd3.y - py) * vy) / len2))
-                : 0;
-            const dx = nd3.x - (px + t * vx);
-            const dy = nd3.y - (py + t * vy);
-            if (dx * dx + dy * dy < (nd3.r + 2) ** 2) return false;
+            // 点到线段距离不足 = 穿越。裕量取 max(半径+余量, 半格)：
+            // r+2 保物理圆不穿，半格保台面不被打扰 —— 与 throughOk
+            // 同一口径，「节点先落、边后定」路径才不漏检（否则斥力
+            // 成果仍会被后定的边抹掉）。
+            const c = closestPointOnSegment(nd3.x, nd3.y, px, py, q.x, q.y);
+            const dx = nd3.x - c.x;
+            const dy = nd3.y - c.y;
+            const need = Math.max(nd3.r + 2, lattice / 2);
+            if (dx * dx + dy * dy < need * need) return false;
           }
           // 边-边交叉：关联边（候选点→对端）与非邻接边严格相交 = 交叉
           for (const [a2, b2] of edgePairs) {
@@ -370,13 +476,49 @@ function gridSystem(): CoordinateSystem {
         return true;
       };
 
+      /** 台面净空：**无关联边**（两端均已落格）不许穿过候选格的谷底
+       *  台面（格胞内切圆，半径 = 半格距）。弛豫阶段边-节点斥力已把
+       *  节点推离他人边线，但就近量化允许 ±半格位移把节点拍回线上
+       *  —— 网格化必须保留斥力成果：候选点距任何已定无关联边不足
+       *  半格即视为穿越损伤（layer1），叶子因此让出轴线落到对角格。
+       *
+       *  两端未定的边不在此检查（几何未定，查了也会被后续移动作废）：
+       *  对端落格时其关联边会以 crossOk 对全部第三方（含本节点）做
+       *  终局把关 —— 「节点先落、边后定」与「边先定、节点后落」两个
+       *  方向互补，覆盖无缝隙。margin 取半格而非 r：r 内的物理穿越由
+       *  crossOk 兜底，这里承诺的是格胞中央的稳定台面不被打扰。 */
+      const throughOk = (i: number, px: number, py: number): boolean => {
+        const half = lattice / 2;
+        for (const [a, b] of edgePairs) {
+          if (a === i || b === i) continue;
+          if (!cellOf.has(a) || !cellOf.has(b)) continue;
+          const p = nodes[a]!;
+          const q = nodes[b]!;
+          if (
+            px < Math.min(p.x, q.x) - half || px > Math.max(p.x, q.x) + half ||
+            py < Math.min(p.y, q.y) - half || py > Math.max(p.y, q.y) + half
+          ) {
+            continue; // 包围盒剪枝
+          }
+          if (crossBudget-- <= 0) return true;
+          const c = closestPointOnSegment(px, py, p.x, p.y, q.x, q.y);
+          const dx = px - c.x;
+          const dy = py - c.y;
+          if (dx * dx + dy * dy < half * half) return false;
+        }
+        return true;
+      };
+
       /** 候选格分层：-1 不可用；2 可用但流向违反；1 流向合格但有穿越；0 全合格。 */
       const evaluate = (i: number, gx: number, gy: number, nd: CoordinateNode): number => {
-        if (zoneBlocked(i, gx * lattice, gy * lattice)) return -1;
+        if (zoneBlocked(i, cellCenter(gx), cellCenter(gy))) return -1;
+
         const skip = nd.region ? idx.get(nd.region.anchorId) ?? null : null;
         if (!cellUsable(gx, gy, lattice, nd.r, occ, nodes, placed, skip)) return -1;
         if (flow && !dirOk(i, gx, gy)) return 2;
-        return crossOk(i, gx * lattice, gy * lattice) ? 0 : 1;
+        const px = cellCenter(gx);
+        const py = cellCenter(gy);
+        return crossOk(i, px, py) && throughOk(i, px, py) ? 0 : 1;
       };
 
       /** 锚点当前坐标（region 引用的 hub 吸附后的新位置）。 */
@@ -389,8 +531,15 @@ function gridSystem(): CoordinateSystem {
         occ.set(`${cx},${cy}`, i);
         placed.push(i);
         cellOf.set(i, { gx: cx, gy: cy });
-        nodes[i]!.x = cx * lattice;
-        nodes[i]!.y = cy * lattice;
+        nodes[i]!.x = cellCenter(cx);
+        nodes[i]!.y = cellCenter(cy);
+        // 首个落格的本层成员锚定该层的格行（TB）/格列（LR）
+        if (flow?.levels) {
+          const lv = flow.levels.get(nodes[i]!.id) ?? -1;
+          if (lv >= 0 && !levelAxis.has(lv)) {
+            levelAxis.set(lv, flow.direction === 'TB' ? cy : cx);
+          }
+        }
       };
 
       /**
@@ -410,8 +559,8 @@ function gridSystem(): CoordinateSystem {
         const c0 = nd.region && restricted ? anchorPos(nd) : null;
         const initialInside =
           !c0 ||
-          (Math.abs(gx * lattice - c0.x) <= nd.region!.hw &&
-            Math.abs(gy * lattice - c0.y) <= nd.region!.hh);
+          (Math.abs(cellCenter(gx) - c0.x) <= nd.region!.hw &&
+            Math.abs(cellCenter(gy) - c0.y) <= nd.region!.hh);
         if (initialInside) nearest = evaluate(i, gx, gy, nd);
         if (nearest === 0) {
           accept(i, gx, gy);
@@ -432,15 +581,15 @@ function gridSystem(): CoordinateSystem {
               if (restricted && nd.region) {
                 // 矩形包含：任一轴超出净空即不可选（与初始钳制同口径）
                 if (
-                  Math.abs(cx2 * lattice - c.x) > nd.region.hw ||
-                  Math.abs(cy2 * lattice - c.y) > nd.region.hh
+                  Math.abs(cellCenter(cx2) - c.x) > nd.region.hw ||
+                  Math.abs(cellCenter(cy2) - c.y) > nd.region.hh
                 ) {
                   continue;
                 }
               }
               const layer = evaluate(i, cx2, cy2, nd);
               if (layer < 0) continue;
-              const d2 = (cx2 * lattice - c.x) ** 2 + (cy2 * lattice - c.y) ** 2;
+              const d2 = (cellCenter(cx2) - c.x) ** 2 + (cellCenter(cy2) - c.y) ** 2;
               if (layer === 0) {
                 if (!best || d2 < best.d2) best = { gx: cx2, gy: cy2, d2 };
               } else if (layer === 1) {
@@ -465,27 +614,27 @@ function gridSystem(): CoordinateSystem {
 
       for (const i of sorted) {
         const nd = nodes[i];
-        let gx = Math.round(nd.x / lattice);
-        let gy = Math.round(nd.y / lattice);
+        let gx = cellIndexOf(nd.x);
+        let gy = cellIndexOf(nd.y);
         // subgraph 成员：目标格钳制在锚点（hub 新位置）附近的包含区内
-        //（格索引级钳制：先取整再夹取到净空允许的格行/格列区间，
-        // 实坐标先钳制再取整会把格点推出区外）
+        //（格索引级钳制：格胞中心 (i+0.5)L 落在净空 [lo,hi] 内 ⇔
+        // i ∈ [lo/L−0.5, hi/L−0.5]，先取格区间再夹取）
         if (nd.region) {
           const c = anchorPos(nd);
-          const loX = Math.ceil((c.x - nd.region.hw) / lattice - 1e-9);
-          const hiX = Math.floor((c.x + nd.region.hw) / lattice + 1e-9);
-          const loY = Math.ceil((c.y - nd.region.hh) / lattice - 1e-9);
-          const hiY = Math.floor((c.y + nd.region.hh) / lattice + 1e-9);
+          const loX = Math.ceil((c.x - nd.region.hw) / lattice - 0.5 - 1e-9);
+          const hiX = Math.floor((c.x + nd.region.hw) / lattice - 0.5 + 1e-9);
+          const loY = Math.ceil((c.y - nd.region.hh) / lattice - 0.5 - 1e-9);
+          const hiY = Math.floor((c.y + nd.region.hh) / lattice - 0.5 + 1e-9);
           gx = Math.min(Math.max(gx, loX), hiX);
           gy = Math.min(Math.max(gy, loY), hiY);
         }
 
         if (search(i, gx, gy, true)) continue;
         // 包含区内无任何可用格（容量不足：净空内容格数 < 成员数等）：
-        // 网格不变量（坐标 = 格距倍数）优先于包含性 —— 放开包含区就近
+        // 网格不变量（坐标 = 格胞中心）优先于包含性 —— 放开包含区就近
         // 落格（保留区规则仍然生效），包含性由容器实占矩形（动态贴合）
         // 兜底，成员不会离格。
-        if (search(i, Math.round(nd.x / lattice), Math.round(nd.y / lattice), false)) continue;
+        if (search(i, cellIndexOf(nd.x), cellIndexOf(nd.y), false)) continue;
         // 全域无任何可用格：保留原坐标（不阻塞布局；防御性分支）
       }
     },

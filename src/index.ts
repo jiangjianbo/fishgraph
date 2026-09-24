@@ -29,6 +29,8 @@ export {
   createCoordinateSystem,
   listCoordinateSystems,
   registerCoordinateSystem,
+  resolveRefineLattice,
+  zoneLatticeCap,
   type CoordinateNode,
   type CoordinateSystem,
   type CoordinateSystemFactory,
