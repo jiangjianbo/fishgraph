@@ -175,14 +175,14 @@ export interface LayoutOptions {
    */
   groupCohesion?: number;
   /**
-   * 坐标系（注册名，默认 'free'）。布局完成后以最优布局为基础做一次
-   * 坐标修正（CoordinateSystem.refine）：'free' 恒等；'grid' 网格化吸附
-   * （就近格点 + 冲突消解，保证不重叠）。可用 registerCoordinateSystem
-   * 注册自定义坐标系（hex/polar 等）。
+   * 坐标系（注册名，默认 'grid'）。布局完成后以最优布局为基础做一次
+   * 坐标修正（CoordinateSystem.refine）：'grid' 网格化吸附（就近格点 +
+   * 冲突消解，保证不重叠）。可用 registerCoordinateSystem 注册自定义
+   * 坐标系（hex/polar 等）。
    */
   coordinateSystem?: string;
   /**
-   * 网格间距（px，coordinateSystem: 'grid' 时生效）。默认 = naturalLength。
+   * 网格吸附间距（px）。默认 = naturalLength。
    * 实际吸附保证任意两节点不重叠（必要时自动放大间距或就近挪格）。
    */
   gridSize?: number;

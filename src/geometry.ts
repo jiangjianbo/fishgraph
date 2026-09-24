@@ -1,4 +1,4 @@
-/** 几何工具：向量、点到线段投影、形状 SDF（带符号距离函数）。 */
+/** 几何工具：向量、点到线段投影、线段相交判定、形状 SDF（带符号距离函数）。 */
 
 import type { ShapeSpec, Vec2 } from './types.js';
 
@@ -200,4 +200,16 @@ export function segmentClosestPoints(
   const p1 = { x: a1x + d1x * s, y: a1y + d1y * s };
   const p2 = { x: b1x + d2x * t, y: b1y + d2y * t };
   return { p1, p2, dist: Math.hypot(p1.x - p2.x, p1.y - p2.y) };
+}
+
+/** 严格相交（两线段内部互分对方为两段）；端点接触/共线不算。 */
+export function segmentsProperlyIntersect(
+  ax: number, ay: number, bx: number, by: number,
+  cx: number, cy: number, dx: number, dy: number,
+): boolean {
+  const d1 = (dx - cx) * (ay - cy) - (dy - cy) * (ax - cx);
+  const d2 = (dx - cx) * (by - cy) - (dy - cy) * (bx - cx);
+  const d3 = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+  const d4 = (bx - ax) * (dy - ay) - (by - ay) * (dx - ax);
+  return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
 }

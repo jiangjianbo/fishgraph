@@ -187,14 +187,14 @@ const graph = {
 
 ## 坐标系（可替换）
 
-求解过程始终在自由坐标上进行；**布局完成后**，以最优布局为基础做一次
+求解过程始终在连续坐标上进行；**布局完成后**，以最优布局为基础做一次
 坐标修正（策略对象 `CoordinateSystem.refine`，按注册名选择，核心代码
-零类型分支）：
+零类型分支），**默认且唯一内置 `'grid'`：所有节点吸附到网格单元坐标**：
 
 ```ts
 const layout = new ForceLayout(graph, {
-  coordinateSystem: 'grid',  // 'free'（默认，恒等）| 'grid'（网格化）
-  gridSize: 60,              // 网格间距，默认 = naturalLength
+  // coordinateSystem: 'grid',  // 默认即网格化（唯一内置）
+  gridSize: 60,                // 网格间距，默认 = naturalLength
 });
 ```
 
@@ -388,8 +388,8 @@ r.converged;        // 力残差判据
 | `edgeTension` | 1 | >0 让长边额外收缩；过大时会把多跳路径压成叠线 |
 | `crossingShrink` | 0.15 | 交叉收缩力：边每交叉一次，引力/张力放大 (1+λ) 倍 |
 | `crossingEnergy` | 0.05 | 交叉能量罚：每个交叉点抬高能量 0.05×(k_a/L)，交叉布局能量更高 |
-| `coordinateSystem` | 'free' | 坐标系（布局完成后的坐标修正）：'grid' 网格化吸附 |
-| `gridSize` | naturalLength | 网格间距（'grid' 时生效），吸附后保证节点不重叠 |
+| `coordinateSystem` | 'grid' | 坐标系（布局完成后的坐标修正）：'grid' 网格化吸附（唯一内置） |
+| `gridSize` | naturalLength | 网格吸附间距，吸附后保证节点不重叠 |
 | `hopRepulsionDecay` | 0.7 | 跳数斥力衰减：相距 h 跳的节点斥力乘 decay^(h−1) |
 | `unrelatedRepulsion` | 0.35 | 无关系节点对（不同分量）的斥力下限系数 |
 | `edgeNodeRepulsion` | 3 | 压线推开力度；大矩形+回环枢纽的图可加到 10–20 |

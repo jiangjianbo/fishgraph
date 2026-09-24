@@ -66,8 +66,8 @@ const DEFAULTS = {
   // 走线通道宽度（格，算法：grid-undirected）：通道约束压实后相邻节点
   // AABB 之间保留的最小空行/列数（走线走廊）。
   channelMargin: 1,
-  // 坐标系（布局完成后的坐标修正策略）：'free' 恒等；'grid' 网格化吸附
-  coordinateSystem: 'free' as const,
+  // 坐标系（布局完成后的坐标修正策略）：'grid' 网格化吸附（唯一内置）
+  coordinateSystem: 'grid' as const,
   // 网格间距；0 = 跟随 naturalLength
   gridSize: 0,
   // 跳数斥力衰减：相距 h 跳的节点斥力乘 0.7^(h-1)；跳数>3 与不同分量的节点对乘 0.35

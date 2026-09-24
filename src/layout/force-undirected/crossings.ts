@@ -11,6 +11,8 @@
  * "无交叉"（乘子全 1）—— 特性在大图上自动停用而不是拖垮求解器。
  */
 
+import { segmentsProperlyIntersect } from '../../geometry.js';
+
 /** 交叉计数的边视图（InternalEdge 结构兼容：端点为节点下标）。 */
 export interface CrossSeg {
   sourceIndex: number;
@@ -19,18 +21,6 @@ export interface CrossSeg {
 export interface CrossPoint {
   x: number;
   y: number;
-}
-
-/** 严格相交（两线段内部互分对方为两段）；端点接触/共线不算。 */
-export function segmentsProperlyIntersect(
-  ax: number, ay: number, bx: number, by: number,
-  cx: number, cy: number, dx: number, dy: number,
-): boolean {
-  const d1 = (dx - cx) * (ay - cy) - (dy - cy) * (ax - cx);
-  const d2 = (dx - cx) * (by - cy) - (dy - cy) * (bx - cx);
-  const d3 = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
-  const d4 = (bx - ax) * (dy - ay) - (by - ay) * (dx - ax);
-  return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
 }
 
 /**

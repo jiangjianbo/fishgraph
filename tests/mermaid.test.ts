@@ -32,6 +32,7 @@ import { describe, expect, it } from 'vitest';
 import { ForceLayout, estimateLabelBox, type NodeView } from '../src/index.js';
 import { computeLevels } from '../src/layout/force-directed/levels.js';
 import { MERMAID_GRAPH } from './mermaid.graph.js';
+import { useIdentityCoordinateSystem } from './helpers.js';
 
 /** 判断节点（mermaid 的 {} 菱形）。 */
 const DIAMOND = new Set(['L', 'R']);
@@ -215,6 +216,8 @@ describe('mermaid 流程图（用户样本）', () => {
     () => {
     // edgeNodeRepulsion: 40 —— 大矩形节点图 + 跳数衰减的紧凑布局里，
     // 软墙必须坚决生效才能守住"零线穿节点"。
+    // identity 坐标系：断言的是弛豫引擎的方向/穿越/间隙质量，与终点
+    // 网格化修正解耦（格点口径由 coordinates.test.ts 覆盖）。
     const options = {
       algorithm: 'force-directed',
       direction: 'TB',
@@ -223,6 +226,7 @@ describe('mermaid 流程图（用户样本）', () => {
       // edgeNodeRepulsion 40：跳数衰减(0.7)让图更紧凑，软墙需同步加强
       // 才能守住"零线穿节点"（20 会被挤压穿透，40 实测零穿透且收敛）。
       edgeNodeRepulsion: 40,
+      coordinateSystem: useIdentityCoordinateSystem(),
     } as const;
     const layout = new ForceLayout(MERMAID_GRAPH, options);
     const r = layout.run({ maxIterations: 24000 });

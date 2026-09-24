@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ForceLayout } from '../src/index.js';
+import { useIdentityCoordinateSystem } from './helpers.js';
 import type { GraphSpec } from '../src/types.js';
 
 /** 两节点布局：节点 0 在 (x0, y0)，节点 1 固定在原点的 (100, deg) 极坐标处。 */
@@ -94,9 +95,11 @@ describe('连线方向对齐（edgeAngleAlignment）', () => {
       return worst;
     };
     const chainN = 6;
-    // 默认已关闭（opt-in）：开启侧显式传 0.1，与关闭侧形成对照
-    const on = new ForceLayout(chain(chainN), { accuracy: 'exact', seed: 11, edgeAngleAlignment: 0.1 });
-    const off = new ForceLayout(chain(chainN), { accuracy: 'exact', seed: 11, edgeAngleAlignment: 0 });
+    // 默认已关闭（opt-in）：开启侧显式传 0.1，与关闭侧形成对照。
+    // identity：角度偏差断言测力学行为，与终点网格化修正解耦
+    // （格点吸附会把链边强制成 0°/90° 正交向，角度语义失去测量意义）。
+    const on = new ForceLayout(chain(chainN), { accuracy: 'exact', seed: 11, edgeAngleAlignment: 0.1, coordinateSystem: useIdentityCoordinateSystem() });
+    const off = new ForceLayout(chain(chainN), { accuracy: 'exact', seed: 11, edgeAngleAlignment: 0, coordinateSystem: useIdentityCoordinateSystem() });
     on.run({ maxIterations: 4000 });
     off.run({ maxIterations: 4000 });
     expect(on.converged).toBe(true);

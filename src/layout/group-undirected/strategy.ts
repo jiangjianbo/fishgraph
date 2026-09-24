@@ -34,7 +34,12 @@ import { coarsePlacement } from '../force-undirected/coarse.js';
 import { deriveParams, type DerivedParams, type ForceContext } from '../force-undirected/forces.js';
 import { RelaxationSolver, type SolverOptions } from '../force-undirected/solver.js';
 import { buildHopScale } from '../force-undirected/hops.js';
-import { createCoordinateSystem, type CoordinateNode, type CoordinateSystem } from '../coordinates.js';
+import {
+  createCoordinateSystem,
+  type CoordinateNode,
+  type CoordinateSystem,
+  type RefineZone,
+} from '../coordinates.js';
 import { registerStrategy } from '../strategy.js';
 import type { LayoutStrategy, ResolvedLayoutOptions } from '../strategy.js';
 import type { RunOptions, RunResult } from '../../types.js';
@@ -74,10 +79,15 @@ export class GroupUndirectedStrategy implements LayoutStrategy {
     // 再以它为锚继续向深层映射）。
     for (const root of forest) this.settleGroup(root);
 
-    // 容器有效半径按成员几何刷新（渲染口径；≤ 布局期的保守单元半径）。
-    for (const sg of this.store.subgraphNodes) {
-      sg.updateBoundsFromChildren(this.store.elements);
-    }
+    // 终局包含口径：容器矩形以容器节点（格点）为中心按成员实占贴合
+    // —— settle 取整平移的残差（≤ 半格）使块中心与节点不严格重合，
+    // AABB 中心口径会把矩形画偏导致成员出界；节点中心贴合使包含性
+    // 回到构造保证。子容器先贴合，父容器量测才能读到子容器的新实占。
+    const fitContainers = (g: GroupTreeNode): void => {
+      for (const c of g.children) fitContainers(c);
+      g.container?.fitShapeToMembersAtNode(this.store.elements);
+    };
+    for (const root of forest) fitContainers(root);
   }
 
   /**
@@ -113,7 +123,7 @@ export class GroupUndirectedStrategy implements LayoutStrategy {
 
     // ── 阶段 3：坐标系修正（free 恒等；grid 网格化吸附按层执行，
     //    保证组内成员吸附不出自己的层级帧）──
-    this.refineLevel(view);
+    this.refineLevel(view, childGroups);
 
     if (isTop) this.topSolver = solver;
   }
@@ -161,7 +171,7 @@ export class GroupUndirectedStrategy implements LayoutStrategy {
   }
 
   /** 本层坐标系修正（布局完成后以最优布局为基础做一次坐标修正）。 */
-  private refineLevel(view: LevelView): void {
+  private refineLevel(view: LevelView, childGroups: readonly GroupTreeNode[]): void {
     if (view.elements.length === 0) return;
     const nodes: CoordinateNode[] = view.elements.map((el) => ({
       id: el.id,
@@ -170,13 +180,31 @@ export class GroupUndirectedStrategy implements LayoutStrategy {
       r: el.r,
       fixed: el.fixed,
     }));
-    const lattice =
-      this.options.gridSize > 0 ? this.options.gridSize : this.options.naturalLength;
-    this.cs.refine(nodes, { lattice });
+    const lattice = this.latticeOf();
+    // 质量感知吸附：本层提升边供穿越否决（无向算法不传方向约束）；
+    // 子组声明矩形为保留区 —— 非成员单元的落格避让容器内部，容器
+    // 矩形内只保留成员（成员由 settle 平移映射归位，不在本层吸附）。
+    const zones: RefineZone[] = [];
+    for (const g of childGroups) {
+      const rect = g.container?.declaredShape;
+      if (rect?.kind === 'rect') {
+        zones.push({ anchorId: g.unit.id, hw: rect.w / 2, hh: rect.h / 2 });
+      }
+    }
+    const edges = view.edges.map((e) => ({
+      source: view.elements[e.sourceIndex]!.id,
+      target: view.elements[e.targetIndex]!.id,
+    }));
+    this.cs.refine(nodes, { lattice, edges, zones });
     for (let i = 0; i < nodes.length; i++) {
       view.elements[i]!.x = nodes[i]!.x;
       view.elements[i]!.y = nodes[i]!.y;
     }
+  }
+
+  /** 全局统一的吸附格距（各层与平移映射必须同距，网格一致才成立）。 */
+  private latticeOf(): number {
+    return this.options.gridSize > 0 ? this.options.gridSize : this.options.naturalLength;
   }
 
   /** 每层独立派生力学参数（nodeCount 只影响按层归一化的 centroid 束缚）。 */
@@ -201,6 +229,10 @@ export class GroupUndirectedStrategy implements LayoutStrategy {
    * 平移映射（自底向上）：先深层——把子组的内部块对齐到子组单元位置；
    * 后本层——把整块（含子组子树与子组容器）平移到本组单元的最终位置。
    *
+   * 平移量取整到 lattice 倍数：成员在各层内部帧中已吸附到统一网格，
+   * 纯平移只有保持格距倍数才能把网格一致性带到最终坐标系（块中心与
+   * 单元位置的偏差 ≤ 半格，布局语义不变）。
+   *
    * 顺序是正确性的关键：深层成员（如 hidden 伪单元的成员）在内部帧中
    * 从未跟随子组单元移动，必须先被映射到子组单元锚点上，本层的整块
    * 平移才能以"正确的相对构型"一次对齐到单元位置（整体平移不改变块
@@ -215,8 +247,9 @@ export class GroupUndirectedStrategy implements LayoutStrategy {
     for (const c of g.children) this.settleGroup(c);
     const center = measureBlockCenter(this.store, g);
     if (center) {
-      const dx = g.unit.x - center.cx;
-      const dy = g.unit.y - center.cy;
+      const lattice = this.latticeOf();
+      const dx = Math.round((g.unit.x - center.cx) / lattice) * lattice;
+      const dy = Math.round((g.unit.y - center.cy) / lattice) * lattice;
       for (const idx of g.subtreeIndices) {
         const el = this.store.elements[idx];
         if (!el) continue;

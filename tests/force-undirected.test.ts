@@ -13,7 +13,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { assertAllFinite, minSurfaceGap } from './helpers.js';
+import { assertAllFinite, minSurfaceGap, useIdentityCoordinateSystem } from './helpers.js';
 import { ForceLayout } from '../src/index.js';
 import { countEdgeCrossings } from '../src/layout/force-undirected/crossings.js';
 import { MERMAID_GRAPH } from './mermaid.graph.js';
@@ -198,6 +198,8 @@ describe('force-undirected：质点网格粗布局流水线', () => {
         naturalLength: 120,
         seed: 42,
         edgeNodeRepulsion: 40,
+        // identity：零穿越断言测弛豫引擎质量，与终点网格化修正解耦
+        coordinateSystem: useIdentityCoordinateSystem(),
       });
       const r = layout.run({ maxIterations: 24000 });
       assertAllFinite(layout);

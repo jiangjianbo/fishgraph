@@ -45,23 +45,13 @@ function meanPairDistance(points: Array<{ x: number; y: number }>): number {
   return count === 0 ? 0 : sum / count;
 }
 
-/** 节点 p 到容器 subId 中心的距离（容器中心取 positions 中的容器坐标）。 */
-function distanceToSubgraph(
-  layout: ForceLayout,
-  subId: string,
-  nodeId: string,
-): number {
-  const hub = layout.positions.get(subId);
-  const p = layout.positions.get(nodeId);
-  expect(hub, `container ${subId} has position`).toBeDefined();
-  expect(p, `node ${nodeId} has position`).toBeDefined();
-  return Math.hypot(p!.x - hub!.x, p!.y - hub!.y);
-}
-
 /**
  * subgraph 归属充分检查：逐容器 × 逐点验收「点是否在 subgraph 中」——
- * 成员必须落在容器包围圆内，非成员必须落在容器包围圆外（跨容器身份
- * 重复检查：一点在甲组内、同时在乙组外的两侧断言都会显式执行）。
+ * 成员必须落在容器矩形内（网格约束下的包含口径：容器画在容器节点
+ * 位置、按成员实占贴合，包含是构造性不变量；包围圆是它的松弛上界，
+ * 格点最小间距 = 格距使内切圆口径对多成员组不可满足），非成员必须
+ * 落在容器包围圆外（跨容器身份重复检查：一点在甲组内、同时在乙组外
+ * 的两侧断言都会显式执行）。
  */
 function assertSubgraphMembership(
   layout: ForceLayout,
@@ -74,13 +64,26 @@ function assertSubgraphMembership(
   for (const { subId, members, nonMembers } of checks) {
     const view = layout.subgraphViews.find((v) => v.id === subId);
     expect(view, `subgraph view ${subId} exists`).toBeDefined();
+    const rect = view!.shape as { kind: 'rect'; w: number; h: number };
+    const hub = layout.positions.get(subId)!;
     for (const m of members) {
-      const d = distanceToSubgraph(layout, subId, m);
-      expect(d, `member ${m} inside ${subId}`).toBeLessThanOrEqual(view!.r + 1e-6);
+      const p = layout.positions.get(m)!;
+      expect(Math.abs(p.x - hub.x), `member ${m} inside ${subId}`).toBeLessThanOrEqual(
+        rect.w / 2 + 1e-6,
+      );
+      expect(Math.abs(p.y - hub.y), `member ${m} inside ${subId}`).toBeLessThanOrEqual(
+        rect.h / 2 + 1e-6,
+      );
     }
     for (const o of nonMembers) {
-      const d = distanceToSubgraph(layout, subId, o);
-      expect(d, `non-member ${o} outside ${subId}`).toBeGreaterThan(view!.r - 1);
+      const p = layout.positions.get(o)!;
+      // 保留区口径：容器矩形（声明）内只有成员，外部节点在矩形之外
+      //（逐轴逃离；保留区是 refine 的构造性约束）
+      const declared = view!.declaredShape as { kind: 'rect'; w: number; h: number };
+      const outside =
+        Math.abs(p.x - hub!.x) > declared.w / 2 + 1e-6 ||
+        Math.abs(p.y - hub!.y) > declared.h / 2 + 1e-6;
+      expect(outside, `non-member ${o} outside ${subId}`).toBe(true);
     }
   }
 }
@@ -240,17 +243,25 @@ describe('group-undirected（深度优先递归分组布局）', () => {
 
     const hub = layout.positions.get('sub')!;
     const view = layout.subgraphViews.find((v) => v.id === 'sub')!;
-    // 成员在容器包围圆内
+    const rect = view.shape as { kind: 'rect'; w: number; h: number };
+    // 成员在容器矩形内（网格约束下的包含口径，构造性不变量）
     for (const m of ['in1', 'in2', 'in3']) {
       const p = layout.positions.get(m)!;
-      const d = Math.hypot(p.x - hub.x, p.y - hub.y);
-      expect(d, `member ${m} inside container`).toBeLessThanOrEqual(view.r + 1e-6);
+      expect(Math.abs(p.x - hub.x), `member ${m} inside container`).toBeLessThanOrEqual(
+        rect.w / 2 + 1e-6,
+      );
+      expect(Math.abs(p.y - hub.y), `member ${m} inside container`).toBeLessThanOrEqual(
+        rect.h / 2 + 1e-6,
+      );
     }
-    // 外部节点在容器包围圆之外（布局期单元圆 ⊇ 容器圆，弛豫保持分离）
+    // 外部节点在容器声明矩形之外（保留区：容器矩形内只有成员）
+    const declared = view.declaredShape as { kind: 'rect'; w: number; h: number };
     for (const o of ['out1', 'out2']) {
       const p = layout.positions.get(o)!;
-      const d = Math.hypot(p.x - hub.x, p.y - hub.y);
-      expect(d, `external ${o} outside container`).toBeGreaterThan(view.r - 1);
+      const outside =
+        Math.abs(p.x - hub.x) > declared.w / 2 + 1e-6 ||
+        Math.abs(p.y - hub.y) > declared.h / 2 + 1e-6;
+      expect(outside, `external ${o} outside container`).toBe(true);
     }
   });
 
@@ -317,16 +328,29 @@ describe('group-undirected（深度优先递归分组布局）', () => {
     const inner = layout.positions.get('inner')!;
     const outerView = layout.subgraphViews.find((v) => v.id === 'outer')!;
     const innerView = layout.subgraphViews.find((v) => v.id === 'inner')!;
-    // inner 在 outer 内部；outer 成员都在 outer 包围圆内
-    expect(Math.hypot(inner.x - outer.x, inner.y - outer.y)).toBeLessThanOrEqual(outerView.r + 1e-6);
+    const outerRect = outerView.shape as { kind: 'rect'; w: number; h: number };
+    const innerRect = innerView.shape as { kind: 'rect'; w: number; h: number };
+    // inner 在 outer 矩形内；outer 成员都在 outer 矩形内（矩形包含口径）
+    expect(Math.abs(inner.x - outer.x)).toBeLessThanOrEqual(outerRect.w / 2 + 1e-6);
+    expect(Math.abs(inner.y - outer.y)).toBeLessThanOrEqual(outerRect.h / 2 + 1e-6);
     for (const m of ['m1', 'm2', 'm3']) {
       const p = layout.positions.get(m)!;
-      expect(Math.hypot(p.x - outer.x, p.y - outer.y)).toBeLessThanOrEqual(outerView.r + 1e-6);
+      expect(Math.abs(p.x - outer.x), `${m} inside outer`).toBeLessThanOrEqual(
+        outerRect.w / 2 + 1e-6,
+      );
+      expect(Math.abs(p.y - outer.y), `${m} inside outer`).toBeLessThanOrEqual(
+        outerRect.h / 2 + 1e-6,
+      );
     }
-    // inner 成员在 inner 包围圆内
+    // inner 成员在 inner 矩形内
     for (const m of ['m1', 'm2']) {
       const p = layout.positions.get(m)!;
-      expect(Math.hypot(p.x - inner.x, p.y - inner.y)).toBeLessThanOrEqual(innerView.r + 1e-6);
+      expect(Math.abs(p.x - inner.x), `${m} inside inner`).toBeLessThanOrEqual(
+        innerRect.w / 2 + 1e-6,
+      );
+      expect(Math.abs(p.y - inner.y), `${m} inside inner`).toBeLessThanOrEqual(
+        innerRect.h / 2 + 1e-6,
+      );
     }
   });
 
@@ -356,9 +380,11 @@ describe('group-undirected（深度优先递归分组布局）', () => {
     expect(minSurfaceGap(layout)).toBeGreaterThan(0);
     const hub = layout.positions.get('sub')!;
     const view = layout.subgraphViews.find((v) => v.id === 'sub')!;
+    const rect = view.shape as { kind: 'rect'; w: number; h: number };
     for (const m of ['h1', 'h2', 'h3', 's1']) {
       const p = layout.positions.get(m)!;
-      expect(Math.hypot(p.x - hub.x, p.y - hub.y)).toBeLessThanOrEqual(view.r + 1e-6);
+      expect(Math.abs(p.x - hub.x), `${m} inside sub`).toBeLessThanOrEqual(rect.w / 2 + 1e-6);
+      expect(Math.abs(p.y - hub.y), `${m} inside sub`).toBeLessThanOrEqual(rect.h / 2 + 1e-6);
     }
   });
 
@@ -451,9 +477,11 @@ describe('group-undirected（深度优先递归分组布局）', () => {
     expect(minSurfaceGap(layout)).toBeGreaterThan(0);
     const hub = layout.positions.get('sub')!;
     const view = layout.subgraphViews.find((v) => v.id === 'sub')!;
+    const rect = view.shape as { kind: 'rect'; w: number; h: number };
     for (const m of ['m1', 'm2', 'm3']) {
       const p = layout.positions.get(m)!;
-      expect(Math.hypot(p.x - hub.x, p.y - hub.y)).toBeLessThanOrEqual(view.r + 1e-6);
+      expect(Math.abs(p.x - hub.x), `${m} inside sub`).toBeLessThanOrEqual(rect.w / 2 + 1e-6);
+      expect(Math.abs(p.y - hub.y), `${m} inside sub`).toBeLessThanOrEqual(rect.h / 2 + 1e-6);
     }
   });
 

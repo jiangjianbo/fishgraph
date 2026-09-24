@@ -7,6 +7,7 @@
  */
 
 import { expect } from 'vitest';
+import { registerCoordinateSystem } from '../src/index.js';
 import type { ForceLayout } from '../src/index.js';
 
 /**
@@ -41,4 +42,22 @@ export function assertAllFinite(layout: ForceLayout): void {
     expect(Number.isFinite(p.x), `x of ${String(id)} not finite: ${p.x}`).toBe(true);
     expect(Number.isFinite(p.y), `y of ${String(id)} not finite: ${p.y}`).toBe(true);
   }
+}
+
+/**
+ * identity 坐标系（幂等注册）：恒等修正，保持弛豫终点坐标。
+ *
+ * 物理与几何基线测试（方向顺流、零穿越、自然构型、平衡距离等）断言的
+ * 是求解器行为，应通过本坐标系隔离「布局终点坐标修正」层 —— 默认已
+ * 网格化吸附（坐标全落格点、格距不小于最大直径），连续几何断言在格点
+ * 上不成立。返回注册名，直接放进 LayoutOptions.coordinateSystem。
+ */
+export function useIdentityCoordinateSystem(): 'identity' {
+  registerCoordinateSystem('identity', () => ({
+    name: 'identity',
+    refine() {
+      // 恒等：不做任何修正
+    },
+  }));
+  return 'identity';
 }

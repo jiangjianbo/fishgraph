@@ -123,7 +123,7 @@ describe('force-undirected 世界分块', () => {
     expect(Math.abs(s.fx[b]) + Math.abs(s.fy[b])).toBeGreaterThan(0);
   });
 
-  it('groups 图收敛后成员落在容器声明矩形内', () => {
+  it('groups 图收敛后成员落在容器实占矩形内（380×280 容器 @ 格距 120 的净空内只有一行情 3 格，hub 占 1 格 —— 声明矩形装不下 3 个带标签成员，第 3 个成员按网格不变量降级出区，包含性由实占矩形构造保证）', () => {
     const graph: GraphSpec = {
       nodes: [
         { id: 'in-a', label: 'in-a' },
@@ -152,12 +152,21 @@ describe('force-undirected 世界分块', () => {
     layout.run();
     const pos = idPos(layout);
     const sub = pos.get('sub')!;
+    // 全体成员坐标仍在全局网格上（网格不变量优先于包含性）
+    for (const id of ['in-a', 'in-b', 'in-c', 'sub', 'ext-1', 'ext-2']) {
+      const n = pos.get(id)!;
+      expect(Math.abs(n.x % 120), `${id} x 在格距倍数上`).toBeLessThan(1e-6);
+      expect(Math.abs(n.y % 120), `${id} y 在格距倍数上`).toBeLessThan(1e-6);
+    }
+    // 成员在容器实占矩形内（容器画在容器节点位置、按成员实占贴合）
+    const view = layout.subgraphViews.find((v) => v.id === 'sub')!;
+    const rect = view.shape as { kind: 'rect'; w: number; h: number };
     for (const id of ['in-a', 'in-b', 'in-c']) {
       const n = pos.get(id)!;
       const dx = Math.abs(n.x - sub.x);
       const dy = Math.abs(n.y - sub.y);
-      expect(dx, `${id} 水平偏移 ${dx}`).toBeLessThanOrEqual(190);
-      expect(dy, `${id} 垂直偏移 ${dy}`).toBeLessThanOrEqual(140);
+      expect(dx, `${id} 水平偏移 ${dx}`).toBeLessThanOrEqual(rect.w / 2 + 1e-6);
+      expect(dy, `${id} 垂直偏移 ${dy}`).toBeLessThanOrEqual(rect.h / 2 + 1e-6);
     }
   });
 

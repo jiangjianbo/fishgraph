@@ -10,7 +10,8 @@
 
 import { describe, expect, it } from 'vitest';
 import { ForceLayout } from '../src/index.js';
-import { countEdgeCrossings, segmentsProperlyIntersect } from '../src/layout/force-undirected/crossings.js';
+import { countEdgeCrossings } from '../src/layout/force-undirected/crossings.js';
+import { segmentsProperlyIntersect } from '../src/geometry.js';
 
 
 describe('边交叉计数', () => {

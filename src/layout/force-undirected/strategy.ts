@@ -25,7 +25,13 @@ import {
 } from './forces.js';
 import { RelaxationSolver, type SolverOptions } from './solver.js';
 import { buildHopScale } from './hops.js';
-import { createCoordinateSystem, type CoordinateNode, type CoordinateSystem } from '../coordinates.js';
+import {
+  createCoordinateSystem,
+  type CoordinateNode,
+  type CoordinateSystem,
+  type RefineEdge,
+  type RefineZone,
+} from '../coordinates.js';
 import { registerStrategy } from '../strategy.js';
 import type { ForceSnapshot, LayoutStrategy, ResolvedLayoutOptions } from '../strategy.js';
 import type { AccuracyMode, LayoutStage, RunOptions, RunResult } from '../../types.js';
@@ -56,6 +62,8 @@ export class ForceUndirectedStrategy implements LayoutStrategy {
   protected partition: WorldPartition | null = null;
   private solver: RelaxationSolver;
   private cs: CoordinateSystem;
+  /** 终局对齐 + 坐标系修正是否已应用于当前收敛态（防逐帧路径重复执行）。 */
+  private correctionApplied = false;
   readonly energyHistory: number[] = [];
 
   constructor(store: GraphStore, options: ResolvedLayoutOptions) {
@@ -132,6 +140,16 @@ export class ForceUndirectedStrategy implements LayoutStrategy {
     this.ctx.extensions = {};
   }
 
+  /**
+   * 接缝：坐标修正（网格化吸附）的流向约束。默认不约束 —— 无向算法
+   * 不含流向语义（options.direction 只服务有向派生算法的粗布局与
+   * 流动力）；有向派生算法覆写本方法返回正向边集合 + options.direction，
+   * 让吸附的格点选择保持 target 严格不逆于 source 的行/列序。
+   */
+  protected refineFlow(): { direction: 'TB' | 'LR'; edges: RefineEdge[] } | null {
+    return null;
+  }
+
   private solverOptions(): SolverOptions {
     const L = this.params.L;
     return {
@@ -174,10 +192,14 @@ export class ForceUndirectedStrategy implements LayoutStrategy {
     Object.assign(this.solver.opts, this.solverOptions());
     this.solver.stepSize = Math.min(this.solver.stepSize, this.solver.opts.maxStep);
     this.solver.invalidate();
+    // 参数变化后重新弛豫，收敛时需再做一次终局对齐与修正。
+    this.correctionApplied = false;
   }
 
   invalidate(): void {
     this.solver.invalidate();
+    // 拖拽等外部坐标改动后重新弛豫，收敛时需再做一次终局对齐与修正。
+    this.correctionApplied = false;
   }
 
   /** 图结构变化（增删节点/边）：重建世界分块、重新粗布局并重建求解器。 */
@@ -208,6 +230,8 @@ export class ForceUndirectedStrategy implements LayoutStrategy {
     this.configureExtensions();
     this.solver = new RelaxationSolver(this.ctx, this.solverOptions());
     this.solver.invalidate();
+    // 图结构变化后重新弛豫，收敛时需再做一次终局对齐与修正。
+    this.correctionApplied = false;
   }
 
   // ── 迭代 ────────────────────────────────────────────────
@@ -227,11 +251,15 @@ export class ForceUndirectedStrategy implements LayoutStrategy {
       // 时尤甚），压回保证成员任何时刻都在自己的世界内。run 与逐帧
       // （demo 动画）共用本方法，两条路径行为一致。
       clampMembersToContainers(this.store, this.partition);
-      // 逐帧调用不会经过 run() 末尾的终局对齐，收敛时在此补齐；
-      // 对齐是纯平移、幂等，收敛态下重复调用零位移。
-      if (this.solver.converged) {
-        alignMembersToContainers(this.store, this.partition);
-      }
+    }
+    // 收敛即终局化：终局对齐 + 坐标系修正（与 run() 末尾同一口径）。
+    // 逐帧驱动（demo 动画循环）不经过 run()，网格化必须挂在收敛路径上：
+    // 触发条件是"本步无接受移动（局部停滞）或求解器已收敛"——单步拒绝
+    // 时求解器未必置收敛位，但布局已不再变化，正是终局化的时机；每个
+    // 收敛episode只做一次（修正后坐标已稳定，重复执行纯属浪费）。
+    if (!this.correctionApplied && (!moved || this.solver.converged)) {
+      this.correctionApplied = true;
+      this.applyCoordinateCorrection();
     }
     return moved;
   }
@@ -241,42 +269,82 @@ export class ForceUndirectedStrategy implements LayoutStrategy {
     const max = Math.max(0, opts.maxIterations ?? DEFAULT_MAX_ITERATIONS);
     this.store.applyNodeLabelSizes(true);
     this.solver.invalidate();
+    this.correctionApplied = false;
     this.runBudget(max, opts.onTick);
-
-    // 坐标系修正（布局完成后，以最优布局为基础）：free 恒等，grid 网格化吸附。
-    // 世界分块时只修正根世界（world=-1）元素：吸附会破坏容器内的相对构型，
-    // 容器本体的位移由终局对齐以纯平移传导给成员。
-    if (this.store.elements.length > 0) {
-      const partition = this.partition;
-      const targets = partition
-        ? this.store.elements.filter((_, i) => partition.world[i] < 0)
-        : this.store.elements;
-      const nodes: CoordinateNode[] = targets.map((el) => ({
-        id: el.id,
-        x: el.x,
-        y: el.y,
-        r: el.r,
-        fixed: el.fixed,
-      }));
-      const lattice =
-        this.options.gridSize > 0 ? this.options.gridSize : this.options.naturalLength;
-      this.cs.refine(nodes, { lattice });
-      for (let i = 0; i < nodes.length; i++) {
-        targets[i]!.x = nodes[i]!.x;
-        targets[i]!.y = nodes[i]!.y;
-      }
-      // 终局对齐：弛豫期两世界零耦合各自收敛，末次纯平移把成员块
-      // 对齐容器本体（不改内部相对构型，能量不变量保持）。
-      if (partition) {
-        alignMembersToContainers(this.store, partition);
-      }
-    }
-
+    this.correctionApplied = true;
+    this.applyCoordinateCorrection();
     return {
       iterations: this.solver.iterations,
       converged: this.solver.converged,
       energy: this.energy,
     };
+  }
+
+  /**
+   * 终局对齐 + 坐标系修正（布局完成后，以最优布局为基础）：free 恒等，
+   * grid 网格化吸附。世界分块时先做终局对齐（弛豫期两世界零耦合各自
+   * 收敛，末次纯平移把成员块对齐容器本体，不改内部相对构型），再对
+   * **全部元素**统一精修 —— 网格不变量（坐标 = 格距倍数）对成员同样
+   * 成立，且精修以全图几何与全部原始边做质量否决；成员节点携带
+   * region 约束（锚点 = 容器本体吸附后的新位置，净空 = 声明矩形
+   * 内净空），候选格钳制在声明矩形内，包含性保持构造保证。容器渲染
+   * 几何按成员实占刷新（updateBoundsFromChildren）。
+   */
+  private applyCoordinateCorrection(): void {
+    if (this.store.elements.length === 0) return;
+    const partition = this.partition;
+    if (partition) {
+      alignMembersToContainers(this.store, partition);
+    }
+    const targets = this.store.elements;
+    const nodes: CoordinateNode[] = targets.map((el) => ({
+      id: el.id,
+      x: el.x,
+      y: el.y,
+      r: el.r,
+      fixed: el.fixed,
+    }));
+    // 成员包含区：声明矩形内净空（逐轴半宽高 − 成员力学外接半尺寸）。
+    // region 成员在精修中最后放置，读到的是容器本体吸附后的最终位置；
+    // 声明矩形装不下成员实体（净空 ≤ 0）时退回无约束，不虚构包含。
+    // 全部容器同时登记为保留区：非成员的落格避让容器内部。
+    const zones: RefineZone[] = [];
+    for (const sg of this.store.subgraphNodes) {
+      const rect = sg.declaredShape;
+      if (rect.kind !== 'rect') continue;
+      zones.push({ anchorId: sg.id, hw: rect.w / 2, hh: rect.h / 2 });
+      for (const mi of sg.memberIndices) {
+        const el = targets[mi];
+        const nd = nodes[mi];
+        if (!el || !nd) continue;
+        const hwIn = rect.w / 2 - el.hw;
+        const hhIn = rect.h / 2 - el.hh;
+        if (hwIn <= 0 || hhIn <= 0) continue;
+        nd.region = { anchorId: sg.id, hw: hwIn, hh: hhIn };
+      }
+    }
+    const lattice =
+      this.options.gridSize > 0 ? this.options.gridSize : this.options.naturalLength;
+    // 质量感知吸附：全部边供穿越否决，流向约束由接缝提供（有向算法）
+    const elements = this.store.elements;
+    const edges = this.store.edges.map((e) => ({
+      source: elements[e.sourceIndex]!.id,
+      target: elements[e.targetIndex]!.id,
+    }));
+    this.cs.refine(nodes, { lattice, edges, zones, flow: this.refineFlow() ?? undefined });
+    for (let i = 0; i < nodes.length; i++) {
+      targets[i]!.x = nodes[i]!.x;
+      targets[i]!.y = nodes[i]!.y;
+    }
+    // 终局包含口径：容器矩形以容器节点（格点）为中心按成员实占贴合
+    // —— 网格吸附/保留区使块中心与节点不严格重合，AABB 中心口径会
+    // 把矩形画偏；节点中心贴合使包含性回到构造保证（容量不足而降级
+    // 出区的成员同样被覆盖）。
+    if (partition) {
+      for (const sg of this.store.subgraphNodes) {
+        sg.fitShapeToMembersAtNode(this.store.elements);
+      }
+    }
   }
 
   /** 在预算内微调到收敛，返回实际使用的迭代数。 */

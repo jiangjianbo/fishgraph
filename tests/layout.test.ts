@@ -17,7 +17,11 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { assertAllFinite, minSurfaceGap } from './helpers.js';
+import { assertAllFinite, minSurfaceGap, useIdentityCoordinateSystem } from './helpers.js';
+
+// 本文件断言的是求解器物理/几何行为（平衡距离、自然构型、边长分布、
+// 软墙推离），与「布局终点坐标修正」层解耦：统一恒等坐标系。
+const identity = useIdentityCoordinateSystem();
 import { ForceLayout, estimateLabelBox } from '../src/index.js';
 import type { GraphSpec, NodeId } from '../src/types.js';
 
@@ -134,7 +138,7 @@ describe('物理平衡（核力式斥力 vs 引力 + 线性张力）', () => {
     const gStar = equilibriumGap(L, 0.1); // ≈ 92.7 → 中心距 ≈ 112.7
     const layout = new ForceLayout(
       { nodes: [{ id: 'a' }, { id: 'b' }], edges: [{ source: 'a', target: 'b' }] },
-      { naturalLength: L, edgeTension: 0.1, gravity: 'pairwise', accuracy: 'exact', seed: 1, edgeAngleAlignment: 0 },
+      { naturalLength: L, edgeTension: 0.1, gravity: 'pairwise', accuracy: 'exact', seed: 1, edgeAngleAlignment: 0, coordinateSystem: identity },
     );
     const r = layout.run({ maxIterations: 3000 });
     expect(r.converged).toBe(true);
@@ -161,7 +165,7 @@ describe('物理平衡（核力式斥力 vs 引力 + 线性张力）', () => {
     // 陌生人仍比朋友远，且远程斥力基本消失（覆盖面积趋小）。
     const layout = new ForceLayout(
       { nodes: [{ id: 'a' }, { id: 'b' }], edges: [] },
-      { naturalLength: L, weakGravityRatio: 0.2, gravity: 'pairwise', accuracy: 'exact', seed: 1 },
+      { naturalLength: L, weakGravityRatio: 0.2, gravity: 'pairwise', accuracy: 'exact', seed: 1, coordinateSystem: identity },
     );
     const r = layout.run({ maxIterations: 6000 });
     expect(r.converged).toBe(true);
@@ -180,7 +184,7 @@ describe('物理平衡（核力式斥力 vs 引力 + 线性张力）', () => {
           { source: 1, target: 3 },
         ],
       },
-      { naturalLength: L, gravity: 'pairwise', accuracy: 'exact', seed: 7, edgeAngleAlignment: 0 },
+      { naturalLength: L, gravity: 'pairwise', accuracy: 'exact', seed: 7, edgeAngleAlignment: 0, coordinateSystem: identity },
     );
     const r = layout.run({ maxIterations: 3000 });
     expect(r.converged).toBe(true);
@@ -206,7 +210,7 @@ describe('边-节点避让', () => {
         ],
         edges: [{ source: 'A', target: 'B' }],
       },
-      { naturalLength: 140, edgeNodeRepulsion: 3, accuracy: 'exact', seed: 3 },
+      { naturalLength: 140, edgeNodeRepulsion: 3, accuracy: 'exact', seed: 3, coordinateSystem: identity },
     );
     layout.run({ maxIterations: 3000 });
     const A = layout.positions.get('A')!;
@@ -290,7 +294,7 @@ describe('Barnes-Hut 与精确解一致性', () => {
   });
 
   it('BH 布局中等规模图：收敛、无 NaN、边长合理', () => {
-    const layout = new ForceLayout(randomGraph(200, 0.03, 2024), { naturalLength: 100, seed: 8 });
+    const layout = new ForceLayout(randomGraph(200, 0.03, 2024), { naturalLength: 100, seed: 8, coordinateSystem: identity });
     const r = layout.run({ maxIterations: 3000 });
     expect(r.converged).toBe(true);
     assertAllFinite(layout);
@@ -316,6 +320,7 @@ describe('规模：节点数量从少到多', () => {
         naturalLength: 100,
         accuracy: n <= 100 ? 'exact' : 'barnes-hut',
         seed: n,
+        coordinateSystem: identity,
       });
       const r = layout.run({ maxIterations: 3000 });
       assertAllFinite(layout);
@@ -417,7 +422,7 @@ describe('场景 S1：同大小圆点无连线（n=2..6）自然构型', () => {
     it(`n=${n} → ${kind}${kind === 'core+ring' ? `（核心 + 外围${ring}）` : ''}`, () => {
       const layout = new ForceLayout(
         { nodes: Array.from({ length: n }, (_, i) => jitterNode(i)), edges: [] },
-        { accuracy: 'exact', seed: 5 },
+        { accuracy: 'exact', seed: 5, coordinateSystem: identity },
       );
       const r = layout.run({ maxIterations: 4000 });
       expect(r.converged).toBe(true);
@@ -449,7 +454,7 @@ describe('场景 S2：全两两连线（K_n）与无连线构型等同', () => {
       for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) edges.push({ source: i, target: j });
       const layout = new ForceLayout(
         { nodes: Array.from({ length: n }, (_, i) => jitterNode(i)), edges },
-        { accuracy: 'exact', seed: 5, edgeAngleAlignment: 0 },
+        { accuracy: 'exact', seed: 5, edgeAngleAlignment: 0, coordinateSystem: identity },
       );
       const r = layout.run({ maxIterations: 4000 });
       expect(r.converged).toBe(true);
@@ -474,7 +479,7 @@ describe('场景 S2：全两两连线（K_n）与无连线构型等同', () => {
     ];
     const edges: Array<{ source: number; target: number }> = [];
     for (let i = 0; i < 6; i++) for (let j = i + 1; j < 6; j++) edges.push({ source: i, target: j });
-    const layout = new ForceLayout({ nodes, edges }, { accuracy: 'exact', seed: 5, edgeAngleAlignment: 0 });
+    const layout = new ForceLayout({ nodes, edges }, { accuracy: 'exact', seed: 5, edgeAngleAlignment: 0, coordinateSystem: identity });
     const r = layout.run({ maxIterations: 4000 });
     expect(r.converged).toBe(true);
     const info = ringInfo(layout.nodeViews);
@@ -617,7 +622,7 @@ describe('场景 S5：边文字撑开距离 + 长文字按最小面积回绕', (
     const build = (chars: number) =>
       new ForceLayout(
         { nodes: [{ id: 0 }, { id: 1 }], edges: [{ source: 0, target: 1, label: '字'.repeat(chars) }] },
-        { accuracy: 'exact', seed: 5, naturalLength: 40, labelFontSize: 12, labelPadding: 4 },
+        { accuracy: 'exact', seed: 5, naturalLength: 40, labelFontSize: 12, labelPadding: 4, coordinateSystem: identity },
       );
     const d = (chars: number) => {
       const l = build(chars);

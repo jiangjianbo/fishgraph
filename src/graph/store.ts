@@ -202,6 +202,31 @@ export class LayoutSubgraphNode extends LayoutElement {
     if (!bounds) return;
     this.setShapeFromMemberBounds(bounds, this.padding);
   }
+
+  /**
+   * 终局包含口径：以容器节点自身位置为中心、按成员实占（力学外接矩形）
+   * 就近贴合出渲染矩形 —— 半宽高 = max(成员相对节点的轴向偏移 + 成员
+   * 半尺寸) + padding。与 updateBoundsFromChildren（AABB 中心口径，矩形
+   * 画在节点位置时依赖块中心与节点重合）不同，本口径保证"画在节点
+   * 位置的矩形"构造性覆盖全部成员：网格化平移的取整残差（≤ 半格）
+   * 不再造成成员出界。无成员时保持原形状。
+   */
+  fitShapeToMembersAtNode(elements: readonly LayoutElement[]): void {
+    let hw = 0;
+    let hh = 0;
+    for (const idx of this.memberIndices) {
+      const el = elements[idx];
+      if (!el) continue;
+      hw = Math.max(hw, Math.abs(el.x - this.x) + el.hw);
+      hh = Math.max(hh, Math.abs(el.y - this.y) + el.hh);
+    }
+    if (this.memberIndices.length === 0) return;
+    this.shape = {
+      kind: 'rect',
+      w: 2 * (hw + this.padding),
+      h: 2 * (hh + this.padding),
+    };
+  }
 }
 
 /** 类型守卫：元素是否为 subgraph 容器（判别联合收窄）。 */

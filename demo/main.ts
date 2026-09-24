@@ -234,7 +234,6 @@ const outs = {
   hd: $<HTMLOutputElement>('hdv'),
 };
 const labelCollision = $<HTMLInputElement>('lc');
-const coordsSel = $<HTMLSelectElement>('coords');
 const gsSlider = $<HTMLInputElement>('gs');
 const gsOut = $<HTMLOutputElement>('gsv');
 
@@ -248,7 +247,6 @@ function optionsFromUi(): LayoutOptions {
     edgeTension: Number(sliders.kt.value) / 10,
     crossingShrink: Number(sliders.cs.value) / 100,
     hopRepulsionDecay: Number(sliders.hd.value) / 100,
-    coordinateSystem: coordsSel.value,
     gridSize: Number(gsSlider.value),
     labelCollision: labelCollision.checked,
     gravity: gravitySel.value as LayoutOptions['gravity'],
@@ -483,7 +481,6 @@ for (const el of [...Object.values(sliders), labelCollision, gsSlider]) {
   });
 }
 graphSel.addEventListener('change', () => rebuild()); // 切换图需要整体重建布局实例
-coordsSel.addEventListener('change', () => rebuild()); // 坐标系修正是 run 终点行为
 for (const el of [algorithmSel, directionSel, gravitySel, accuracySel]) {
   el.addEventListener('change', () => {
     layout?.updateOptions(optionsFromUi());
@@ -550,8 +547,8 @@ function drawView(): void {
   g.clearRect(0, 0, viewCanvas.clientWidth, viewCanvas.clientHeight);
   if (!layout) return;
 
-  // grid 坐标系：淡色网格背景
-  if (coordsSel.value === 'grid') {
+  // 淡色网格背景（网格化坐标的吸附参考线，间距 = 网格尺寸）
+  {
     const lattice = Number(gsSlider.value) || 120;
     const [wx0, wy0] = screenToWorld(0, 0);
     const [wx1, wy1] = screenToWorld(viewCanvas.clientWidth, viewCanvas.clientHeight);
