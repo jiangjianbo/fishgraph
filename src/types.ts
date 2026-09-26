@@ -30,13 +30,9 @@ export interface ElementSpec {
 export interface NodeSpec extends ElementSpec {
   /** 缺省为默认圆（r=10）。 */
   shape?: ShapeSpec;
-  /** 参与引力的质量，默认 1。 */
-  mass?: number;
   /** 可选的初始位置（两维都给才生效）。 */
   x?: number;
   y?: number;
-  /** 固定节点：不受力移动，但仍对其他节点施力。 */
-  fixed?: boolean;
 }
 
 /**
@@ -61,18 +57,6 @@ export interface SubgraphSpec extends GroupSpec {
   padding?: number;
 }
 
-/**
- * hidden-group：无边界、不可见的分组。布局时不产生任何实体，
- * 仅对成员施加"尽量聚集"的向心引力束缚（物化为 ClusterConstraint）。
- */
-export interface HiddenGroupSpec extends GroupSpec {
-  /**
-   * 聚集强度（成员到组质心的简谐束缚，越大组内越紧凑）。
-   * 缺省用全局 LayoutOptions.groupCohesion。
-   */
-  attractionStrength?: number;
-}
-
 export interface EdgeSpec {
   source: ElementId;
   target: ElementId;
@@ -88,173 +72,47 @@ export interface GraphSpec {
    * 物化为一个 LayoutSubgraphNode（参与碰撞/排斥的大节点）。
    */
   subgraphs?: SubgraphSpec[];
-  /**
-   * hidden-group 声明（无边界、仅聚类）。GraphStore 工厂会把每个声明
-   * 物化为一个 ClusterConstraint（力导向迭代时的辅助向心引力）。
-   * 可不声明；需要自动分组时，先调用 detectHiddenGroups 按拓扑推断，
-   * 再把结果作为 hiddenGroups 传入（库内不会自动推断）。
-   */
-  hiddenGroups?: HiddenGroupSpec[];
 }
-
-export type GravityMode = 'pairwise' | 'centroid';
-export type AccuracyMode = 'exact' | 'barnes-hut';
-
-/**
- * 分阶段弛豫的力阶段（策略内部调度概念，供动画/调试观察进度）：
- *  0 = 只有节点力场；1 = 加入连线；2 = 加入避让与边文字；3 = 节点文字生效。
- */
-export type LayoutStage = 0 | 1 | 2 | 3;
 
 export interface LayoutOptions {
   /**
-   * 布局算法（策略名）。默认 'force-undirected'（无向力导向基础算法）。
-   * 内置：'force-undirected' | 'force-directed' | 'grid-undirected' |
-   * 'group-undirected' | 'circle'；可用 registerStrategy 注册自定义策略。
-   * 'force-undirected'：均匀分布、结构对称、无交叉的紧凑布局
-   * （质点网格粗布局 → 膨胀压实 → 短弛豫微调，见 doc/布局核心原则.md）。
-   * 'force-directed'：有向图布局 —— 在无向基础算法上派生，叠加层级解环、
-   * 软层级引导放置与方向流动势能，配合 direction 指定流动方向。
-   * 'group-undirected'：无向分组布局 —— 深度优先递归的复合布局：组内成员
-   * 先用同一套流水线递归布局，组折叠为一个"巨大号的单元"（单元半径 =
-   * 内部块包围半径）参与外层布局，最后把内部块平移映射到单元最终位置。
-   * 消费 subgraphs 与 hiddenGroups 声明（含嵌套；成员重叠抛错）。
-   * 运行时切换用 layout.setStrategy(name)（保留图数据，重新初始化位置）。
+   * 布局算法（策略名）。默认 'grid-undirected'（纯网格布局，唯一主引擎）。
+   * 内置：'grid-undirected' | 'circle'（最小环形，验证策略接缝）；
+   * 可用 registerStrategy 注册自定义策略。
+   * 运行时切换用 layout.setStrategy(name)（保留图数据，重新布局）。
    */
   algorithm?: string;
   /**
-   * 有向图流动方向（算法：force-directed，默认 'TB'）。
-   * 'TB' = 自顶向下（top→bottom，边 target 在 source 下方）；
-   * 'LR' = 自左向右（left→right，边 target 在 source 右方）。其他算法不消费。
+   * 流动方向（grid-undirected 的布局模式，默认 'none' = 无向放置）：
+   *  - 'none'：无向波纹放置（张力 − 环周长 + 环内方位分类）；
+   *  - 'TB'：有向层级布局，自顶向下（解环 + 最长路径分层，节点钉在
+   *    自己的层级行上，所有边顺流——target 在 source 下方或同层下游）；
+   *  - 'LR'：自左向右（层排列成列）。
    */
-  direction?: 'TB' | 'LR';
+  direction?: 'none' | 'TB' | 'LR';
   /**
-   * 自然边长：相邻节点**表面**的平衡间距，单位 = 格数（格单位力学）。
-   * 一格 = 初始化分级的最小级盒尺寸（宽高基准的几何平均，各向同性
-   * 比例尺，见 grade.ts）。由核力常数校准导出：无张力时平衡间隙
-   * g* = naturalLength × 比例尺；斥力作用域 = 2 × naturalLength。
+   * 自然边长（格）：粗布局格胞 = 本值 × 比例尺（grade.ts 分级基准），
+   * 相邻节点表面的目标间隙。默认 6。
    */
   naturalLength?: number;
-  /**
-   * 弱基础引力系数 k_w = weakGravityRatio × k_a。
-   * 非相邻节点对的平衡间隙 g = 1/(k_w/k_r + 1/(2L))，饱和于斥力作用域
-   * （陌生人比朋友远，但远到作用域边缘就再不推开 —— 图整体趋紧凑）。
-   */
-  weakGravityRatio?: number;
-  /** 边-节点避让斥力倍率：k_en = edgeNodeRepulsion × k_r。 */
-  edgeNodeRepulsion?: number;
-  /**
-   * 连线弹力刚度倍率 τ（默认 1）：相邻节点之间的橡皮筋收缩力
-   * F = τ·(k_a/L³)·g —— 连线越长拉力越大，g→0 拉力消失。
-   * τ=1 时无交叉的平衡间隙恰为 naturalLength；更大则收得更紧。
-   */
-  edgeTension?: number;
-  /**
-   * 交叉收缩系数 λ（默认 0.15）：一条边每与其他边交叉一次，它的引力与
-   * 张力就放大 (1+λ) 倍 —— 交叉越多的线收缩越强，交叉在能量上天然趋于消解。
-   * 交叉计数在每次力场求值时按当前坐标重算，力与能量用同一组乘子
-   * （分段保守，能量单调下降不受影响）；大图超出计数预算时自动停用。
-   */
-  crossingShrink?: number;
-  /**
-   * 交叉能量罚（默认 0.05，单位 k_a/L）：每条边每有一个交叉点，总能量加
-   * crossingEnergy × (k_a/L) —— 交叉点越多的布局含能量越高。该项是分段
-   * 常数势垒：不产生力，但通过能量比较影响线搜索的取舍（交叉事件即
-   * 能量台阶），与 crossingShrink 的收缩力互补。
-   */
-  crossingEnergy?: number;
-  /**
-   * 线间避让斥力（默认 false）：两条连线中心线靠近到 0.35L 内时互相排斥，
-   * 力学上直接挤开交叉。适用于稀疏流程图/树图；全连接图（边必然互相
-   * 穿过中心区域）与高密度图应保持关闭，否则结构被边-边互斥撑坏。
-   */
-  lineAvoidance?: boolean;
-  /**
-   * hidden-group 聚集强度全局默认值（默认 3，算法：force-group）：
-   * HiddenGroupSpec.attractionStrength 未声明时生效。成员到组质心的
-   * 简谐束缚（相对力单位 k_a/L²、按成员数归一）。纯力导向不消费本项。
-   */
-  groupCohesion?: number;
-  /**
-   * 坐标系（注册名，默认 'grid'）。布局完成后以最优布局为基础做一次
-   * 坐标修正（CoordinateSystem.refine）：'grid' 网格化吸附（就近格点 +
-   * 冲突消解，保证不重叠）。可用 registerCoordinateSystem 注册自定义
-   * 坐标系（hex/polar 等）。
-   */
-  coordinateSystem?: string;
-  /**
-   * 网格吸附间距，单位 = 格数（0 = 跟随 naturalLength）。
-   * 实际吸附保证任意两节点不重叠（必要时自动放大间距或就近挪格），
-   * 自适应后量化到基准格整数倍（格点坐标 = 整数格下标）。
-   */
-  gridSize?: number;
-  /**
-   * 跨容器张力传导（实验性，默认 false，算法：force-group）：跨容器连线的
-   * 张力按有界比例传导给两端容器（hub），使容器朝连接方向靠近。已知问题：
-   * 简单传导与容器互斥/弱引力平衡后仍可能振荡，需要专项的引力+阻尼设计。
-   */
-  tensionConduction?: boolean;
-  /**
-   * 跳数斥力衰减（默认 0.7）：图上相距 2..3 跳的两节点，中程斥力乘
-   * hopRepulsionDecay^(h−1)。邻接对（h=1）不衰减、键合平衡不变。
-   * 跳数 > 3 的节点对与不同分量的节点对一样，远程斥力基本消失
-   * （只乘 unrelatedRepulsion 下限防接触粘连）。
-   * 防重叠的接触弹簧不衰减。设为 1 关闭本规则。
-   */
-  hopRepulsionDecay?: number;
-  /**
-   * 远程斥力下限系数（默认 0.35）：跳数 > 3 或不同连通分量（无直接或
-   * 间接关系）的节点对，中程斥力乘该系数 —— 基本没有远程斥力，
-   * 重叠仍由接触弹簧坚决阻止。节点数超过 3000 时自动停用。
-   */
-  unrelatedRepulsion?: number;
-  /** 是否让边文字包围盒温和推开节点，避免文字被盖住。 */
+  /** 是否让边文字参与占位（文字盒并入节点格宽高），避免文字被盖住。 */
   labelCollision?: boolean;
   /** 估算文字包围盒用的字号（px）。 */
   labelFontSize?: number;
   /** 文字包围盒外扩留白（px）。 */
   labelPadding?: number;
-  /** 弱引力的实现方式：任意节点对之间（pairwise）或朝向质心（centroid）。 */
-  gravity?: GravityMode;
-  /** centroid 模式下每节点受到的恒定引力强度（相对力单位 k_a/L²）。 */
-  centroidStrength?: number;
-  /** 节点-节点斥力的计算方式。 */
-  accuracy?: AccuracyMode;
-  /** Barnes-Hut 张开判据：cellSize / distance < theta 时聚合。 */
-  theta?: number;
   /** 随机初始化 / 抖动的种子，固定则结果可复现。 */
   seed?: number;
-  /** 单步最大位移（相对 naturalLength 的比例）。 */
-  maxStepRatio?: number;
   /**
-   * 连线方向对齐强度（相对力单位 k_a）：连线落在水平/垂直方向能量最低，
-   * ±45° 稍高，其余角度更高 —— 温和鼓励图形成横平竖直（兼对角）的排列感。
-   * 纯切向内力（合力恒零），只转边不改边长。
-   * 开关（opt-in）：默认 0 = 关闭，需要排列感时显式设置正值（如 0.1）开启。
-   */
-  edgeAngleAlignment?: number;
-  /**
-   * 同顶点连线角向均布（opt-in，默认 0 = 关闭）：同一节点的每对连线
-   * （相邻线对）之间有「张开斥力」——两线夹角越小斥力越大（势
-   * E = k·(1 − sin(θ/2))，θ→π 完全张开时能量与力双双归零），使顶点的
-   * 全部连线趋向等分圆周（4 线十字、3 线品字，链上两线拉直）。严格成对
-   * 的保守切向内力（合力恒零），只在共享顶点的线对之间发生。
-   * 推荐 0.5 起步；该力平衡态对链是「拉直」，会系统性增大组内链跨度、
-   * 重排卫星节点的切向布局（强度只影响快慢），组内紧凑优先的图慎开。
-   */
-  angleBalance?: number;
-  /**
-   * 走线通道宽度（格，算法：grid-undirected）：通道约束压实把相邻占用
-   * 行/列之间的空隙压缩到恰好不小于本值 —— 相邻节点 AABB 之间天然留出
-   * 走线走廊（Channel Safety Margin）。默认 1；0 = 不留通道（压到贴邻）。
+   * 走线通道宽度（格）：通道约束压实把相邻占用行/列之间的空隙压缩到
+   * 恰好不小于本值 —— 相邻节点 AABB 之间天然留出走线走廊（Channel
+   * Safety Margin）。默认 1；0 = 不留通道（压到贴邻）。
    */
   channelMargin?: number;
 }
 
 export interface RunOptions {
   maxIterations?: number;
-  /** 每个被接受的步进后回调（用于动画）。 */
-  onTick?: () => void;
 }
 
 export interface RunResult {
@@ -276,10 +134,9 @@ export interface NodeView {
   readonly hh: number;
   shape: ShapeSpec;
   label?: string | null;
-  fixed: boolean;
   /**
-   * 物化 AABB 物理宽/高（px，算法：grid-undirected）—— 中心 (x,y) +
-   * 半宽高即节点包围盒；力导向等连续布局不产生本字段（用 r 包围圆）。
+   * 物化 AABB 物理宽/高（px，grid-undirected 产物）—— 中心 (x,y) +
+   * 半宽高即节点包围盒。
    */
   w?: number;
   h?: number;

@@ -3,14 +3,13 @@
  *
  * 职责只有"图数据的校验、物化与变更"（GraphSpec → GraphStore 工厂）：
  *   - 物化：NodeSpec → LayoutNode（物理节点）；
- *           SubgraphSpec → LayoutSubgraphNode（有边界的物理容器，参与碰撞）；
- *           HiddenGroupSpec → ClusterConstraint（无边界，仅聚类引力约束）；
- *   - 邻接表、固定状态、元素位置与质量；
- *   - 边文字/节点文字的包围盒度量（纯数据，不含任何力学）；
- *   - 增删元素/边、拖拽相关的位置写入。
+ *           SubgraphSpec → LayoutSubgraphNode（有边界的物理容器）；
+ *   - 邻接表、元素位置；
+ *   - 边文字/节点文字的包围盒度量（纯数据）；
+ *   - 增删元素/边、位置写入。
  *
  * 布局引擎（src/layout/ 下的策略实现）只面向 LayoutElement 多态基类：
- * 读 x/y/getBoundRadius()、写回坐标，不区分物理节点与容器节点；
+ * 读 x/y、写回坐标，不区分物理节点与容器节点；
  * 图结构变化后由调用方通知策略 rebuild()。
  */
 
@@ -21,8 +20,6 @@ import type {
   EdgeSpec,
   ElementId,
   GraphSpec,
-  GroupSpec,
-  HiddenGroupSpec,
   NodeSpec,
   NodeView,
   ShapeSpec,
@@ -38,12 +35,10 @@ export interface ElementInit {
   id: ElementId;
   x: number;
   y: number;
-  fixed: boolean;
   shape: ShapeSpec;
   label: string | null;
   /** 用户是否显式给了初始位置。 */
   placed: boolean;
-  mass: number;
 }
 
 /**
@@ -65,11 +60,6 @@ export abstract class LayoutElement {
   readonly id: ElementId;
   x: number;
   y: number;
-  /** 力累加器（每轮力场求值前清零）。 */
-  fx = 0;
-  fy = 0;
-  /** 固定元素：不受力移动，但仍对其他元素施力。 */
-  fixed: boolean;
   /** 真实形状（渲染/贴合/命中/钳制共用；容器为动态实占矩形）。 */
   shape: ShapeSpec;
   /** 声明形状快照（容器成员钳制上界；普通节点与 shape 相同）。 */
@@ -80,8 +70,6 @@ export abstract class LayoutElement {
   readonly baseR: number;
   readonly label: string | null;
   placed: boolean;
-  /** 引力质量。 */
-  mass: number;
   /** 网格布局（grid-undirected）物化的 AABB 物理宽（px）；连续布局不设置。 */
   w?: number;
   /** 网格布局（grid-undirected）物化的 AABB 物理高（px）；连续布局不设置。 */
@@ -96,13 +84,11 @@ export abstract class LayoutElement {
     this.id = init.id;
     this.x = init.x;
     this.y = init.y;
-    this.fixed = init.fixed;
     this.shape = init.shape;
     this.declaredShape = init.shape;
     this.baseR = boundingRadius(init.shape);
     this.label = init.label;
     this.placed = init.placed;
-    this.mass = init.mass;
   }
 
   /** 力学外接矩形（AABB）半宽：形状半尺寸 + 文字外扩（统一计算，只读）。 */
@@ -125,12 +111,8 @@ export abstract class LayoutElement {
     return boundingRadius(this.shape) + this.labelOutset;
   }
 
-  getBoundRadius(): number {
-    return this.r;
-  }
-
   /**
-   * 复合单元口径（subgraph 容器与 hidden 伪单元共用）：把真实形状刷新为
+   * 复合单元口径（subgraph 容器）：把真实形状刷新为
    * 成员实占包围盒 + padding 的动态矩形 —— "实占 → 动态矩形"的唯一构造，
    * 渲染/碰撞/贴合随 shape 自动跟随。
    */
@@ -150,11 +132,9 @@ export class LayoutNode extends LayoutElement {
       id: spec.id,
       x: spec.x ?? 0,
       y: spec.y ?? 0,
-      fixed: spec.fixed ?? false,
       shape: spec.shape ?? DEFAULT_SHAPE,
       label: spec.label ?? null,
       placed: spec.x !== undefined && spec.y !== undefined,
-      mass: spec.mass && spec.mass > 0 ? spec.mass : 1,
     });
   }
 }
@@ -185,13 +165,9 @@ export class LayoutSubgraphNode extends LayoutElement {
       id: spec.id,
       x: 0,
       y: 0,
-      fixed: false,
       shape: spec.shape,
       label: spec.label ?? null,
       placed: false,
-      // 斥力强度与节点大小无关（2026-09-22 起）：质量维度整体归一，
-      // 容器不再按成员数放大力学强度（对外推力、提升边弹力、弱引力）。
-      mass: 1,
     });
     this.children = [...spec.members];
     this.padding = spec.padding ?? DEFAULT_SUBGRAPH_PADDING;
@@ -268,51 +244,6 @@ export function elementsAABB(
   return minX === Infinity ? null : { minX, minY, maxX, maxY };
 }
 
-/**
- * ClusterConstraint —— hidden-group 的物理化身（Hidden Group Dynamics）。
- *
- * 不继承 LayoutElement：不参与空间包围盒碰撞，也不产生可见实体；
- * 只在力导向迭代时作为辅助引力钩子，向成员施加"到组质心的简谐束缚"
- * （向心力，保守、合力恒为零 —— "尽量聚集"而非"约束在界内"）。
- */
-export class ClusterConstraint {
-  /** 每成员束缚系数（k_a/L² 尺度）。由布局策略按聚集强度与 naturalLength 派生后写入。 */
-  k = 0;
-  /** 成员元素下标（物化派生；增删元素后由 store 重建）。 */
-  memberIndices: number[];
-
-  constructor(
-    readonly id: ElementId,
-    /** 声明的聚集强度；null = 使用全局默认（LayoutOptions.groupCohesion）。 */
-    readonly strength: number | null,
-    memberIndices: number[],
-  ) {
-    this.memberIndices = memberIndices;
-  }
-
-  /** 向成员施加到组质心的简谐束缚（就地累加力），返回该组势能。 */
-  applyForces(elements: readonly LayoutElement[]): number {
-    const m = this.memberIndices.length;
-    if (m === 0 || this.k === 0) return 0;
-    let cx = 0;
-    let cy = 0;
-    for (const idx of this.memberIndices) {
-      cx += elements[idx].x;
-      cy += elements[idx].y;
-    }
-    cx /= m;
-    cy /= m;
-    let energy = 0;
-    for (const idx of this.memberIndices) {
-      const nd = elements[idx];
-      nd.fx += (this.k * nd.mass) * (cx - nd.x);
-      nd.fy += (this.k * nd.mass) * (cy - nd.y);
-      energy += 0.5 * this.k * nd.mass * ((nd.x - cx) ** 2 + (nd.y - cy) ** 2);
-    }
-    return energy;
-  }
-}
-
 export interface InternalEdge {
   /** 端点元素下标（elements 数组；可为 subgraph 容器下标）。 */
   sourceIndex: number;
@@ -328,16 +259,6 @@ export interface InternalEdge {
   waypoints?: Array<{ x: number; y: number }>;
 }
 
-/** group 内成员的角色：与组外有连线的成员是边界（入口/出口），纯内连是内部。 */
-export interface GroupRoles {
-  group: GroupSpec;
-  /** 成员 id → elements 下标（未知成员为 -1）。 */
-  indexOf: (memberId: ElementId) => number;
-  entry: ElementId[];
-  exit: ElementId[];
-  internal: ElementId[];
-}
-
 export class GraphStore {
   /**
    * 全量布局元素（物理节点 + subgraph 容器），声明序混排；
@@ -351,11 +272,8 @@ export class GraphStore {
   edges: InternalEdge[] = [];
   /** adj[i] = 与下标 i 相邻的元素下标集合。 */
   readonly adj: Array<Set<number>> = [];
-  /** hidden-group 物化出的聚类引力约束。 */
-  readonly clusterConstraints: ClusterConstraint[] = [];
-  /** 声明保留（角色分类 groupRoles 等需要原始 spec）。 */
+  /** 声明保留（subgraph 的原始 spec）。 */
   readonly subgraphs: SubgraphSpec[] = [];
-  readonly hiddenGroups: HiddenGroupSpec[] = [];
   /** 成员元素 id → 所属 subgraph 容器下标。 */
   private memberHub = new Map<ElementId, number>();
   private idToIndex = new Map<ElementId, number>();
@@ -376,7 +294,6 @@ export class GraphStore {
     graph.nodes.forEach((spec) => this.insertNode(spec));
     // subgraph 先于边物化：外部边可以直接以 group.id 为端点
     for (const spec of graph.subgraphs ?? []) this.insertSubgraph(spec);
-    for (const spec of graph.hiddenGroups ?? []) this.insertHiddenGroup(spec);
     for (const spec of graph.edges) this.insertEdge(spec);
     this.rebuildGroupIndices();
   }
@@ -414,22 +331,6 @@ export class GraphStore {
     this.adj.push(new Set());
   }
 
-  /** hidden-group：物化为聚类引力约束（无实体，仅"尽量聚集"）。 */
-  private insertHiddenGroup(spec: HiddenGroupSpec): void {
-    const memberIndices: number[] = [];
-    for (const m of spec.members) {
-      const idx = this.idToIndex.get(m);
-      if (idx === undefined) {
-        throw new Error(`hidden group ${String(spec.id)} 引用未知成员：${String(m)}`);
-      }
-      memberIndices.push(idx);
-    }
-    this.clusterConstraints.push(
-      new ClusterConstraint(spec.id, spec.attractionStrength ?? null, memberIndices),
-    );
-    this.hiddenGroups.push(spec);
-  }
-
   private insertEdge(spec: EdgeSpec): void {
     const a = this.idToIndex.get(spec.source);
     const b = this.idToIndex.get(spec.target);
@@ -460,13 +361,7 @@ export class GraphStore {
         this.memberHub.set(m, hubIdx);
       }
     });
-    this.clusterConstraints.forEach((c, gi) => {
-      const spec = this.hiddenGroups[gi];
-      c.memberIndices = spec.members
-        .map((m) => this.idToIndex.get(m))
-        .filter((x): x is number => x !== undefined);
-    });
-  }
+}
 
   // ── 分组查询 ────────────────────────────────────────────
 
@@ -514,41 +409,6 @@ export class GraphStore {
     const box = this.containerOf(id);
     if (!box) return { x, y };
     return clampPointToShape(box.declaredShape, box.x, box.y, x, y, el.r);
-  }
-
-  /**
-   * group 内成员角色：与组外有连线的是边界节点（有向边 外→成员 = 入口，
-   * 成员→外 = 出口），纯内连的是内部节点。
-   */
-  groupRoles(groupId: ElementId): GroupRoles | null {
-    const spec =
-      this.subgraphs.find((g) => g.id === groupId) ??
-      this.hiddenGroups.find((g) => g.id === groupId);
-    if (!spec) return null;
-    const memberIdx = new Set(
-      spec.members.map((m) => this.idToIndex.get(m)).filter((x): x is number => x !== undefined),
-    );
-    const entry: ElementId[] = [];
-    const exit: ElementId[] = [];
-    const internal: ElementId[] = [];
-    for (const m of spec.members) {
-      const mi = this.idToIndex.get(m);
-      if (mi === undefined) continue;
-      let hasIn = false;
-      let hasOut = false;
-      for (const e of this.edges) {
-        const fromMember = memberIdx.has(e.sourceIndex);
-        const toMember = memberIdx.has(e.targetIndex);
-        if (fromMember && toMember) continue;
-        if (e.sourceIndex === mi && !toMember) hasOut = true;
-        if (e.targetIndex === mi && !fromMember) hasIn = true;
-      }
-      if (hasIn && !hasOut) entry.push(m);
-      else if (hasOut && !hasIn) exit.push(m);
-      else if (hasIn && hasOut) { entry.push(m); exit.push(m); }
-      else internal.push(m);
-    }
-    return { group: spec, indexOf: (m) => this.idToIndex.get(m) ?? -1, entry, exit, internal };
   }
 
   // ── 变更（图结构）───────────────────────────────────────
@@ -693,19 +553,7 @@ export class GraphStore {
     }
   }
 
-  // ── 交互（拖拽支持）─────────────────────────────────────
-
-  /** 固定节点（可同时移动它）。固定节点不受力移动，但仍对其他节点施力。 */
-  fix(id: ElementId, x?: number, y?: number): void {
-    const nd = this.elementById(id);
-    nd.fixed = true;
-    if (x !== undefined) nd.x = x;
-    if (y !== undefined) nd.y = y;
-  }
-
-  unfix(id: ElementId): void {
-    this.elementById(id).fixed = false;
-  }
+  // ── 交互（位置写入）─────────────────────────────────────
 
   setNodePosition(id: ElementId, x: number, y: number): void {
     const nd = this.elementById(id);

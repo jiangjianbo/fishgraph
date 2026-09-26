@@ -1,82 +1,89 @@
-// 内置策略在加载时自注册（副作用 import）。
-import './layout/force-undirected/strategy.js';
-import './layout/force-directed/strategy.js';
+/**
+ * fishgraph 公共导出面。
+ *
+ * 主引擎：grid-undirected 纯网格布局
+ * （波纹放置 → 中心对称膨胀 → 通道约束压实 → 网格 A* 避障走线）。
+ */
+
+// 公共 API 门面
+export { ForceLayout } from './layout.js';
+
+// 策略自注册（import 副作用：registerStrategy）
 import './layout/grid-undirected/strategy.js';
-import './layout/group-undirected/strategy.js';
 import './layout/circle/strategy.js';
 
-export { ForceLayout } from './layout.js';
-export { estimateLabelBox, type LabelBox } from './label.js';
-
-// 图数据底座（GraphSpec → GraphStore 工厂物化）
+// 策略接缝
 export {
-  ClusterConstraint,
-  GraphStore,
-  LayoutElement,
-  LayoutNode,
-  LayoutSubgraphNode,
-  type ElementInit,
-  type GroupRoles,
-  type InternalEdge,
-} from './graph/store.js';
-export { detectHiddenGroups, type HiddenGroup } from './graph/groups.js';
-
-// 几何原语（统一形状口径：外接矩形碰撞、连线端点形状贴合）
-export { halfExtentsOf, rayShapeExit, shapeContains, type HalfExtents } from './geometry.js';
-
-// 坐标系（布局完成后的坐标修正策略）
-export {
-  createCoordinateSystem,
-  listCoordinateSystems,
-  registerCoordinateSystem,
-  resolveRefineLattice,
-  zoneLatticeCap,
-  type CoordinateNode,
-  type CoordinateSystem,
-  type CoordinateSystemFactory,
-  type RefineParams,
-} from './layout/coordinates.js';
-
-// 布局策略接缝
-export {
-  registerStrategy,
   createStrategy,
   listStrategies,
-  type ForceSnapshot,
+  registerStrategy,
   type LayoutStrategy,
   type ResolvedLayoutOptions,
   type StrategyFactory,
 } from './layout/strategy.js';
 
-// 空间上下文（泛型化布局算法的空间原语接缝：离散网格 / 连续平面）
+// 图数据底座与类型
 export {
-  ContinuousSpaceContext,
-} from './layout/space/continuous-context.js';
-export { GridSpaceContext } from './layout/space/grid-context.js';
-export { gridRouteAStar, type GridRouteOptions } from './layout/space/grid-route.js';
-export type { Bounds, Box, Point, SpaceContext } from './layout/space/types.js';
+  GraphStore,
+  LayoutElement,
+  LayoutNode,
+  LayoutSubgraphNode,
+  isSubgraphNode,
+  elementsAABB,
+  type ElementAABB,
+  type InternalEdge,
+} from './graph/store.js';
+
+// 几何与文字
+export { DEFAULT_SHAPE, boundingRadius, clampPointToShape, halfExtentsOf, rayShapeExit, shapeContains } from './geometry.js';
+export { estimateLabelBox } from './label.js';
 
 // 尺寸分级（格单位架构 · 初始化：px 盒 → 整数格占用）
-export { GRADE_TOLERANCE, gradeAxis, gradeBoxes, type AxisGrades, type BoxSize, type GradeBasis } from './layout/grade.js';
+export {
+  GRADE_TOLERANCE,
+  gradeAxis,
+  gradeBoxes,
+  type AxisGrades,
+  type BoxSize,
+  type GradeBasis,
+} from './layout/grade.js';
+
+// 纯网格流水线（主引擎内部件，供测试与扩展）
+export {
+  coarseGridPlacement,
+  undirectedHeuristics,
+  insertLine,
+  placeOrphan,
+  type CoarseHeuristics,
+  type CoarsePlacementOptions,
+  type CoarsePlacementGrid,
+  type Cell,
+  type GridPos,
+  type PointGrid,
+  type PushDir,
+  type UndirectedHeuristicsOptions,
+} from './layout/grid-undirected/coarse.js';
+export { computeLevels, type LevelInfo, type EdgeEndpoints } from './layout/grid-undirected/levels.js';
+export { directedHeuristics } from './layout/grid-undirected/directed-placement.js';
+export { ExpansionGrid } from './layout/grid-undirected/expansion.js';
+export { GridSpaceContext, type GridSpaceOptions } from './layout/grid-undirected/grid-context.js';
+export { gridRouteAStar, type GridRouteOptions } from './layout/grid-undirected/grid-route.js';
+export type { Bounds, Box, Point } from './layout/grid-undirected/space-types.js';
 
 export type {
-  AccuracyMode,
-  EdgeSpec,
   ElementId,
-  ElementSpec,
-  GraphSpec,
-  GroupSpec,
-  GravityMode,
-  HiddenGroupSpec,
-  LayoutOptions,
-  LayoutStage,
   NodeId,
+  Vec2,
+  ShapeSpec,
+  ElementSpec,
   NodeSpec,
-  NodeView,
+  GroupSpec,
+  SubgraphSpec,
+  EdgeSpec,
+  GraphSpec,
+  LayoutOptions,
   RunOptions,
   RunResult,
-  ShapeSpec,
-  SubgraphSpec,
+  NodeView,
   SubgraphView,
-  Vec2,
 } from './types.js';

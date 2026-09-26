@@ -3,7 +3,7 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   // 生成物与临时目录不检查（node_modules 由 ESLint 默认忽略）
-  { ignores: ['output/**', '.tmp/**', 'dist/**'] },
+  { ignores: ['output/**', '.tmp/**', 'dist/**', 'demo/dist/**'] },
   // recommended：只含"正确性"规则，无风格类规则
   ...tseslint.configs.recommended,
   {

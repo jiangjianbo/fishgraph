@@ -1,107 +1,80 @@
 <!doctype html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>fishgraph — 核力式力导向布局 demo</title>
-    <style>
-      :root { color-scheme: light; }
-      * { box-sizing: border-box; }
-      body {
-        margin: 0; display: flex; height: 100vh;
-        font: 13px/1.5 system-ui, 'PingFang SC', 'Microsoft YaHei', sans-serif;
-        color: #0f172a; background: #f8fafc;
-      }
-      #panel {
-        width: 280px; flex: none; padding: 14px; overflow-y: auto;
-        border-right: 1px solid #e2e8f0; background: #fff;
-      }
-      #panel h1 { font-size: 15px; margin: 0 0 4px; }
-      #panel p.hint { color: #64748b; margin: 0 0 12px; font-size: 12px; }
-      fieldset { border: 1px solid #e2e8f0; border-radius: 8px; margin: 0 0 12px; padding: 8px 10px; }
-      legend { font-size: 12px; color: #475569; padding: 0 4px; }
-      label.row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
-      label.row span.name { flex: none; width: 92px; }
-      label.row input[type='range'] { flex: 1; }
-      label.row output { flex: none; width: 44px; text-align: right; color: #0369a1; font-variant-numeric: tabular-nums; }
-      select, button {
-        font: inherit; padding: 3px 8px; border: 1px solid #cbd5e1;
-        border-radius: 6px; background: #fff; cursor: pointer;
-      }
-      button.primary { background: #0284c7; border-color: #0284c7; color: #fff; }
-      .btnrow { display: flex; gap: 8px; margin-bottom: 12px; }
-      #status { font-size: 12px; color: #475569; white-space: pre-line; }
-      #stage { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-      #canvasWrap { flex: 1; position: relative; min-height: 0; }
-      canvas#view { position: absolute; inset: 0; width: 100%; height: 100%; cursor: grab; }
-      canvas#view.dragging { cursor: grabbing; }
-      #energyWrap { flex: none; height: 130px; border-top: 1px solid #e2e8f0; background: #fff; position: relative; }
-      canvas#energy { position: absolute; inset: 0; width: 100%; height: 100%; }
-      #energyWrap .cap { position: absolute; top: 4px; left: 8px; font-size: 11px; color: #94a3b8; pointer-events: none; }
-    </style>
-  </head>
-  <body>
-    <div id="panel">
-      <h1>fishgraph 交互 demo</h1>
-      <p class="hint">拖动节点观察力场响应；滚轮缩放、空白处平移。所有力 = −∇E，能量单调不增。</p>
-
-      <fieldset>
-        <legend>示例图</legend>
-        <select id="graph">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>fishgraph · 纯网格布局</title>
+  <style>
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; display: flex; height: 100vh; font-family: system-ui, 'PingFang SC', sans-serif;
+      color: #0f172a; background: #f8fafc;
+    }
+    aside {
+      width: 280px; padding: 14px; overflow-y: auto; border-right: 1px solid #e2e8f0; background: #ffffff;
+    }
+    h1 { font-size: 16px; margin: 4px 0 10px; }
+    fieldset { border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 12px; padding: 8px 10px; }
+    legend { font-size: 12px; color: #64748b; padding: 0 4px; }
+    label.row { display: flex; align-items: center; gap: 8px; font-size: 12px; margin: 6px 0; }
+    label.row .name { width: 96px; color: #334155; }
+    label.row input[type='range'] { flex: 1; }
+    output { width: 34px; text-align: right; font-variant-numeric: tabular-nums; color: #0f172a; }
+    select, button {
+      font-size: 12px; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc;
+    }
+    button { cursor: pointer; margin-right: 6px; }
+    button:hover { background: #e2e8f0; }
+    main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+    #view { flex: 1; width: 100%; cursor: grab; touch-action: none; }
+    #status { padding: 6px 12px; font-size: 12px; color: #64748b; border-top: 1px solid #e2e8f0; white-space: pre-line; }
+  </style>
+</head>
+<body>
+  <aside>
+    <h1>fishgraph · 纯网格布局</h1>
+    <fieldset>
+      <legend>示例图</legend>
+      <label class="row"><span class="name">图</span>
+        <select id="graph" style="flex:1">
           <option value="tree">树（21 节点）</option>
           <option value="grid">网格 5×5</option>
           <option value="star">星形（1+12）</option>
           <option value="mixed">成群组+离散点</option>
           <option value="random">随机图（80 节点）</option>
           <option value="shapes">形状+边文字</option>
-          <option value="groups">分组（子图+隐藏组）</option>
+          <option value="flow">有向流程图</option>
+          <option value="groups">分组（子图）</option>
           <option value="mermaidSub">架构图（4 层 subgraph）</option>
         </select>
-      </fieldset>
+      </label>
+      <label class="row"><span class="name">流动方向</span>
+        <select id="direction" style="flex:1">
+          <option value="none" selected>无向（波纹放置）</option>
+          <option value="TB">自顶向下 TB</option>
+          <option value="LR">自左向右 LR</option>
+        </select>
+      </label>
+    </fieldset>
 
-      <fieldset>
-        <legend>物理参数</legend>
-        <label class="row"><span class="name">自然边长 L（格）</span><input id="L" type="range" min="2" max="16" step="1" value="6" /><output id="Lv"></output></label>
-        <label class="row"><span class="name">边-节点斥力</span><input id="en" type="range" min="0" max="40" step="1" value="3" /><output id="env"></output></label>
-        <label class="row"><span class="name">弱引力系数</span><input id="wg" type="range" min="1" max="30" value="20" /><output id="wgv"></output></label>
-        <label class="row"><span class="name">弹力刚度</span><input id="kt" type="range" min="0" max="50" step="1" value="10" /><output id="ktv"></output></label>
-        <label class="row"><span class="name">交叉收缩</span><input id="cs" type="range" min="0" max="60" value="15" /><output id="csv"></output></label>
-        <label class="row"><span class="name">跳数衰减</span><input id="hd" type="range" min="0" max="90" value="50" /><output id="hdv"></output></label>
-        <label class="row"><span class="name">线间角向斥力</span><input id="ab" type="range" min="0" max="30" step="1" value="0" /><output id="abv"></output></label>
-        <label class="row"><span class="name">边文字避让</span><input id="lc" type="checkbox" checked /></label>
-        <label class="row"><span class="name">网格尺寸（格，0=跟随 L）</span><input id="gs" type="range" min="0" max="20" step="1" value="0" /><output id="gsv"></output></label>
-      </fieldset>
+    <fieldset>
+      <legend>网格参数</legend>
+      <label class="row"><span class="name">自然边长 L（格）</span><input id="L" type="range" min="2" max="16" step="1" value="6" /><output id="Lv"></output></label>
+      <label class="row"><span class="name">走线通道宽（格）</span><input id="cm" type="range" min="0" max="4" step="1" value="1" /><output id="cmv"></output></label>
+      <label class="row"><span class="name">边文字占位</span><input id="lc" type="checkbox" checked /></label>
+    </fieldset>
 
-      <fieldset>
-        <legend>求解</legend>
-        <label class="row"><span class="name">布局算法</span>
-          <select id="algorithm"><option value="force-undirected" selected>力导向无向图</option><option value="force-directed">力导向有向图</option><option value="group-undirected">分组无向图</option><option value="grid-undirected">网格无向图</option><option value="circle">环形</option></select>
-        </label>
-        <label class="row"><span class="name">流动方向</span>
-          <select id="direction"><option value="TB" selected>自顶向下 TB</option><option value="LR">自左向右 LR</option></select>
-        </label>
-        <label class="row"><span class="name">弱引力模式</span>
-          <select id="gravity"><option value="pairwise">pairwise</option><option value="centroid">centroid</option></select>
-        </label>
-        <label class="row"><span class="name">精度</span>
-          <select id="accuracy"><option value="exact">exact</option><option value="barnes-hut">barnes-hut</option></select>
-        </label>
-      </fieldset>
-
-      <div class="btnrow">
-        <button id="restart" class="primary">重新布局</button>
-        <button id="pause">暂停</button>
-        <button id="fitView">适应视图</button>
-      </div>
-      <div id="status"></div>
-    </div>
-    <div id="stage">
-      <div id="canvasWrap"><canvas id="view"></canvas></div>
-      <div id="energyWrap">
-        <span class="cap">能量曲线（每接受一步一个样本，纵轴自适应）</span>
-        <canvas id="energy"></canvas>
-      </div>
-    </div>
-    <script type="module" src="./main.ts"></script>
-  </body>
+    <fieldset>
+      <legend>视图</legend>
+      <button id="restart">重新布局</button>
+      <button id="fitView">适应视图</button>
+    </fieldset>
+  </aside>
+  <main>
+    <canvas id="view"></canvas>
+    <div id="status"></div>
+  </main>
+  <script type="module" src="./main.ts"></script>
+</body>
 </html>

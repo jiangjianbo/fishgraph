@@ -4,22 +4,19 @@
  * 覆盖角度：
  *  1. 注册表：内置策略自注册、未知策略报错并列出可用项
  *  2. 以 algorithm 选项选用非默认策略（circle：无迭代、立即收敛、环形构型）
- *  3. setStrategy 运行时热切换：图数据保留，位置由新策略重新初始化，
- *     切回力导向后仍能弛豫到合法布局
- *  4. 节点/边管理（GraphStore 透传）：增删节点/边后策略 rebuild，布局仍收敛
+ *  3. setStrategy 运行时热切换：图数据保留，重新布局
+ *  4. 节点/边管理（GraphStore 透传）：增删节点/边后策略 rebuild，布局仍合法
  */
 
 import { describe, expect, it } from 'vitest';
-import { minSurfaceGap } from './helpers.js';
 import { ForceLayout, listStrategies } from '../src/index.js';
 
 describe('布局策略（策略模式）', () => {
   it('注册表：内置策略已自注册；未知策略抛错并提示可用项', () => {
-    expect(listStrategies()).toContain('force-undirected');
-    expect(listStrategies()).toContain('force-directed');
+    expect(listStrategies()).toContain('grid-undirected');
     expect(listStrategies()).toContain('circle');
     expect(() => new ForceLayout({ nodes: [{ id: 1 }], edges: [] }, { algorithm: 'nope' })).toThrow(
-      /nope.*force-undirected/s,
+      /nope.*grid-undirected/s,
     );
   });
 
@@ -48,10 +45,9 @@ describe('布局策略（策略模式）', () => {
         nodes: Array.from({ length: 8 }, (_, i) => ({ id: i })),
         edges: Array.from({ length: 7 }, (_, i) => ({ source: i, target: i + 1 })),
       },
-      { naturalLength: 100, accuracy: 'exact', seed: 3 },
+      { naturalLength: 6, seed: 3 },
     );
-    const r0 = layout.run({ maxIterations: 2000 });
-    expect(r0.converged).toBe(true);
+    layout.run();
     expect(layout.edgeViews.length).toBe(7); // 切换不丢图数据
 
     layout.setStrategy('circle');
@@ -60,25 +56,36 @@ describe('布局策略（策略模式）', () => {
       expect(Number.isFinite(p.x)).toBe(true);
       expect(Number.isFinite(p.y)).toBe(true);
     }
-    expect(minSurfaceGap(layout)).toBeGreaterThan(0.1);
 
-    layout.setStrategy('force-undirected');
-    const r1 = layout.run({ maxIterations: 3000 });
-    expect(r1.converged).toBe(true);
-    expect(minSurfaceGap(layout)).toBeGreaterThan(0.1);
+    layout.setStrategy('grid-undirected');
+    layout.run();
+    // 网格布局物化为 AABB（w/h），用实占矩形口径断言无重叠
+    const boxes = layout.nodeViews.map((nd) => ({
+      x: nd.x - nd.w! / 2,
+      y: nd.y - nd.h! / 2,
+      w: nd.w!,
+      h: nd.h!,
+    }));
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i]!;
+        const b = boxes[j]!;
+        const overlap = a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+        expect(overlap, `节点 ${i} 与 ${j} 的物化 AABB 重叠`).toBe(false);
+      }
+    }
   });
 
   it('节点/边管理：增删后策略自动 rebuild，布局仍收敛、视图一致', () => {
     const layout = new ForceLayout(
       { nodes: [{ id: 'a' }, { id: 'b' }], edges: [{ source: 'a', target: 'b' }] },
-      { naturalLength: 100, accuracy: 'exact', seed: 1 },
+      { naturalLength: 6, seed: 1 },
     );
     layout.addNode({ id: 'c' });
     layout.addEdge({ source: 'b', target: 'c' });
     expect(layout.nodeViews.length).toBe(3);
     expect(layout.edgeViews.length).toBe(2);
-    const r = layout.run({ maxIterations: 3000 });
-    expect(r.converged).toBe(true);
+    layout.run();
     for (const p of layout.positions.values()) {
       expect(Number.isFinite(p.x)).toBe(true);
       expect(Number.isFinite(p.y)).toBe(true);

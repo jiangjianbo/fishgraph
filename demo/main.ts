@@ -1,5 +1,5 @@
-import { ForceLayout, estimateLabelBox, halfExtentsOf, rayShapeExit, shapeContains } from '../src/index.js';
-import type { GraphSpec, LayoutOptions, NodeId, ShapeSpec, SubgraphView } from '../src/index.js';
+import { ForceLayout, estimateLabelBox, halfExtentsOf, rayShapeExit } from '../src/index.js';
+import type { GraphSpec, ShapeSpec, SubgraphView } from '../src/index.js';
 
 // ── 示例图 ────────────────────────────────────────────────
 
@@ -8,7 +8,7 @@ function mulberry32(seed: number): () => number {
   return () => {
     a = (a + 0x6d2b79f5) | 0;
     let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    t = (t + 0x6d2b79f5) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
@@ -39,7 +39,7 @@ function gridGraph(): GraphSpec {
   const edges: GraphSpec['edges'] = [];
   for (let y = 0; y < n; y++) {
     for (let x = 0; x < n; x++) {
-      nodes.push({ id: `${x},${y}`, label: `${x},${y}` });
+      nodes.push({ id: `${x},${y}` });
       if (x + 1 < n) edges.push({ source: `${x},${y}`, target: `${x + 1},${y}` });
       if (y + 1 < n) edges.push({ source: `${x},${y}`, target: `${x},${y + 1}` });
     }
@@ -113,6 +113,28 @@ function shapesGraph(): GraphSpec {
   };
 }
 
+function flowGraph(): GraphSpec {
+  // 有向流程图（direction=TB/LR 时展示层级布局）
+  return {
+    nodes: [
+      { id: 'start', label: '开始' },
+      { id: 'input', label: '读取输入' },
+      { id: 'check', label: '校验' },
+      { id: 'work', label: '处理' },
+      { id: 'retry', label: '重试' },
+      { id: 'done', label: '完成' },
+    ],
+    edges: [
+      { source: 'start', target: 'input' },
+      { source: 'input', target: 'check' },
+      { source: 'check', target: 'work' },
+      { source: 'work', target: 'done' },
+      { source: 'check', target: 'retry', label: '失败' },
+      { source: 'retry', target: 'work' },
+    ],
+  };
+}
+
 function groupsGraph(): GraphSpec {
   return {
     nodes: [
@@ -136,9 +158,6 @@ function groupsGraph(): GraphSpec {
     ],
     subgraphs: [
       { id: 'sub', shape: { kind: 'rect', w: 380, h: 280 }, label: '子图', members: ['in-a', 'in-b', 'in-c'] },
-    ],
-    hiddenGroups: [
-      { id: 'hidden', members: ['chain-1', 'chain-2', 'chain-3'] },
     ],
   };
 }
@@ -202,6 +221,7 @@ const GRAPHS: Record<string, () => GraphSpec> = {
   mixed: mixedGraph,
   random: randomGraph,
   shapes: shapesGraph,
+  flow: flowGraph,
   groups: groupsGraph,
   mermaidSub: mermaidSubgraphGraph,
 };
@@ -210,88 +230,74 @@ const GRAPHS: Record<string, () => GraphSpec> = {
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 const viewCanvas = $<HTMLCanvasElement>('view');
-const energyCanvas = $<HTMLCanvasElement>('energy');
 const statusEl = $('status');
 const graphSel = $<HTMLSelectElement>('graph');
-const algorithmSel = $<HTMLSelectElement>('algorithm');
 const directionSel = $<HTMLSelectElement>('direction');
-const gravitySel = $<HTMLSelectElement>('gravity');
-const accuracySel = $<HTMLSelectElement>('accuracy');
 const sliders = {
   L: $<HTMLInputElement>('L'),
-  en: $<HTMLInputElement>('en'),
-  wg: $<HTMLInputElement>('wg'),
-  kt: $<HTMLInputElement>('kt'),
-  cs: $<HTMLInputElement>('cs'),
-  hd: $<HTMLInputElement>('hd'),
-  ab: $<HTMLInputElement>('ab'),
+  cm: $<HTMLInputElement>('cm'),
 };
 const outs = {
   L: $<HTMLOutputElement>('Lv'),
-  en: $<HTMLOutputElement>('env'),
-  wg: $<HTMLOutputElement>('wgv'),
-  kt: $<HTMLOutputElement>('ktv'),
-  cs: $<HTMLOutputElement>('csv'),
-  hd: $<HTMLOutputElement>('hdv'),
-  ab: $<HTMLOutputElement>('abv'),
+  cm: $<HTMLOutputElement>('cmv'),
 };
 const labelCollision = $<HTMLInputElement>('lc');
-const gsSlider = $<HTMLInputElement>('gs');
-const gsOut = $<HTMLOutputElement>('gsv');
 
-function optionsFromUi(): LayoutOptions {
+function buildOptions() {
   return {
-    algorithm: algorithmSel.value,
-    direction: directionSel.value as LayoutOptions['direction'],
+    algorithm: 'grid-undirected' as const,
+    direction: directionSel.value as 'none' | 'TB' | 'LR',
     naturalLength: Number(sliders.L.value),
-    edgeNodeRepulsion: Number(sliders.en.value),
-    weakGravityRatio: Number(sliders.wg.value) / 100,
-    edgeTension: Number(sliders.kt.value) / 10,
-    crossingShrink: Number(sliders.cs.value) / 100,
-    hopRepulsionDecay: Number(sliders.hd.value) / 100,
-    angleBalance: Number(sliders.ab.value) / 10,
-    gridSize: Number(gsSlider.value),
+    channelMargin: Number(sliders.cm.value),
     labelCollision: labelCollision.checked,
-    gravity: gravitySel.value as LayoutOptions['gravity'],
-    accuracy: accuracySel.value as LayoutOptions['accuracy'],
     seed: 42,
   };
 }
 
 function syncOutputs(): void {
   outs.L.value = sliders.L.value;
-  outs.en.value = sliders.en.value;
-  outs.wg.value = `${(Number(sliders.wg.value) / 100).toFixed(2)}`;
-  outs.kt.value = (Number(sliders.kt.value) / 10).toFixed(1);
-  outs.cs.value = (Number(sliders.cs.value) / 100).toFixed(2);
-  outs.hd.value = (Number(sliders.hd.value) / 100).toFixed(2);
-  outs.ab.value = (Number(sliders.ab.value) / 10).toFixed(1);
-  gsOut.value = gsSlider.value;
+  outs.cm.value = sliders.cm.value;
 }
 
-// ── 布局实例与动画状态 ────────────────────────────────────
+// ── 布局实例 ──────────────────────────────────────────────
 
 let layout: ForceLayout | null = null;
-let converged = false;
-let paused = false;
-let iterations = 0;
-/** 布局（重）开始后待执行的视图适配标记：收敛时 fit 一次后清除，
- *  用户交互（拖拽/缩放）引发的再收敛不重复触发。 */
-let needFit = false;
 
 function rebuild(): void {
-  layout = new ForceLayout(GRAPHS[graphSel.value](), optionsFromUi());
-  converged = false;
-  iterations = 0;
-  needFit = true;
-  cam.x = 0;
-  cam.y = 0;
-  cam.k = 1;
-  // 粗布局在构造期已完成，坐标可用：立即适配一次，弛豫收敛后再精调一次
+  layout = new ForceLayout(GRAPHS[graphSel.value](), buildOptions());
+  layout.run();
   fitToView();
+  drawView();
+  const nv = layout.nodeViews.length;
+  const ev = layout.edgeViews.length;
+  statusEl.textContent = `${nv} 节点 · ${ev} 边 · 纯网格布局（确定性，构造期完成）`;
 }
 
-// ── 视图变换（world ↔ screen）─────────────────────────────
+for (const el of [...Object.values(sliders), labelCollision]) {
+  el.addEventListener('input', () => {
+    syncOutputs();
+    if (!layout) return;
+    layout.updateOptions(buildOptions());
+    layout.run();
+    fitToView();
+    drawView();
+    statusEl.textContent = `${layout.nodeViews.length} 节点 · ${layout.edgeViews.length} 边 · 纯网格布局（确定性，构造期完成）`;
+  });
+}
+graphSel.addEventListener('change', rebuild);
+directionSel.addEventListener('change', () => {
+  layout?.updateOptions(buildOptions());
+  layout?.run();
+  fitToView();
+  drawView();
+});
+$('restart').addEventListener('click', rebuild);
+$('fitView').addEventListener('click', () => {
+  fitToView();
+  drawView();
+});
+
+// ── 视图变换（world ↔ screen）：平移 + 缩放 ───────────────
 
 const cam = { x: 0, y: 0, k: 1 };
 
@@ -302,12 +308,7 @@ function screenToWorld(sx: number, sy: number): [number, number] {
   return [(sx - viewCanvas.clientWidth / 2) / cam.k + cam.x, (sy - viewCanvas.clientHeight / 2) / cam.k + cam.y];
 }
 
-/**
- * 视图适配（fit-to-view）：把布局包围盒平移缩放到画布中央。包围盒口径 =
- * 节点实占（物化 w/h，无则包围圆 r）∪ subgraph 容器形状，四周留 40px；
- * 缩放钳制在与滚轮一致的 [0.1, 2]。重建与算法切换时自动触发（收敛时
- * 再精调一次），也可用"适应视图"按钮手动触发。
- */
+/** 视图适配：把布局包围盒平移缩放到画布中央（四周留 40px）。 */
 function fitToView(): void {
   if (!layout) return;
   let x0 = Infinity;
@@ -329,12 +330,12 @@ function fitToView(): void {
     y0 = Math.min(y0, sg.y - he.hh);
     y1 = Math.max(y1, sg.y + he.hh);
   }
-  if (!Number.isFinite(x0)) return; // 空图无可适配
+  if (!Number.isFinite(x0)) return;
   const pad = 40;
   const k = Math.min(
     2,
     Math.max(
-      0.1,
+      0.05,
       Math.min(
         (viewCanvas.clientWidth - pad * 2) / (x1 - x0),
         (viewCanvas.clientHeight - pad * 2) / (y1 - y0),
@@ -346,13 +347,9 @@ function fitToView(): void {
   cam.y = (y0 + y1) / 2;
 }
 
-// ── 交互：拖节点 / 拖容器 / 平移 / 缩放 ────────────────────
+// ── 交互：平移 / 缩放 ─────────────────────────────────────
 
-type Drag =
-  | { kind: 'node'; id: NodeId }
-  | { kind: 'subgraph'; id: NodeId; members: NodeId[]; lastX: number; lastY: number }
-  | { kind: 'pan'; sx: number; sy: number; camX: number; camY: number }
-  | null;
+type Drag = { kind: 'pan'; sx: number; sy: number; camX: number; camY: number } | null;
 let drag: Drag = null;
 
 function eventPos(ev: MouseEvent): [number, number] {
@@ -360,10 +357,35 @@ function eventPos(ev: MouseEvent): [number, number] {
   return [ev.clientX - rect.left, ev.clientY - rect.top];
 }
 
-/** 点是否落在容器形状内（dx/dy 为相对容器中心的偏移；几何口径统一走 geometry）。 */
-function pointInSubgraph(v: SubgraphView, dx: number, dy: number): boolean {
-  return shapeContains(v.shape, 0, 0, dx, dy);
-}
+viewCanvas.addEventListener('pointerdown', (ev) => {
+  const [sx, sy] = eventPos(ev);
+  drag = { kind: 'pan', sx, sy, camX: cam.x, camY: cam.y };
+  viewCanvas.setPointerCapture(ev.pointerId);
+});
+
+viewCanvas.addEventListener('pointermove', (ev) => {
+  if (!drag) return;
+  const [sx, sy] = eventPos(ev);
+  cam.x = drag.camX - (sx - drag.sx) / cam.k;
+  cam.y = drag.camY - (sy - drag.sy) / cam.k;
+  drawView();
+});
+
+viewCanvas.addEventListener('pointerup', () => {
+  drag = null;
+});
+
+viewCanvas.addEventListener('wheel', (ev) => {
+  ev.preventDefault();
+  const [sx, sy] = eventPos(ev);
+  const [wx, wy] = screenToWorld(sx, sy);
+  cam.k = Math.min(8, Math.max(0.05, cam.k * Math.pow(1.0015, -ev.deltaY)));
+  cam.x = wx - (sx - viewCanvas.clientWidth / 2) / cam.k;
+  cam.y = wy - (sy - viewCanvas.clientHeight / 2) / cam.k;
+  drawView();
+});
+
+// ── 绘制 ──────────────────────────────────────────────────
 
 /** 按形状声明描出轮廓路径（画布特化；尺寸 = 声明尺寸 × 相机缩放）。 */
 function shapePath(
@@ -383,132 +405,7 @@ function shapePath(
   }
 }
 
-viewCanvas.addEventListener('pointerdown', (ev) => {
-  if (!layout) return;
-  const [sx, sy] = eventPos(ev);
-  const [wx, wy] = screenToWorld(sx, sy);
-  let hit: NodeId | null = null;
-  let bestDist = Infinity;
-  for (const nd of layout.nodeViews) {
-    const d = Math.hypot(nd.x - wx, nd.y - wy);
-    if (d <= Math.max(nd.r, 14 / cam.k) && d < bestDist) {
-      bestDist = d;
-      hit = nd.id;
-    }
-  }
-  if (hit !== null) {
-    drag = { kind: 'node', id: hit };
-    layout.fix(hit);
-    viewCanvas.classList.add('dragging');
-  } else {
-    // 容器命中：嵌套时取最深的容器（视觉上在最上层）
-    const views = layout.subgraphViews;
-    if (views.length > 0) {
-      const depth = subgraphDepthMap(views);
-      let best: SubgraphView | null = null;
-      let bestDepth = -1;
-      for (const v of views) {
-        if (!pointInSubgraph(v, wx - v.x, wy - v.y)) continue;
-        const d = depth.get(String(v.id)) ?? 0;
-        if (d > bestDepth) {
-          bestDepth = d;
-          best = v;
-        }
-      }
-      if (best) {
-        const members: NodeId[] = [best.id, ...layout.subgraphMemberIds(best.id)];
-        drag = { kind: 'subgraph', id: best.id, members, lastX: wx, lastY: wy };
-        for (const m of members) layout.fix(m);
-        viewCanvas.classList.add('dragging');
-      }
-    }
-  }
-  if (!drag) drag = { kind: 'pan', sx, sy, camX: cam.x, camY: cam.y };
-  viewCanvas.setPointerCapture(ev.pointerId);
-});
-
-viewCanvas.addEventListener('pointermove', (ev) => {
-  if (!drag || !layout) return;
-  const [sx, sy] = eventPos(ev);
-  if (drag.kind === 'node') {
-    const [wx, wy] = screenToWorld(sx, sy);
-    const p = layout.clampToContainer(drag.id, wx, wy);
-    layout.setNodePosition(drag.id, p.x, p.y);
-    layout.fix(drag.id, p.x, p.y);
-    converged = false; // 拖拽持续弛豫，实时看力场响应
-  } else if (drag.kind === 'subgraph') {
-    const [wx, wy] = screenToWorld(sx, sy);
-    const dx = wx - drag.lastX;
-    const dy = wy - drag.lastY;
-    drag.lastX = wx;
-    drag.lastY = wy;
-    // 容器带动全部成员（含嵌套）刚性平移，连线随端点走
-    const pos = layout.positions;
-    for (const m of drag.members) {
-      const cur = pos.get(m);
-      if (!cur) continue;
-      layout.setNodePosition(m, cur.x + dx, cur.y + dy);
-      layout.fix(m, cur.x + dx, cur.y + dy);
-    }
-    converged = false;
-  } else {
-    cam.x = drag.camX - (sx - drag.sx) / cam.k;
-    cam.y = drag.camY - (sy - drag.sy) / cam.k;
-  }
-});
-
-viewCanvas.addEventListener('pointerup', () => {
-  if (layout && drag?.kind === 'node') layout.unfix(drag.id);
-  if (layout && drag?.kind === 'subgraph') {
-    for (const m of drag.members) layout.unfix(m);
-  }
-  drag = null;
-  viewCanvas.classList.remove('dragging');
-});
-
-viewCanvas.addEventListener('wheel', (ev) => {
-  ev.preventDefault();
-  const [sx, sy] = eventPos(ev);
-  const [wx, wy] = screenToWorld(sx, sy);
-  cam.k = Math.min(8, Math.max(0.1, cam.k * Math.pow(1.0015, -ev.deltaY)));
-  // 保持鼠标下的世界坐标不动
-  cam.x = wx - (sx - viewCanvas.clientWidth / 2) / cam.k;
-  cam.y = wy - (sy - viewCanvas.clientHeight / 2) / cam.k;
-});
-
-// 参数滑条：实时换参数继续弛豫
-for (const el of [...Object.values(sliders), labelCollision, gsSlider]) {
-  el.addEventListener('input', () => {
-    syncOutputs();
-    layout?.updateOptions(optionsFromUi());
-    converged = false;
-  });
-}
-graphSel.addEventListener('change', () => rebuild()); // 切换图需要整体重建布局实例
-for (const el of [algorithmSel, directionSel, gravitySel, accuracySel]) {
-  el.addEventListener('change', () => {
-    layout?.updateOptions(optionsFromUi());
-    converged = false;
-    // 换算法/方向会整体重排（新策略或 rebuild），坐标全部失效：立即适配
-    // 新布局，收敛后再由 needFit 精调一次
-    needFit = true;
-    fitToView();
-  });
-}
-$('restart').addEventListener('click', rebuild);
-$('fitView').addEventListener('click', fitToView);
-$('pause').addEventListener('click', () => {
-  paused = !paused;
-  $('pause').textContent = paused ? '继续' : '暂停';
-});
-
-// ── 绘制 ──────────────────────────────────────────────────
-
-/**
- * 容器嵌套深度表：children 引用其它容器 id 视为嵌套，深度 = 1 +
- * 最深子容器深度（子为物理节点计 0）。供绘制排序使用——深度浅的
- * 容器先画（更靠底层），内层容器框才不会被外层填充盖住。
- */
+/** 容器嵌套深度表（绘制排序：浅的先画、在底层）。 */
 function subgraphDepthMap(views: readonly SubgraphView[]): Map<string, number> {
   const byId = new Map(views.map((v) => [String(v.id), v] as const));
   const depth = new Map<string, number>();
@@ -516,7 +413,7 @@ function subgraphDepthMap(views: readonly SubgraphView[]): Map<string, number> {
     const cached = depth.get(id);
     if (cached !== undefined) return cached;
     const v = byId.get(id);
-    if (!v || path.has(id)) return 0; // path 防环（store 构造已拒绝环，双保险）
+    if (!v || path.has(id)) return 0;
     path.add(id);
     let d = 0;
     for (const c of v.children) {
@@ -551,13 +448,9 @@ function drawView(): void {
   g.clearRect(0, 0, viewCanvas.clientWidth, viewCanvas.clientHeight);
   if (!layout) return;
 
-  // 淡色网格背景（吸附参考线）：格点相位已退役，节点吸附在格点
-  // g·lattice 上，格线穿过节点中心。间距读布局实际使用的格距
-  // （自适应后可能与滑杆值不同），未修正时回退滑杆格数 × 比例尺。
+  // 淡色网格背景：格线 = 粗布局格胞（L × 比例尺），与节点格位对齐。
   {
-    const gsCells = Number(gsSlider.value);
-    const lattice =
-      layout.gridLattice ?? (gsCells > 0 ? gsCells : 6) * layout.cellScale;
+    const lattice = Number(sliders.L.value) * layout.cellScale;
     const [wx0, wy0] = screenToWorld(0, 0);
     const [wx1, wy1] = screenToWorld(viewCanvas.clientWidth, viewCanvas.clientHeight);
     const startX = Math.floor(wx0 / lattice) * lattice;
@@ -579,15 +472,9 @@ function drawView(): void {
   }
 
   const nv = layout.nodeViews;
-  // 边端点下标基于 elements 数组（物理节点在前、subgraph 容器按声明序
-  // 追加在后）：以容器 id 为端点的边在 nodeViews（仅物理节点）中越界，
-  // 需要拼上容器视图才能解析端点坐标。
   const edgeEnds = [...nv, ...layout.subgraphViews];
 
-  // 背景层 0：subgraph 容器 —— z-order 硬约束：容器是画面最底层，
-  // 必须先于所有连线与节点绘制，不得遮掩任何节点和连线（连线与节点
-  // 在后续层统一绘制，永远位于容器之上）；嵌套容器按深度升序绘制
-  // （外层先画、内层后画），保证内层容器框不被外层填充盖住。
+  // 背景层 0：subgraph 容器（嵌套按深度升序绘制）
   const hubDepth = subgraphDepthMap(layout.subgraphViews);
   const hubs = [...layout.subgraphViews].sort(
     (a, b) => (hubDepth.get(String(a.id)) ?? 0) - (hubDepth.get(String(b.id)) ?? 0),
@@ -614,28 +501,22 @@ function drawView(): void {
     }
   }
 
-
-  // 边：优先按走线拐点画折线（grid-undirected 的 A* 正交走线），
-  // 无 waypoints 时退化为直线；两端按各自真实形状贴合求交（圆/矩形/
-  // 椭圆轮廓的精确出射点），末端画箭头；标签画在折线路径长度中点
+  // 边：按走线拐点画折线（A* 正交走线）；两端按真实形状贴合，末端箭头；
+  // 标签画在折线路径长度中点
   for (const e of layout.edgeViews) {
     const a = edgeEnds[e.sourceIndex];
     const b = edgeEnds[e.targetIndex];
-    // 走线点序列（含首末中心）；无 waypoints（连续布局）时即直线两端
     const wps = e.waypoints && e.waypoints.length >= 2 ? e.waypoints : [a, b];
-    // 首段方向：从 a 中心贴形状出射
     const d0 = Math.hypot(wps[1]!.x - a.x, wps[1]!.y - a.y) || 1;
     const u0x = (wps[1]!.x - a.x) / d0;
     const u0y = (wps[1]!.y - a.y) / d0;
     const t0 = rayShapeExit(a.shape, u0x, u0y);
-    // 末段方向：贴 b 形状入射；末端回退量 = 形状出射距离 + 3px 箭头余量
     const last = wps[wps.length - 2]!;
     const d1 = Math.hypot(b.x - last.x, b.y - last.y) || 1;
     const u1x = (b.x - last.x) / d1;
     const u1y = (b.y - last.y) / d1;
     const t1 = rayShapeExit(b.shape, -u1x, -u1y) + 3;
     const isLine = wps.length === 2;
-    // 直线时两端贴合点交叠（贴邻节点）则无可画长度
     if (isLine && d1 - t1 <= t0) continue;
     const pts = [
       { x: a.x + u0x * t0, y: a.y + u0y * t0 },
@@ -648,7 +529,6 @@ function drawView(): void {
     g.beginPath();
     scr.forEach(([sx, sy], i) => (i === 0 ? g.moveTo(sx, sy) : g.lineTo(sx, sy)));
     g.stroke();
-    // 箭头按末段方向
     const [sx1, sy1] = scr[scr.length - 1]!;
     const ang = Math.atan2(sy1 - scr[scr.length - 2]![1], sx1 - scr[scr.length - 2]![0]);
     g.fillStyle = '#64748b';
@@ -660,8 +540,6 @@ function drawView(): void {
     g.fill();
 
     if (e.label !== null && e.label !== '') {
-      // 路径长度中点：累计折线段长取一半，定位标签（正交走线时落在
-      // 中间走廊段上，不压节点）
       let total = 0;
       for (let i = 1; i < pts.length; i++) {
         total += Math.hypot(pts[i]!.x - pts[i - 1]!.x, pts[i]!.y - pts[i - 1]!.y);
@@ -696,9 +574,7 @@ function drawView(): void {
     }
   }
 
-  // 节点层：普通节点（subgraph 容器已在背景层绘制）。
-  // grid-undirected 物化节点（nd.w/nd.h 存在）按实占 AABB 矩形画，
-  // 其余按声明形状画。
+  // 节点层：物化节点（nd.w/h 存在）按实占 AABB 矩形画，其余按声明形状
   for (const nd of nv) {
     const [sx, sy] = worldToScreen(nd.x, nd.y);
     const sh = nd.shape;
@@ -711,10 +587,9 @@ function drawView(): void {
     } else {
       const he = halfExtentsOf(sh);
       shapePath(g, sh, sx, sy, cam.k, Math.min(8, (he.hh * 2 * cam.k) / 4));
-      // subgraph（大矩形）的标签画在矩形顶部内侧，不遮挡内部成员
       if (sh.kind === 'rect' && sh.w >= 200) labelTopOffset = sh.h / 2 - 10;
     }
-    g.fillStyle = nd.fixed ? '#fef9c3' : '#e0f2fe';
+    g.fillStyle = '#e0f2fe';
     g.fill();
     g.strokeStyle = '#0284c7';
     g.lineWidth = 1.5;
@@ -729,72 +604,5 @@ function drawView(): void {
   }
 }
 
-function drawEnergy(): void {
-  fitCanvas(energyCanvas);
-  const dpr = window.devicePixelRatio || 1;
-  const g = energyCanvas.getContext('2d')!;
-  g.setTransform(dpr, 0, 0, dpr, 0, 0);
-  g.clearRect(0, 0, energyCanvas.clientWidth, energyCanvas.clientHeight);
-  const hist = layout?.energyHistory ?? [];
-  if (hist.length < 2) return;
-  const w = energyCanvas.clientWidth;
-  const h = energyCanvas.clientHeight;
-  // 对数尺度（能量恒正时），负值段画 0 线以下
-  const samples = hist.filter((_, i) => i % Math.max(1, Math.floor(hist.length / 2400)) === 0);
-  let lo = Infinity;
-  let hi = -Infinity;
-  for (const e of samples) {
-    if (e < lo) lo = e;
-    if (e > hi) hi = e;
-  }
-  if (hi - lo < 1e-12) {
-    hi = lo + 1;
-  }
-  g.strokeStyle = '#0ea5e9';
-  g.lineWidth = 1.25;
-  g.beginPath();
-  samples.forEach((e, i) => {
-    const x = (i / (samples.length - 1)) * (w - 16) + 8;
-    const y = h - 8 - ((e - lo) / (hi - lo)) * (h - 28);
-    if (i === 0) g.moveTo(x, y);
-    else g.lineTo(x, y);
-  });
-  g.stroke();
-  g.fillStyle = '#94a3b8';
-  g.font = '10px system-ui';
-  g.textAlign = 'left';
-  g.textBaseline = 'top';
-  g.fillText(`E ∈ [${lo.toFixed(1)}, ${hi.toFixed(1)}]`, 8, 14);
-}
-
-// ── 主循环 ────────────────────────────────────────────────
-
-const STEPS_PER_FRAME = 3;
-
-function frame(): void {
-  if (layout && !paused && !converged) {
-    for (let i = 0; i < STEPS_PER_FRAME; i++) {
-      if (!layout.step()) break;
-      iterations++;
-    }
-    if (layout.converged) converged = true;
-  }
-  // 布局收敛后的视图适配（重建/换算法置位，fit 一次即清除）
-  if (converged && needFit) {
-    needFit = false;
-    fitToView();
-  }
-  drawView();
-  drawEnergy();
-  const nv = layout?.nodeViews.length ?? 0;
-  const ev = layout?.edgeViews.length ?? 0;
-  const e = layout ? layout.energy : null;
-  statusEl.textContent =
-    `${nv} 节点 · ${ev} 边\n迭代 ${iterations} · ${converged ? '已收敛 ✓' : paused ? '已暂停' : '弛豫中…'}` +
-    (e !== null ? `\n能量 ${e.toExponential(3)}` : '');
-  requestAnimationFrame(frame);
-}
-
 syncOutputs();
 rebuild();
-requestAnimationFrame(frame);

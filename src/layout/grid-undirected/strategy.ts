@@ -1,34 +1,38 @@
 /**
- * GridUndirectedStrategy —— grid-first 无向图布局策略（纯网格流水线）。
+ * GridUndirectedStrategy —— grid-first 网格布局策略（纯网格流水线，唯一
+ * 主引擎）。
  *
  * 按 doc/布局核心原则.md 的「纯网格布局算法流程」组织，全程在离散网格
  * 中运行（连续坐标只是网格解的物理化表达）：
  *   [质点拓扑粗布局] → [节点中心对称膨胀物化为 AABB] → [通道约束压实] →
  *   [网格 A* 避障走线]
- *  - 阶段 1 复用 coarse.ts 的质点网格放置（度数优先连通生长 + 死锁插行列）；
+ *  - 阶段 1 用 coarse.ts 的质点网格放置（波纹连通生长 + 死锁插行列）。
+ *    direction = 'none'（默认）用无向放置美学（张力 − 环周长 + 环内方位
+ *    分类 + 扫描序平局）；'TB'/'LR' 用有向层级放置（解环 + 最长路径
+ *    分层，节点钉在自己的层级行/列上，顺流无逆边）；
  *  - 阶段 2/3 由 ExpansionGrid 承担：节点按文字/形状物化为逻辑格 AABB，
- *    插行列让位扩张，压实把相邻行列空隙压到 channelMargin（走线走廊）；
- *  - 阶段 4 用泛型化的 GridSpaceContext.routeEdge（A* 正交寻路 + 拐点
- *    惩罚）为每条边计算走线拐点，写入 edgeViews 的 waypoints；
+ *    中心对称扩张让位，压实把相邻行列空隙压到 channelMargin（走线走廊）；
+ *  - 阶段 4 用 GridSpaceContext.routeEdge（A* 正交寻路 + 拐点惩罚）为
+ *    每条边计算走线拐点，写入 edgeViews 的 waypoints；
  *  - 节点位置一旦物化不再被走线反向推开（连线不占空间，走线只在
  *    自由通道格中流转）。
  *
- * 与 force-undirected 的关系：共享质点粗布局（阶段 1 完全同源），但
- * 不经过力场弛豫 —— 网格解即最终解（确定性、成行成列、O(n·(w+h)) 级
- * 膨胀开销）。坐标修正（coordinateSystem）不适用：网格解本身就是格点。
+ * 网格解即最终解：确定性、成行成列、构造保证无重叠。坐标修正
+ * （coordinateSystem）不适用——网格解本身就是格点。
  *
  * 第一期边界（后续工作）：连线文字不占格（虚拟文本节点待第二期）；
- * subgraph 容器按声明形状参与网格；无连续模式短弛豫（网格解直接输出）；
- * 平行走线的通道内等距分布待做。
+ * subgraph 容器按声明形状参与网格；平行走线的通道内等距分布待做。
  */
 
 import type { GraphStore } from '../../graph/store.js';
-import type { Box } from '../space/types.js';
-import { GridSpaceContext } from '../space/grid-context.js';
+import type { Box } from './space-types.js';
+import { GridSpaceContext } from './grid-context.js';
 import { registerStrategy } from '../strategy.js';
 import type { LayoutStrategy, ResolvedLayoutOptions } from '../strategy.js';
 import type { RunOptions, RunResult } from '../../types.js';
-import { coarseGridPlacement, undirectedHeuristics } from '../force-undirected/coarse.js';
+import { coarseGridPlacement, undirectedHeuristics } from './coarse.js';
+import { computeLevels } from './levels.js';
+import { directedHeuristics } from './directed-placement.js';
 import { ExpansionGrid } from './expansion.js';
 
 /** 默认走线通道宽（格）：相邻节点 AABB 之间保留的最小空行/列数。 */
@@ -57,15 +61,25 @@ export class GridUndirectedStrategy implements LayoutStrategy {
     this.store.refreshLabelBoxes();
     this.store.applyNodeLabelSizes(true);
 
-    // 阶段 1：质点拓扑粗布局（与 force-undirected 同源，另启用环内方位
-    // 分类：张力同分的候选优先十字方位，45° 次之 —— 纯网格解无弛豫，
-    // 排列感由放置评分直接承担）。
+    // 阶段 1：质点拓扑粗布局。'none'（默认）用无向放置美学（张力 − 环
+    // 周长 + 环内方位分类：张力同分的候选优先十字方位，45° 次之）；
+    // 'TB'/'LR' 用有向层级放置（解环 + 最长路径分层，钉层级行/列）。
     // naturalLength 为格数，粗布局格胞 = 格数 × 比例尺（px 中间量）。
+    const direction = this.options.direction;
+    const heuristics =
+      direction === 'none'
+        ? undirectedHeuristics(adj, { directionClass: true })
+        : directedHeuristics(
+            adj,
+            this.store.edges,
+            computeLevels(elements.length, this.store.edges).level,
+            direction,
+          );
     const { grid, posOf, cell, order } = coarseGridPlacement(
       elements,
       adj,
       this.options.naturalLength * this.store.cellScale,
-      undirectedHeuristics(adj, { directionClass: true }),
+      heuristics,
     );
     void grid; // 占用语义由 ExpansionGrid 接管
 

@@ -17,7 +17,7 @@
  *    flow 轴，挤出新空间的同时保持层级行不乱。
  */
 
-import type { InternalEdge, LayoutElement } from '../../graph/store.js';
+import type { InternalEdge } from '../../graph/store.js';
 import {
   insertLine,
   placeOrphan,
@@ -25,7 +25,7 @@ import {
   type CoarseHeuristics,
   type PointGrid,
   type PushDir,
-} from '../force-undirected/coarse.js';
+} from './coarse.js';
 
 /** 层级偏离罚权重：偏 1 行的罚须明显高于同行内候选格的张力差异（每格 1）
  *  —— 否则环扩搜的对称外扩会让贴邻的上/下游行候选（张力 1~2）赢过同行
@@ -151,8 +151,8 @@ export function directedHeuristics(
       return Math.abs(flowOf(bestCell) - levelOf[v]!) > DEV_CAP;
     },
 
-    deadlock(grid, anchor) {
-      return insertLine(grid, anchor.gx, anchor.gy, deadlockDirs);
+    deadlock(grid, anchor, posOf) {
+      return insertLine(grid, anchor.gx, anchor.gy, posOf, deadlockDirs);
     },
 
     /** 种子也钉在自己的层级行上（否则微调期流动弹簧要把它硬拉回层级）。 */
@@ -166,93 +166,4 @@ export function directedHeuristics(
       return placeOrphan(grid); // 层级行附近极端拥堵时退回默认孤儿放置
     },
   };
-}
-
-/**
- * 层内排序（Sugiyama 行内 barycenter）：粗布局后按相邻层邻居的 flow 轴坐标
- * 均值重排每层内部的先后次序，再按「半径和 + 间隙」的最小间距重放坐标。
- *
- * 为什么必须有它：环扩搜是按扫描顺序找空格的，同行内谁先抢到哪个格来自
- * 放置的偶然性而非图结构 —— 相邻子树的叶子向两侧对称扩展时迎面交错，产生
- * 大量可避免的行内交叉，层级罚权重调不出两全（钉死层级反而让行内更挤）。
- * 层内排序让每层顺序由「邻居质心」这一图结构决定：叶子聚到父节点下方、
- * 子树区间连续，行内交叉随之消解。
- *
- * 放在有向算法侧而非共享主流程：有序流动是有向美学的组成部分；无向图的
- * 核心美学是零交叉与有机形态，行序本就不该被钉死。
- *
- * 只动 cross 轴（TB 行内 x / LR 列内 y），层级行（flow 轴）位置不动。
- */
-export function orderLayers(
-  elements: readonly LayoutElement[],
-  adjacency: Array<Set<number>>,
-  levelOf: Int32Array,
-  direction: 'TB' | 'LR',
-  L: number,
-): void {
-  const crossOf = (el: LayoutElement): number => (direction === 'TB' ? el.x : el.y);
-  const setCross = (el: LayoutElement, v: number): void => {
-    if (direction === 'TB') el.x = v;
-    else el.y = v;
-  };
-
-  // 分层，层内以当前 cross 坐标序作为 barycenter 的初值。
-  const layers = new Map<number, number[]>();
-  for (let v = 0; v < levelOf.length; v++) {
-    const lv = levelOf[v]!;
-    let layer = layers.get(lv);
-    if (!layer) layers.set(lv, (layer = []));
-    layer.push(v);
-  }
-  for (const layer of layers.values()) {
-    layer.sort((a, b) => crossOf(elements[a]!) - crossOf(elements[b]!) || a - b);
-  }
-  const levelOrder = [...layers.keys()].sort((a, b) => a - b);
-
-  // 与粗布局压实的目标间隙一致。
-  const GAP = 0.3 * L;
-  const keys = new Float64Array(elements.length);
-
-  // 自下而上排子叶、再自上而下排父层，上下交替 4 遍（小图 1~2 遍即收敛）。
-  for (let round = 0; round < 4; round++) {
-    const sweep = round % 2 === 0 ? [...levelOrder].reverse() : levelOrder;
-    for (const lv of sweep) {
-      const layer = layers.get(lv)!;
-      if (layer.length < 2) continue;
-
-      for (const v of layer) {
-        let sum = 0;
-        let cnt = 0;
-        for (const u of adjacency[v]) {
-          if (levelOf[u] === lv - 1 || levelOf[u] === lv + 1) {
-            sum += crossOf(elements[u]!);
-            cnt++;
-          }
-        }
-        keys[v] = cnt > 0 ? sum / cnt : crossOf(elements[v]!);
-      }
-      layer.sort((a, b) => keys[a]! - keys[b]! || a - b);
-
-      // 重放：相邻对间距 ≥ max(L, 半径和 + 间隙)，保持该层质心不变。
-      const positions: number[] = [];
-      let cursor = 0;
-      for (let k = 0; k < layer.length; k++) {
-        if (k > 0) {
-          const ra = elements[layer[k - 1]!].getBoundRadius();
-          const rb = elements[layer[k]!].getBoundRadius();
-          cursor += Math.max(L, ra + rb + GAP);
-        }
-        positions.push(cursor);
-      }
-      let mean = 0;
-      for (const p of positions) mean += p;
-      mean /= positions.length;
-      let centroid = 0;
-      for (const v of layer) centroid += crossOf(elements[v]!);
-      const shift = centroid / layer.length - mean;
-      for (let k = 0; k < layer.length; k++) {
-        setCross(elements[layer[k]!]!, positions[k]! + shift);
-      }
-    }
-  }
 }

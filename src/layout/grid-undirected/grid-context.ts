@@ -8,14 +8,13 @@
  * 「AABB 多格占位」的膨胀语义。
  */
 
-import type { Box, Bounds, Point, SpaceContext } from './types.js';
+import type { Box, Bounds, Point } from './space-types.js';
 import { gridRouteAStar, type GridRouteOptions } from './grid-route.js';
 
 /** 上下文可调项（当前仅寻路参数）。 */
 export type GridSpaceOptions = GridRouteOptions;
 
-export class GridSpaceContext implements SpaceContext<number> {
-  readonly kind = 'grid' as const;
+export class GridSpaceContext {
 
   /** 占用格集合（键 "gx,gy"；布局流水线经 occupy/insertLine 维护）。 */
   private occ = new Set<string>();

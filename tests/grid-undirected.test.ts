@@ -257,7 +257,7 @@ describe('grid-undirected（grid-first 纯网格流水线）', () => {
     expect([...layout.nodeViews].every((v) => v.w !== undefined && v.h !== undefined)).toBe(true);
     // demo 的换算法路径（updateOptions）：旧拐点绑定旧坐标，必须作废；
     // 物化 w/h 同理，否则节点被画成旧网格矩形、fit 包围盒偏大
-    layout.updateOptions({ algorithm: 'force-undirected' });
+    layout.updateOptions({ algorithm: 'circle' });
     expect(layout.edgeViews.every((e) => e.waypoints === undefined)).toBe(true);
     expect([...layout.nodeViews].every((v) => v.w === undefined && v.h === undefined)).toBe(true);
     // setStrategy 路径同样清除

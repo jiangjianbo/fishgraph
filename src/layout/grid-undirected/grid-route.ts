@@ -12,7 +12,7 @@
  * 路径输出为拐点序列（方向变化处），首尾为 source/target 本身。
  */
 
-import type { Box, Point } from './types.js';
+import type { Box, Point } from './space-types.js';
 
 export interface GridRouteOptions {
   /** 每次转向的附加代价（格）。默认 1：直行一步与转一次弯等价。 */

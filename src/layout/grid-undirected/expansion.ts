@@ -11,7 +11,7 @@
  * Margin）。所有操作保序、保 AABB 连续性，无重叠由构造保证。
  */
 
-import type { Box } from '../space/types.js';
+import type { Box } from './space-types.js';
 
 const key = (gx: number, gy: number): string => `${gx},${gy}`;
 
