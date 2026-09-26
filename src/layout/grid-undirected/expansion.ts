@@ -2,8 +2,9 @@
  * 膨胀网格（Expansion Grid）—— grid-first 流水线的阶段 3 载体。
  *
  * 在质点网格放置（coarseGridPlacement）的产物之上，把每个 1×1 质点
- * 逐个「轴向膨胀」为 W×H 格的 AABB 包围盒：锚点不动，向右/向下扩张，
- * 扩张所需的每一列/行通过「插列/插行」把该侧已占用格整体平移让位
+ * 逐个「中心对称膨胀」为 W×H 格的 AABB 包围盒：质点格保持为 AABB 的
+ * 中心格（奇数尺寸精确居中，偶数尺寸固定向左/上配平半格），扩张所需
+ * 的每一列/行通过「插列/插行」把该侧已占用格整体平移让位
  * （与粗布局的死锁插行列同一思想）。膨胀完成后做**通道约束压实**：
  * 相邻占用行/列之间的空隙压缩到恰好不小于 channelMargin 格 —— 全局
  * 紧凑的同时，相邻节点 AABB 之间天然留出走线走廊（Channel Safety
@@ -34,15 +35,29 @@ export class ExpansionGrid {
   }
 
   /**
-   * 把元素 i 从 1×1 质点膨胀为 w×h 格 AABB：先释放自身覆盖格，再向
-   * 右插 w−1 列、向下插 h−1 行（其他元素整体让位），最后标记自身覆盖。
+   * 把元素 i 从 1×1 质点膨胀为 w×h 格 AABB：先释放自身覆盖格，再中心
+   * 对称扩张 —— 质点格始终是 AABB 的「中心格」：奇数尺寸向两侧各扩
+   * (w−1)/2 格，质点恰为 AABB 几何中心；偶数尺寸格上无精确中心，固定
+   * 向左/上多配一格（半格差），且 b.x+⌊w/2⌋ 恒等于质点格，A* 中心格
+   * 口径不变。扩张所需的每一行/列通过「插列/插行」把该侧已占用格整体
+   * 平移让位（与粗布局的死锁插行列同一思想），锚点格在全过程中不动。
    */
   expand(i: number, w: number, h: number): void {
     const a = this.anchorOf[i]!;
     this.covered.delete(key(a.gx, a.gy));
-    for (let d = 1; d < w; d++) this.shiftLine('x', a.gx + 1, 1);
-    for (let d = 1; d < h; d++) this.shiftLine('y', a.gy + 1, 1);
+    const left = Math.floor(w / 2);
+    const up = Math.floor(h / 2);
+    const right = w - 1 - left;
+    const down = h - 1 - up;
+    // 插入点取锚点格 ±1：插列/插行发生在锚点与邻格之间，锚点自身两侧
+    // 的坐标不受本元素插行影响（其他元素由 shiftLine 整体平移）。
+    for (let d = 0; d < left; d++) this.shiftLine('x', a.gx - 1, -1);
+    for (let d = 0; d < right; d++) this.shiftLine('x', a.gx + 1, 1);
+    for (let d = 0; d < up; d++) this.shiftLine('y', a.gy - 1, -1);
+    for (let d = 0; d < down; d++) this.shiftLine('y', a.gy + 1, 1);
     this.sizeOf[i] = { w, h };
+    a.gx -= left;
+    a.gy -= up;
     for (let gx = a.gx; gx < a.gx + w; gx++) {
       for (let gy = a.gy; gy < a.gy + h; gy++) {
         this.covered.set(key(gx, gy), i);

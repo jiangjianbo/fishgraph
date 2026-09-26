@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ForceLayout } from '../src/index.js';
 import type { GraphSpec } from '../src/types.js';
 import { estimateLabelBox } from '../src/label.js';
+import { ExpansionGrid } from '../src/layout/grid-undirected/expansion.js';
 
 const CELL = 100; // 粗布局格胞 px 值（断言用）；naturalLength 以格数传入
 
@@ -267,5 +268,69 @@ describe('grid-undirected（grid-first 纯网格流水线）', () => {
     layout.setStrategy('circle');
     expect(layout.edgeViews.every((e) => e.waypoints === undefined)).toBe(true);
     expect([...layout.nodeViews].every((v) => v.w === undefined && v.h === undefined)).toBe(true);
+  });
+});
+
+describe('ExpansionGrid 中心对称膨胀', () => {
+  /** AABB 的格中心（物理中心 / 格宽）。 */
+  const centerOf = (b: { x: number; y: number; width: number; height: number }) => ({
+    x: b.x + b.width / 2,
+    y: b.y + b.height / 2,
+  });
+
+  it('奇数尺寸：质点格恰为 AABB 几何中心', () => {
+    const g = new ExpansionGrid(1);
+    g.place(0, 7, -3);
+    g.expand(0, 5, 3);
+    const [b] = g.boxes();
+    expect(b).toEqual({ x: 7 - 2, y: -3 - 1, width: 5, height: 3 });
+    expect(centerOf(b!)).toEqual({ x: 7.5, y: -2.5 }); // 质点格中心 (7+0.5, -3+0.5)
+  });
+
+  it('偶数尺寸：固定向左/上多配一格（半格配平），质点格保持为中心格', () => {
+    const g = new ExpansionGrid(1);
+    g.place(0, 0, 0);
+    g.expand(0, 4, 2);
+    const [b] = g.boxes();
+    expect(b).toEqual({ x: -2, y: -1, width: 4, height: 2 });
+    // 质点格 (0,0) 是两中间格的右/下格：物理中心差半格，格上无精确中心
+    expect(centerOf(b!)).toEqual({ x: 0, y: 0 });
+    // A* 中心格口径 b.x+⌊w/2⌋ 恒等于质点格
+    expect(b!.x + Math.floor(b!.width / 2)).toBe(0);
+    expect(b!.y + Math.floor(b!.height / 2)).toBe(0);
+  });
+
+  it('竖直相邻边在横向膨胀后保持竖直：质点为 AABB 中心', () => {
+    const g = new ExpansionGrid(2);
+    g.place(0, 0, 0); // A
+    g.place(1, 0, 1); // B 在 A 正下方（粗布局竖直边）
+    g.expand(1, 3, 1); // B 横向膨胀 3×1
+    const [a, b] = g.boxes();
+    expect(a).toEqual({ x: 0, y: 0, width: 1, height: 1 });
+    expect(b).toEqual({ x: -1, y: 1, width: 3, height: 1 });
+    expect(centerOf(b!).x).toBe(centerOf(a!).x); // 中心 x 对齐 → 边仍竖直
+    expect(g.sizeOf[0]).toEqual({ w: 1, h: 1 });
+  });
+
+  it('膨胀推挤保序：四周邻居被插行/插列让位且 AABB 互不重叠', () => {
+    const g = new ExpansionGrid(5);
+    g.place(0, 0, 0); // 中心
+    g.place(1, -3, 0); // 左
+    g.place(2, 3, 0); // 右
+    g.place(3, 0, -3); // 上
+    g.place(4, 0, 3); // 下
+    g.expand(0, 5, 5);
+    const boxes = g.boxes();
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i]!;
+        const b = boxes[j]!;
+        const overlap =
+          a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+        expect(overlap).toBe(false);
+      }
+    }
+    // 中心 AABB 覆盖 [-2,3)×[-2,3)：质点格 (0,0) 为中心格
+    expect(boxes[0]).toEqual({ x: -2, y: -2, width: 5, height: 5 });
   });
 });

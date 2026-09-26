@@ -5,7 +5,7 @@
  * 全部在此实现；与"放置美学"相关的四个决策点抽为 CoarseHeuristics
  * 钩子（搜索锚点 / 候选评分 / 死锁判定 / 死锁解法），由具体算法提供：
  *  - undirectedHeuristics（本文件）：无向图 —— 邻居均值锚点、
- *    张力−环周长评分、四方向最小移动插行列；
+ *    张力−环周长评分（可选环内方位分类平局项）、四方向最小移动插行列；
  *  - 有向图（layout/force-directed/）：层级行锚点、软层级惩罚评分、
  *    优先插列 —— 见 doc/布局核心原则.md 有向图流水线。
  *
@@ -193,13 +193,30 @@ export interface CoarseHeuristics {
  *  - 锚点 = 已放置邻居的格坐标均值；
  *  - 评分 = 张力项（到全部已放置邻居的曼哈顿距离和，连线像橡皮筋）
  *    − 环周长奖励（与候选格 8 邻接且图上相邻的邻居对，把节点拉进
- *    "夹角"里消灭长边穿透）；
+ *    "夹角"里消灭长边穿透）+ 方位分类项（可选，见 UndirectedHeuristicsOptions）；
  *  - 死锁 = 最佳得分超过 2×邻居数+2；解法 = 四方向最小移动插行列。
  */
-export function undirectedHeuristics(adjacency: Array<Set<number>>): CoarseHeuristics {
+export interface UndirectedHeuristicsOptions {
+  /**
+   * 环内方位分类项（grid-undirected 启用，默认关）：边的走向优先落在
+   * 邻居的十字（水平/垂直）方位，45° 对角次之，其他方位再次 —— 在张力
+   * 同分的候选之间，正交 > 45° > 杂角。距离维全权由张力项承担（分类
+   * 能力量级 < 张力的每格 1），本项只做环内平局裁决。力导向流水线默认
+   * 关闭：该项改变粗拓扑，弛豫+吸附管线有自己的形状契约基线。
+   */
+  directionClass?: boolean;
+}
+
+export function undirectedHeuristics(
+  adjacency: Array<Set<number>>,
+  options: UndirectedHeuristicsOptions = {},
+): CoarseHeuristics {
   const RING_BONUS = 0.5;
   const DEADLOCK_TENSION_FACTOR = 2;
   const DEADLOCK_TENSION_EXTRA = 2;
+  // 方位分类能量：十字 0 < 对角 0.25 < 杂角 0.5（量级压在张力每格 1 之下）。
+  const DIAGONAL_COST = 0.25;
+  const OBLIQUE_COST = 0.5;
 
   /** 计算候选格的张力项。 */
   const tension = (gx: number, gy: number, neighbors: readonly Cell[]): number => {
@@ -234,6 +251,13 @@ export function undirectedHeuristics(adjacency: Array<Set<number>>): CoarseHeuri
     return bonus;
   };
 
+  /** 单条边的方位分类成本（dx/dy = 候选格相对邻居格的位移）。 */
+  const directionCost = (dx: number, dy: number): number => {
+    if (dx === 0 || dy === 0) return 0;
+    return Math.abs(dx) === Math.abs(dy) ? DIAGONAL_COST : OBLIQUE_COST;
+  };
+  const directionClass = options.directionClass ?? false;
+
   return {
     anchor(_v, neighbors) {
       return {
@@ -242,7 +266,11 @@ export function undirectedHeuristics(adjacency: Array<Set<number>>): CoarseHeuri
       };
     },
     score(v, gx, gy, neighbors, neighborIndices) {
-      return tension(gx, gy, neighbors) - ringBonus(gx, gy, neighbors, neighborIndices);
+      let cost = tension(gx, gy, neighbors) - ringBonus(gx, gy, neighbors, neighborIndices);
+      if (directionClass) {
+        for (const u of neighbors) cost += directionCost(gx - u.gx, gy - u.gy);
+      }
+      return cost;
     },
     isDeadlock(_v, bestScore, _theoreticalMin, neighborCount, bestCell) {
       return (

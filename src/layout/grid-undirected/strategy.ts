@@ -3,7 +3,7 @@
  *
  * 按 doc/布局核心原则.md 的「纯网格布局算法流程」组织，全程在离散网格
  * 中运行（连续坐标只是网格解的物理化表达）：
- *   [质点拓扑粗布局] → [节点轴向膨胀物化为 AABB] → [通道约束压实] →
+ *   [质点拓扑粗布局] → [节点中心对称膨胀物化为 AABB] → [通道约束压实] →
  *   [网格 A* 避障走线]
  *  - 阶段 1 复用 coarse.ts 的质点网格放置（度数优先连通生长 + 死锁插行列）；
  *  - 阶段 2/3 由 ExpansionGrid 承担：节点按文字/形状物化为逻辑格 AABB，
@@ -28,7 +28,7 @@ import { GridSpaceContext } from '../space/grid-context.js';
 import { registerStrategy } from '../strategy.js';
 import type { LayoutStrategy, ResolvedLayoutOptions } from '../strategy.js';
 import type { RunOptions, RunResult } from '../../types.js';
-import { coarseGridPlacement } from '../force-undirected/coarse.js';
+import { coarseGridPlacement, undirectedHeuristics } from '../force-undirected/coarse.js';
 import { ExpansionGrid } from './expansion.js';
 
 /** 默认走线通道宽（格）：相邻节点 AABB 之间保留的最小空行/列数。 */
@@ -57,12 +57,15 @@ export class GridUndirectedStrategy implements LayoutStrategy {
     this.store.refreshLabelBoxes();
     this.store.applyNodeLabelSizes(true);
 
-    // 阶段 1：质点拓扑粗布局（与 force-undirected 同源）。
+    // 阶段 1：质点拓扑粗布局（与 force-undirected 同源，另启用环内方位
+    // 分类：张力同分的候选优先十字方位，45° 次之 —— 纯网格解无弛豫，
+    // 排列感由放置评分直接承担）。
     // naturalLength 为格数，粗布局格胞 = 格数 × 比例尺（px 中间量）。
     const { grid, posOf, cell, order } = coarseGridPlacement(
       elements,
       adj,
       this.options.naturalLength * this.store.cellScale,
+      undirectedHeuristics(adj, { directionClass: true }),
     );
     void grid; // 占用语义由 ExpansionGrid 接管
 
