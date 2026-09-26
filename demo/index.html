@@ -81,6 +81,30 @@
           <option value="distributed">同侧均匀分布</option>
         </select>
       </label>
+      <label class="row"><span class="name">贴合方式</span>
+        <select id="fitStyle" style="flex:1">
+          <option value="aabb" selected>AABB 边界</option>
+          <option value="shape">声明形状边界</option>
+          <option value="circle">包围圆</option>
+          <option value="center">元素中心</option>
+        </select>
+      </label>
+      <label class="row"><span class="name">起点形态</span>
+        <select id="capSource" style="flex:1">
+          <option value="none" selected>无</option>
+          <option value="arrow">实心箭头</option>
+          <option value="open">开放箭头</option>
+          <option value="dot">圆点</option>
+        </select>
+      </label>
+      <label class="row"><span class="name">终点形态</span>
+        <select id="capTarget" style="flex:1">
+          <option value="none">无</option>
+          <option value="arrow" selected>实心箭头</option>
+          <option value="open">开放箭头</option>
+          <option value="dot">圆点</option>
+        </select>
+      </label>
       <label class="row"><span class="name">转弯</span>
         <select id="cornerStyle" style="flex:1">
           <option value="sharp" selected>直角</option>

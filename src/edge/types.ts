@@ -11,7 +11,7 @@
  * 不触碰画布 —— 渲染端（canvas/svg）只需翻译 PathSegment。
  */
 
-import type { Vec2 } from '../types.js';
+import type { ShapeSpec, Vec2 } from '../types.js';
 
 /**
  * 路径段（canvas 路径命令的几何等价物，起点 = 上一段终点）。
@@ -30,7 +30,7 @@ export interface EdgePath {
   segments: PathSegment[];
 }
 
-/** 连线端点元素的几何快照（AABB 语义；圆/椭圆取其半宽高）。 */
+/** 连线端点元素的几何快照。 */
 export interface EdgeEndpointBox {
   /** 元素中心（布局坐标）。 */
   x: number;
@@ -38,6 +38,8 @@ export interface EdgeEndpointBox {
   /** AABB 半宽 / 半高。 */
   hw: number;
   hh: number;
+  /** 声明形状（贴合策略按真实形状边界求交用）。 */
+  shape: ShapeSpec;
 }
 
 /** 端点策略的对接位置（布局坐标）。 */
@@ -58,6 +60,43 @@ export interface PortStrategy {
   /** 注册名（demo 下拉框取值）。 */
   readonly name: string;
   port(end: EdgeEndpointBox, toward: Vec2, slot: number, slotCount: number): PortWithNormal;
+}
+
+/**
+ * 贴合方式策略：把端口点（PortStrategy 在 AABB 侧边上选出）贴合到元素
+ * 的真实几何上，并给出贴合点的外法向。
+ * 返回的 PortWithNormal 即路径管线的最终端点。
+ */
+export interface EndpointFitStrategy {
+  readonly name: string;
+  fit(port: PortWithNormal, box: EdgeEndpointBox): PortWithNormal;
+}
+
+/** 端点装饰几何（全部为路径终点处的局部图形，布局坐标）。 */
+export interface EndCapDecoration {
+  /** 填充多边形（实心箭头的三角形等）。 */
+  fills?: Array<{ points: Vec2[] }>;
+  /** 描边折线（开放式箭头的 V 形两笔）。 */
+  strokes?: Array<{ path: EdgePath }>;
+  /** 实心圆点。 */
+  dots?: Array<{ center: Vec2; radius: number }>;
+}
+
+/**
+ * 两端形态策略（端帽）：决定连线起点/终点处的装饰。
+ * tip = 路径端点，(dx,dy) = 该端指向"路径外部"的单位切向
+ * （终点 = 行进方向，起点 = 行进反方向），at 区分起/终端。
+ */
+export interface EndCapStrategy {
+  readonly name: string;
+  decorate(tip: Vec2, dx: number, dy: number, at: 'source' | 'target'): EndCapDecoration;
+}
+
+/** 单端（起点或终点）的样式组合：对接位置 + 贴合方式 + 端帽形态。 */
+export interface EdgeEndpointStyle {
+  ports: PortStrategy;
+  fit: EndpointFitStrategy;
+  cap: EndCapStrategy;
 }
 
 /**

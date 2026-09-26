@@ -19,10 +19,13 @@ import type {
   CornerStrategy,
   CrossingStrategy,
   EdgeEndpointBox,
+  EdgeEndpointStyle,
   EdgePath,
+  EndCapDecoration,
   PathStrategy,
-  PortStrategy,
 } from './types.js';
+
+export type { EdgeEndpointStyle };
 
 /** 渲染器消费的最小布局输出面。 */
 export interface EdgeScene {
@@ -39,12 +42,18 @@ export interface EdgeGeometry {
   label: string | null;
   /** 标签锚点：按曲线长度取的路径中点。 */
   labelAnchor: Vec2;
-  /** 末端箭头：尖端位置与单位切向。 */
+  /** 末端箭头：尖端位置与单位切向（指向路径外部）。 */
   arrow: { tip: Vec2; dx: number; dy: number };
+  /** 起点切向：位置与单位切向（指向路径外部，即行进反方向）。 */
+  startTangent: { tip: Vec2; dx: number; dy: number };
+  /** 两端端帽装饰（按 source/target 端各自的 EndCapStrategy 产出）。 */
+  caps: { source: EndCapDecoration; target: EndCapDecoration };
 }
 
+/** 连线风格配置：起/终端各自的端点样式（端口 + 贴合 + 端帽）独立配置。 */
 export interface EdgeStyleOptions {
-  ports: PortStrategy;
+  source: EdgeEndpointStyle;
+  target: EdgeEndpointStyle;
   path: PathStrategy;
   corners: CornerStrategy;
   crossings: CrossingStrategy;
@@ -65,12 +74,17 @@ export class EdgeStyleRenderer {
       const e = scene.edgeViews[i]!;
       const a = boxes[e.sourceIndex]!;
       const b = boxes[e.targetIndex]!;
-      const portA = this.options.ports.port(a, { x: b.x - a.x, y: b.y - a.y }, slots[i]!.a.slot, slots[i]!.a.count);
-      const portB = this.options.ports.port(b, { x: a.x - b.x, y: a.y - b.y }, slots[i]!.b.slot, slots[i]!.b.count);
+      const sourceStyle = this.options.source;
+      const targetStyle = this.options.target;
+      const portA = sourceStyle.ports.port(a, { x: b.x - a.x, y: b.y - a.y }, slots[i]!.a.slot, slots[i]!.a.count);
+      const portB = targetStyle.ports.port(b, { x: a.x - b.x, y: a.y - b.y }, slots[i]!.b.slot, slots[i]!.b.count);
+      // 贴合：把 AABB 侧边端口收放到元素真实几何上（口径由各端策略决定）
+      const fitA = sourceStyle.fit.fit(portA, a);
+      const fitB = targetStyle.fit.fit(portB, b);
 
       const base = this.options.path.route({
-        source: portA,
-        target: portB,
+        source: fitA,
+        target: fitB,
         sourceBox: a,
         targetBox: b,
         waypoints: e.waypoints ?? [],
@@ -79,12 +93,19 @@ export class EdgeStyleRenderer {
       const shaped = this.options.crossings.apply(this.options.corners.apply(base), drawn);
       drawn.push(shaped);
 
+      const arrow = endArrow(shaped);
+      const start = startTangent(shaped);
       result.push({
         index: i,
         path: shaped,
         label: e.label,
         labelAnchor: pathMidpoint(shaped),
-        arrow: endArrow(shaped),
+        arrow,
+        startTangent: start,
+        caps: {
+          source: sourceStyle.cap.decorate(start.tip, start.dx, start.dy, 'source'),
+          target: targetStyle.cap.decorate(arrow.tip, arrow.dx, arrow.dy, 'target'),
+        },
       });
     }
     return result;
@@ -175,6 +196,7 @@ function toEndpointBox(el: NodeView | SubgraphView): EdgeEndpointBox {
     y: el.y,
     hw: materialized.w !== undefined ? materialized.w / 2 : he.hw,
     hh: materialized.h !== undefined ? materialized.h / 2 : he.hh,
+    shape: el.shape,
   };
 }
 
@@ -214,7 +236,7 @@ export function pathMidpoint(path: EdgePath): Vec2 {
   return pointAt(path, 0.5);
 }
 
-/** 末端箭头：路径终点与末端切向（单位向量）。 */
+/** 末端箭头：路径终点与末端切向（单位向量，指向路径外部 = 行进方向）。 */
 export function endArrow(path: EdgePath): { tip: Vec2; dx: number; dy: number } {
   const last = path.segments[path.segments.length - 1];
   if (!last) return { tip: { ...path.start }, dx: 1, dy: 0 };
@@ -230,6 +252,26 @@ export function endArrow(path: EdgePath): { tip: Vec2; dx: number; dy: number } 
     last.ccw ? ry : -ry,
     last.ccw ? -rx : rx,
   );
+}
+
+/** 起点切向：路径起点与起始切向（单位向量，指向路径外部 = 行进反方向）。 */
+export function startTangent(path: EdgePath): { tip: Vec2; dx: number; dy: number } {
+  const first = path.segments[0];
+  if (!first) return { tip: { ...path.start }, dx: -1, dy: 0 };
+  if (first.kind === 'line') {
+    return tipWith({ ...path.start }, path.start.x - first.to.x, path.start.y - first.to.y);
+  }
+  if (first.kind === 'bezier') {
+    return tipWith({ ...path.start }, path.start.x - first.cp1.x, path.start.y - first.cp1.y);
+  }
+  // arc 起始切向：与末端同式，角度换为起始角
+  const rx = Math.cos(first.startAngle);
+  const ry = Math.sin(first.startAngle);
+  const tip = { x: first.center.x + first.radius * rx, y: first.center.y + first.radius * ry };
+  // 起点外部方向 = 行进反方向（行进切向再取反）
+  const dx = first.ccw ? ry : -ry;
+  const dy = first.ccw ? -rx : rx;
+  return tipWith(tip, -dx, -dy);
 }
 
 function tipWith(tip: Vec2, dx: number, dy: number): { tip: Vec2; dx: number; dy: number } {

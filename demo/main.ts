@@ -5,6 +5,14 @@ import {
   EdgeStyleRenderer,
   FixedPortStrategy,
   DistributedPortStrategy,
+  AabbEndpointFitStrategy,
+  ShapeEndpointFitStrategy,
+  CircleEndpointFitStrategy,
+  CenterEndpointFitStrategy,
+  NoneEndCapStrategy,
+  ArrowEndCapStrategy,
+  OpenEndCapStrategy,
+  DotEndCapStrategy,
   OrthogonalPolylinePathStrategy,
   StraightLinePathStrategy,
   CubicBezierPathStrategy,
@@ -15,7 +23,13 @@ import {
   BridgeCrossingStrategy,
   pathLength,
 } from '../src/index.js';
-import type { GraphSpec, ShapeSpec, SubgraphView, EdgeGeometry, EdgePath } from '../src/index.js';
+import type {
+  GraphSpec,
+  ShapeSpec,
+  SubgraphView,
+  EdgeGeometry,
+  EdgePath,
+} from '../src/index.js';
 
 // ── 示例图 ────────────────────────────────────────────────
 
@@ -261,6 +275,9 @@ const labelCollision = $<HTMLInputElement>('lc');
 const edgeStyle = {
   path: $<HTMLSelectElement>('pathStyle'),
   port: $<HTMLSelectElement>('portStyle'),
+  fit: $<HTMLSelectElement>('fitStyle'),
+  capSource: $<HTMLSelectElement>('capSource'),
+  capTarget: $<HTMLSelectElement>('capTarget'),
   corner: $<HTMLSelectElement>('cornerStyle'),
   cr: $<HTMLInputElement>('cr'),
   crossing: $<HTMLSelectElement>('crossingStyle'),
@@ -293,14 +310,34 @@ function bridgeGap(): number {
   return Math.min(14, Math.max(2.5, 5 / cam.k));
 }
 
-/** 按控件取值装配四个策略（端点对接 / 路径 / 转弯 / 交叉）。 */
+/** 按控件取值装配风格策略（两端独立：端口 + 贴合 + 端帽各按端配置）。 */
 function buildEdgeRenderer(): EdgeStyleRenderer {
   const path = edgeStyle.path.value;
-  return new EdgeStyleRenderer({
+  const makeEndpoint = (capValue: string) => ({
     ports:
       edgeStyle.port.value === 'distributed'
         ? new DistributedPortStrategy()
         : new FixedPortStrategy(),
+    fit:
+      edgeStyle.fit.value === 'shape'
+        ? new ShapeEndpointFitStrategy()
+        : edgeStyle.fit.value === 'circle'
+          ? new CircleEndpointFitStrategy()
+          : edgeStyle.fit.value === 'center'
+            ? new CenterEndpointFitStrategy()
+            : new AabbEndpointFitStrategy(),
+    cap:
+      capValue === 'arrow'
+        ? new ArrowEndCapStrategy()
+        : capValue === 'open'
+          ? new OpenEndCapStrategy()
+          : capValue === 'dot'
+            ? new DotEndCapStrategy()
+            : new NoneEndCapStrategy(),
+  });
+  return new EdgeStyleRenderer({
+    source: makeEndpoint(edgeStyle.capSource.value),
+    target: makeEndpoint(edgeStyle.capTarget.value),
     path:
       path === 'straight'
         ? new StraightLinePathStrategy()
@@ -330,6 +367,9 @@ function edgeGeometries(): EdgeGeometry[] {
   const key = [
     edgeStyle.path.value,
     edgeStyle.port.value,
+    edgeStyle.fit.value,
+    edgeStyle.capSource.value,
+    edgeStyle.capTarget.value,
     edgeStyle.corner.value,
     edgeStyle.crossing.value,
     edgeStyle.cr.value,
@@ -386,7 +426,15 @@ directionSel.addEventListener('change', () => {
   drawView();
 });
 // 连线风格只影响绘制几何：切换后仅重绘（布局不动）
-for (const el of [edgeStyle.path, edgeStyle.port, edgeStyle.corner, edgeStyle.crossing]) {
+for (const el of [
+  edgeStyle.path,
+  edgeStyle.port,
+  edgeStyle.fit,
+  edgeStyle.capSource,
+  edgeStyle.capTarget,
+  edgeStyle.corner,
+  edgeStyle.crossing,
+]) {
   el.addEventListener('change', drawView);
 }
 edgeStyle.cr.addEventListener('input', () => {
@@ -563,6 +611,36 @@ function traceEdgePath(g: CanvasRenderingContext2D, path: EdgePath): void {
   }
 }
 
+/** 绘制两端端帽装饰（填充多边形 / 圆点 / 描边折线）。 */
+function drawEndCaps(g: CanvasRenderingContext2D, geo: EdgeGeometry): void {
+  for (const cap of [geo.caps.source, geo.caps.target]) {
+    g.fillStyle = '#64748b';
+    g.strokeStyle = '#64748b';
+    g.lineWidth = 1.5;
+    for (const poly of cap.fills ?? []) {
+      g.beginPath();
+      poly.points.forEach((p, i) => {
+        const [x, y] = worldToScreen(p.x, p.y);
+        if (i === 0) g.moveTo(x, y);
+        else g.lineTo(x, y);
+      });
+      g.closePath();
+      g.fill();
+    }
+    for (const dot of cap.dots ?? []) {
+      const [cx, cy] = worldToScreen(dot.center.x, dot.center.y);
+      g.beginPath();
+      g.arc(cx, cy, dot.radius * cam.k, 0, Math.PI * 2);
+      g.fill();
+    }
+    for (const stroke of cap.strokes ?? []) {
+      g.beginPath();
+      traceEdgePath(g, stroke.path);
+      g.stroke();
+    }
+  }
+}
+
 function drawView(): void {
   fitCanvas(viewCanvas);
   const dpr = window.devicePixelRatio || 1;
@@ -623,8 +701,8 @@ function drawView(): void {
     }
   }
 
-  // 边：连线风格策略管线（端点对接 → 路径 → 转弯 → 交叉）产出几何段；
-  // 渲染端只负责把 line/arc/bezier 段翻译成画布命令，末端箭头 + 标签锚点
+  // 边：连线风格策略管线（端口 → 贴合 → 路径 → 转弯 → 交叉）产出几何段；
+  // 渲染端只负责把 line/arc/bezier 段与两端端帽翻译成画布命令，标签锚点
   // 已由管线算好。
   for (const geo of edgeGeometries()) {
     if (pathLength(geo.path) < 1) continue; // 两元素贴邻、端口重合：无可绘路径
@@ -633,17 +711,7 @@ function drawView(): void {
     g.beginPath();
     traceEdgePath(g, geo.path);
     g.stroke();
-
-    const { tip, dx, dy } = geo.arrow;
-    const [tx, ty] = worldToScreen(tip.x, tip.y);
-    const ang = Math.atan2(dy, dx);
-    g.fillStyle = '#64748b';
-    g.beginPath();
-    g.moveTo(tx, ty);
-    g.lineTo(tx - 8 * Math.cos(ang - 0.4), ty - 8 * Math.sin(ang - 0.4));
-    g.lineTo(tx - 8 * Math.cos(ang + 0.4), ty - 8 * Math.sin(ang + 0.4));
-    g.closePath();
-    g.fill();
+    drawEndCaps(g, geo);
 
     if (geo.label !== null && geo.label !== '') {
       const box = estimateLabelBox(geo.label, 12, 3);

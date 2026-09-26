@@ -12,24 +12,33 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  AabbEndpointFitStrategy,
+  ArrowEndCapStrategy,
   BridgeCrossingStrategy,
+  CircleEndpointFitStrategy,
   CubicBezierPathStrategy,
+  CenterEndpointFitStrategy,
   DistributedPortStrategy,
+  DotEndCapStrategy,
   EdgeStyleRenderer,
   FixedPortStrategy,
+  NoneEndCapStrategy,
   ObliqueDistributedPathStrategy,
+  OpenEndCapStrategy,
   OrthogonalPolylinePathStrategy,
   PlainCrossingStrategy,
   RoundCornerStrategy,
+  ShapeEndpointFitStrategy,
   SharpCornerStrategy,
   StraightLinePathStrategy,
   dominantSide,
   endArrow,
   pathLength,
+  startTangent,
 } from '../src/index.js';
 import type { EdgeEndpointBox, EdgePath, EdgeRouteContext, Vec2 } from '../src/index.js';
 
-const BOX: EdgeEndpointBox = { x: 0, y: 0, hw: 10, hh: 5 };
+const BOX: EdgeEndpointBox = { x: 0, y: 0, hw: 10, hh: 5, shape: { kind: 'rect', w: 20, h: 10 } };
 
 /** 正交折线路径的顶点序列（line 段逐个展开）。 */
 function vertices(path: EdgePath): Vec2[] {
@@ -45,8 +54,8 @@ function routeCtx(partial: Partial<EdgeRouteContext>): EdgeRouteContext {
   return {
     source: { x: 0, y: 0, nx: 1, ny: 0 },
     target: { x: 40, y: 0, nx: -1, ny: 0 },
-    sourceBox: { x: 0, y: 0, hw: 10, hh: 5 },
-    targetBox: { x: 40, y: 0, hw: 10, hh: 5 },
+    sourceBox: { x: 0, y: 0, hw: 10, hh: 5, shape: { kind: 'rect', w: 20, h: 10 } },
+    targetBox: { x: 40, y: 0, hw: 10, hh: 5, shape: { kind: 'rect', w: 20, h: 10 } },
     waypoints: [],
     bundle: { slot: 0, count: 1 },
     ...partial,
@@ -128,8 +137,8 @@ describe('路径风格策略', () => {
       routeCtx({
         source: { x: 0, y: -12, nx: 0, ny: -1 },
         target: { x: 40, y: 52, nx: 0, ny: 1 },
-        sourceBox: { x: 0, y: 0, hw: 12, hh: 12 },
-        targetBox: { x: 40, y: 40, hw: 12, hh: 12 },
+        sourceBox: { x: 0, y: 0, hw: 12, hh: 12, shape: { kind: 'circle', r: 12 } },
+        targetBox: { x: 40, y: 40, hw: 12, hh: 12, shape: { kind: 'circle', r: 12 } },
         waypoints: [
           { x: 0, y: 0 },
           { x: 0, y: 10 }, // source AABB 内部
@@ -263,10 +272,102 @@ describe('交叉风格策略', () => {
   });
 });
 
+describe('贴合方式策略', () => {
+  const PORT = { x: 10, y: 3, nx: 1, ny: 0 }; // 右侧 AABB 上的偏移点
+  const ROUND_BOX: EdgeEndpointBox = {
+    x: 0,
+    y: 0,
+    hw: 10,
+    hh: 5,
+    shape: { kind: 'circle', r: 8 },
+  };
+
+  it('AABB 贴合：端口点原样（现状口径）', () => {
+    const p = new AabbEndpointFitStrategy().fit(PORT, ROUND_BOX);
+    expect([p.x, p.y, p.nx, p.ny]).toEqual([10, 3, 1, 0]);
+  });
+
+  it('声明形状贴合：沿中心 → 端口射线收到圆边界，法向取径向', () => {
+    const p = new ShapeEndpointFitStrategy().fit(PORT, ROUND_BOX);
+    // 射线方向 (10,3)/|(10,3)|，距离 = r=8
+    const len = Math.hypot(10, 3);
+    expect(p.x).toBeCloseTo((10 / len) * 8);
+    expect(p.y).toBeCloseTo((3 / len) * 8);
+    expect(p.nx).toBeCloseTo(10 / len);
+    expect(p.ny).toBeCloseTo(3 / len);
+    // 贴合点不在 AABB 边界（x < 10）—— 两种口径可区分
+    expect(p.x).toBeLessThan(10);
+  });
+
+  it('包围圆贴合：端点落在等效包围圆上（离形状最远）', () => {
+    const p = new CircleEndpointFitStrategy().fit(PORT, ROUND_BOX);
+    // 圆的等效包围圆 = 自身（r=8），端点距中心 8
+    expect(Math.hypot(p.x, p.y)).toBeCloseTo(8);
+    // 比 AABB 贴合（距中心 >10）更靠外？不——包围圆在偏移方向上小于 AABB 对角，
+    // 断言贴合方向即径向即可
+    expect(p.nx).toBeCloseTo(10 / Math.hypot(10, 3));
+  });
+
+  it('中心贴合：端点 = 元素中心，法向保留端口法向', () => {
+    const p = new CenterEndpointFitStrategy().fit(PORT, ROUND_BOX);
+    expect([p.x, p.y, p.nx, p.ny]).toEqual([0, 0, 1, 0]);
+  });
+});
+
+describe('两端形态策略（端帽）', () => {
+  it('无端帽：装饰为空', () => {
+    const cap = new NoneEndCapStrategy().decorate({ x: 0, y: 0 }, 1, 0, 'target');
+    expect(cap.fills).toBeUndefined();
+    expect(cap.strokes).toBeUndefined();
+    expect(cap.dots).toBeUndefined();
+  });
+
+  it('实心箭头：尖端在端点、两翼对称于切向', () => {
+    const cap = new ArrowEndCapStrategy(8).decorate({ x: 40, y: 0 }, 1, 0, 'target');
+    expect(cap.fills).toHaveLength(1);
+    const [a, b, c] = cap.fills![0]!.points;
+    expect([a!.x, a!.y]).toEqual([40, 0]); // 尖端
+    expect(b!.x).toBeCloseTo(c!.x); // 两翼在同一条基线上
+    expect(b!.y).toBeCloseTo(-c!.y); // 关于切向对称
+    expect(Math.abs(b!.y)).toBeCloseTo(3.2); // 半张角 0.4rad → 8×0.4
+    expect(b!.x).toBeCloseTo(32); // 40 - 8
+  });
+
+  it('开放箭头：两笔描边折线，起点都在端点', () => {
+    const cap = new OpenEndCapStrategy(7).decorate({ x: 40, y: 0 }, 1, 0, 'target');
+    expect(cap.strokes).toHaveLength(2);
+    for (const s of cap.strokes!) {
+      expect([s.path.start.x, s.path.start.y]).toEqual([40, 0]);
+      expect(s.path.segments).toHaveLength(1);
+    }
+    const [w1, w2] = cap.strokes!.map((s) => s.path.segments[0]!);
+    expect(w1!.kind === 'line' && w2!.kind === 'line').toBe(true);
+    if (w1!.kind === 'line' && w2!.kind === 'line') {
+      expect(w1!.to.y).toBeGreaterThan(0);
+      expect(w2!.to.y).toBeLessThan(0);
+      expect(w1!.to.x).toBeCloseTo(w2!.to.x);
+    }
+  });
+
+  it('圆点：圆心在端点、半径可配', () => {
+    const cap = new DotEndCapStrategy(3).decorate({ x: 40, y: 0 }, 1, 0, 'target');
+    expect(cap.dots).toEqual([{ center: { x: 40, y: 0 }, radius: 3 }]);
+  });
+});
+
 describe('EdgeStyleRenderer 装配', () => {
-  it('端到端：固定四点 + 正交折线产出可绘制段与箭头', () => {
+  it('端到端：两端独立端点样式（起点无帽 + 终点箭头）', () => {
     const renderer = new EdgeStyleRenderer({
-      ports: new FixedPortStrategy(),
+      source: {
+        ports: new FixedPortStrategy(),
+        fit: new AabbEndpointFitStrategy(),
+        cap: new NoneEndCapStrategy(),
+      },
+      target: {
+        ports: new FixedPortStrategy(),
+        fit: new AabbEndpointFitStrategy(),
+        cap: new ArrowEndCapStrategy(),
+      },
       path: new OrthogonalPolylinePathStrategy(),
       corners: new SharpCornerStrategy(),
       crossings: new PlainCrossingStrategy(),
@@ -301,6 +402,12 @@ describe('EdgeStyleRenderer 装配', () => {
     expect(geo.path.start).toEqual({ x: 10, y: 0 });
     const arrow = endArrow(geo.path);
     expect(arrow.tip).toEqual({ x: 90, y: 60 });
+    // 两端独立：起点无装饰、终点有箭头；起点切向指向路径外部（向左）
+    expect(geo.caps.source.fills).toBeUndefined();
+    expect(geo.caps.target.fills).toHaveLength(1);
+    const start = startTangent(geo.path);
+    expect(start.tip).toEqual({ x: 10, y: 0 });
+    expect(start.dx).toBeLessThan(0);
     expect(geo.label).toBe('连接');
     expect(Number.isFinite(geo.labelAnchor.x)).toBe(true);
   });

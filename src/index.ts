@@ -70,14 +70,16 @@ export { GridSpaceContext, type GridSpaceOptions } from './layout/grid-undirecte
 export { gridRouteAStar, type GridRouteOptions } from './layout/grid-undirected/grid-route.js';
 export type { Bounds, Box, Point } from './layout/grid-undirected/space-types.js';
 
-// 连线风格策略（端点对接 / 路径 / 转弯 / 交叉 四接缝 + 装配渲染器）
+// 连线风格策略（端点对接 / 贴合 / 端帽 / 路径 / 转弯 / 交叉 接缝 + 装配渲染器）
 export {
   EdgeStyleRenderer,
   pathMidpoint,
   endArrow,
+  startTangent,
   type EdgeScene,
   type EdgeGeometry,
   type EdgeStyleOptions,
+  type EdgeEndpointStyle,
 } from './edge/renderer.js';
 export { pathLength, segmentEnd, segmentLength } from './edge/segments.js';
 export {
@@ -86,6 +88,18 @@ export {
   dominantSide,
   type Side,
 } from './edge/ports.js';
+export {
+  AabbEndpointFitStrategy,
+  ShapeEndpointFitStrategy,
+  CircleEndpointFitStrategy,
+  CenterEndpointFitStrategy,
+} from './edge/fit.js';
+export {
+  NoneEndCapStrategy,
+  ArrowEndCapStrategy,
+  OpenEndCapStrategy,
+  DotEndCapStrategy,
+} from './edge/caps.js';
 export {
   OrthogonalPolylinePathStrategy,
   StraightLinePathStrategy,
@@ -101,6 +115,9 @@ export type {
   Port,
   PortWithNormal,
   PortStrategy,
+  EndpointFitStrategy,
+  EndCapDecoration,
+  EndCapStrategy,
   PathStrategy,
   EdgeRouteContext,
   CornerStrategy,
