@@ -66,6 +66,37 @@
     </fieldset>
 
     <fieldset>
+      <legend>连线风格</legend>
+      <label class="row"><span class="name">路径</span>
+        <select id="pathStyle" style="flex:1">
+          <option value="orthogonal" selected>正交折线</option>
+          <option value="straight">直线</option>
+          <option value="bezier">贝塞尔曲线</option>
+          <option value="oblique">斜折线（分散）</option>
+        </select>
+      </label>
+      <label class="row"><span class="name">端点对接</span>
+        <select id="portStyle" style="flex:1">
+          <option value="fixed" selected>固定四点</option>
+          <option value="distributed">同侧均匀分布</option>
+        </select>
+      </label>
+      <label class="row"><span class="name">转弯</span>
+        <select id="cornerStyle" style="flex:1">
+          <option value="sharp" selected>直角</option>
+          <option value="round">圆角</option>
+        </select>
+      </label>
+      <label class="row"><span class="name">圆角半径</span><input id="cr" type="range" min="0" max="16" step="1" value="8" /><output id="crv"></output></label>
+      <label class="row"><span class="name">交叉</span>
+        <select id="crossingStyle" style="flex:1">
+          <option value="plain" selected>平交</option>
+          <option value="bridge">立交（跳线）</option>
+        </select>
+      </label>
+    </fieldset>
+
+    <fieldset>
       <legend>视图</legend>
       <button id="restart">重新布局</button>
       <button id="fitView">适应视图</button>

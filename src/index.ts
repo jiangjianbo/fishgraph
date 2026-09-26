@@ -70,6 +70,43 @@ export { GridSpaceContext, type GridSpaceOptions } from './layout/grid-undirecte
 export { gridRouteAStar, type GridRouteOptions } from './layout/grid-undirected/grid-route.js';
 export type { Bounds, Box, Point } from './layout/grid-undirected/space-types.js';
 
+// 连线风格策略（端点对接 / 路径 / 转弯 / 交叉 四接缝 + 装配渲染器）
+export {
+  EdgeStyleRenderer,
+  pathMidpoint,
+  endArrow,
+  type EdgeScene,
+  type EdgeGeometry,
+  type EdgeStyleOptions,
+} from './edge/renderer.js';
+export { pathLength, segmentEnd, segmentLength } from './edge/segments.js';
+export {
+  FixedPortStrategy,
+  DistributedPortStrategy,
+  dominantSide,
+  type Side,
+} from './edge/ports.js';
+export {
+  OrthogonalPolylinePathStrategy,
+  StraightLinePathStrategy,
+  CubicBezierPathStrategy,
+  ObliqueDistributedPathStrategy,
+} from './edge/paths.js';
+export { SharpCornerStrategy, RoundCornerStrategy } from './edge/corners.js';
+export { PlainCrossingStrategy, BridgeCrossingStrategy } from './edge/crossings.js';
+export type {
+  PathSegment,
+  EdgePath,
+  EdgeEndpointBox,
+  Port,
+  PortWithNormal,
+  PortStrategy,
+  PathStrategy,
+  EdgeRouteContext,
+  CornerStrategy,
+  CrossingStrategy,
+} from './edge/types.js';
+
 export type {
   ElementId,
   NodeId,

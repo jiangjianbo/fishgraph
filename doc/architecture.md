@@ -49,6 +49,13 @@ graph TD
 | `src/layout/grade.ts` | 尺寸分级：px 盒 → 整数格占用（宽/高独立聚类定基准格） |
 | `src/layout/circle/strategy.ts` | circle 策略：连通分量摆正多边形环（无力学，接缝示例） |
 | `src/graph/store.ts` | GraphStore：GraphSpec 物化、邻接表、文字度量、增删改查 |
+| `src/edge/types.ts` | 连线风格策略接缝：Port / Path / Corner / Crossing 四接口 + PathSegment 段模型 |
+| `src/edge/ports.ts` | 端点对接策略：固定四点（FixedPort）/ 同侧均匀分布（DistributedPort） |
+| `src/edge/paths.ts` | 路径风格策略：正交折线 / 直线 / 贝塞尔 / 斜折线分散 |
+| `src/edge/corners.ts` | 转弯风格策略：直角（尖点）/ 圆角（相切圆弧替代拐点） |
+| `src/edge/crossings.ts` | 交叉风格策略：平交 / 立交（交点跳线弧） |
+| `src/edge/segments.ts` | 路径段几何工具：段终点、弧长、弧上取点、路径长度 |
+| `src/edge/renderer.ts` | EdgeStyleRenderer 装配器：布局输出 → 逐边几何段（含标签锚点与末端箭头） |
 
 ## 4. 核心数据流
 
@@ -73,12 +80,36 @@ GraphSpec ──▶ GraphStore（节点/容器/边物化 + 邻接表 + 文字盒
 4. **确定性**：放置顺序、评分、平局裁决全固定规则；同输入逐位重放。
 5. **无重叠由构造保证**：质点放置的占用检查 + 膨胀的插行列让位 + 压实的
    通道下限，三段构造性排除重叠，不依赖事后修正。
+6. **连线风格与布局解耦**：连线"长什么样"（端点对接 / 路径 / 转弯 / 交叉）
+   由 `src/edge/` 四个正交策略接口决定，均为纯几何计算、只消费布局输出
+   （nodeViews / edgeViews.waypoints），不反哺布局；渲染端只需翻译
+   line/arc/bezier 段序列（见 `EdgeStyleRenderer`）。
 
-## 6. 测试
+## 6. 连线风格管线
+
+每条边依序经过四个策略，前者的输出是后者的输入：
+
+```
+edgeViews.waypoints ─┐
+nodeViews/subgraphs ─┴─▶ PortStrategy（端口 + 外法向）
+                        ──▶ PathStrategy（EdgePath：line 段序列）
+                        ──▶ CornerStrategy（拐点 → 尖点或圆弧）
+                        ──▶ CrossingStrategy（按绘制序对先画边跳线）
+                        ──▶ EdgeGeometry（段序列 + 标签锚点 + 箭头切向）
+```
+
+- 端口分组：同侧边按「对端方向主导轴」分组、沿侧边自然序给 slot；
+  平行边（同端点对）按声明序给 bundle slot —— 分散类策略据此横移避让。
+- 走线骨架裁剪：A\* waypoints 首尾段位于元素 AABB 内部（从中心格出发），
+  路径策略按两端 AABB 裁掉内部段，端口 breakout 后不再反向穿回节点；
+  与节点重叠的连接段由渲染端「节点层后画且有填充」遮盖。
+
+## 7. 测试
 
 - `tests/grid-undirected.test.ts` —— 流水线不变量（成行成列、无重叠、
   通道宽度、正交走线、确定性、rebuild 重放）+ 膨胀对称性单元测试
 - `tests/shape-contract.test.ts` —— 用户口径形状契约 12 场景硬性验收
 - `tests/grade.test.ts` —— 尺寸分级
 - `tests/strategy.test.ts` —— 策略接缝（注册/热切换/图变更）
+- `tests/edge-style.test.ts` —— 连线风格策略（端口/路径/转弯/交叉 + 装配器端到端）
 - `tests/architecture.test.ts` —— 架构边界（src 不含图实例数据）

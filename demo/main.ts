@@ -1,5 +1,21 @@
-import { ForceLayout, estimateLabelBox, halfExtentsOf, rayShapeExit } from '../src/index.js';
-import type { GraphSpec, ShapeSpec, SubgraphView } from '../src/index.js';
+import {
+  ForceLayout,
+  estimateLabelBox,
+  halfExtentsOf,
+  EdgeStyleRenderer,
+  FixedPortStrategy,
+  DistributedPortStrategy,
+  OrthogonalPolylinePathStrategy,
+  StraightLinePathStrategy,
+  CubicBezierPathStrategy,
+  ObliqueDistributedPathStrategy,
+  SharpCornerStrategy,
+  RoundCornerStrategy,
+  PlainCrossingStrategy,
+  BridgeCrossingStrategy,
+  pathLength,
+} from '../src/index.js';
+import type { GraphSpec, ShapeSpec, SubgraphView, EdgeGeometry, EdgePath } from '../src/index.js';
 
 // ── 示例图 ────────────────────────────────────────────────
 
@@ -242,6 +258,16 @@ const outs = {
   cm: $<HTMLOutputElement>('cmv'),
 };
 const labelCollision = $<HTMLInputElement>('lc');
+const edgeStyle = {
+  path: $<HTMLSelectElement>('pathStyle'),
+  port: $<HTMLSelectElement>('portStyle'),
+  corner: $<HTMLSelectElement>('cornerStyle'),
+  cr: $<HTMLInputElement>('cr'),
+  crossing: $<HTMLSelectElement>('crossingStyle'),
+};
+const edgeStyleOuts = {
+  cr: $<HTMLOutputElement>('crv'),
+};
 
 function buildOptions() {
   return {
@@ -257,6 +283,70 @@ function buildOptions() {
 function syncOutputs(): void {
   outs.L.value = sliders.L.value;
   outs.cm.value = sliders.cm.value;
+  edgeStyleOuts.cr.value = edgeStyle.cr.value;
+}
+
+// ── 连线风格（策略装配）───────────────────────────────────
+
+/** 立交跳线半径：随相机缩放自适应，屏幕上保持约 5px（clamp 2.5..14 世界单位）。 */
+function bridgeGap(): number {
+  return Math.min(14, Math.max(2.5, 5 / cam.k));
+}
+
+/** 按控件取值装配四个策略（端点对接 / 路径 / 转弯 / 交叉）。 */
+function buildEdgeRenderer(): EdgeStyleRenderer {
+  const path = edgeStyle.path.value;
+  return new EdgeStyleRenderer({
+    ports:
+      edgeStyle.port.value === 'distributed'
+        ? new DistributedPortStrategy()
+        : new FixedPortStrategy(),
+    path:
+      path === 'straight'
+        ? new StraightLinePathStrategy()
+        : path === 'bezier'
+          ? new CubicBezierPathStrategy()
+          : path === 'oblique'
+            ? new ObliqueDistributedPathStrategy()
+            : new OrthogonalPolylinePathStrategy(),
+    corners:
+      edgeStyle.corner.value === 'round'
+        ? new RoundCornerStrategy(Number(edgeStyle.cr.value))
+        : new SharpCornerStrategy(),
+    crossings:
+      edgeStyle.crossing.value === 'bridge'
+        ? new BridgeCrossingStrategy(bridgeGap())
+        : new PlainCrossingStrategy(),
+  });
+}
+
+// 边几何缓存：布局重算或风格参数变化才重算，平移/缩放只做坐标变换
+// （例外：立交跳线半径随缩放自适应，缩放时通过 key 变化触发重算）。
+let edgeCache: { stamp: number; key: string; geos: EdgeGeometry[] } | null = null;
+let layoutStamp = 0;
+
+function edgeGeometries(): EdgeGeometry[] {
+  if (!layout) return [];
+  const key = [
+    edgeStyle.path.value,
+    edgeStyle.port.value,
+    edgeStyle.corner.value,
+    edgeStyle.crossing.value,
+    edgeStyle.cr.value,
+    bridgeGap().toFixed(1),
+  ].join('|');
+  if (!edgeCache || edgeCache.stamp !== layoutStamp || edgeCache.key !== key) {
+    edgeCache = {
+      stamp: layoutStamp,
+      key,
+      geos: buildEdgeRenderer().render({
+        nodeViews: layout.nodeViews,
+        subgraphViews: layout.subgraphViews,
+        edgeViews: layout.edgeViews,
+      }),
+    };
+  }
+  return edgeCache.geos;
 }
 
 // ── 布局实例 ──────────────────────────────────────────────
@@ -266,6 +356,7 @@ let layout: ForceLayout | null = null;
 function rebuild(): void {
   layout = new ForceLayout(GRAPHS[graphSel.value](), buildOptions());
   layout.run();
+  layoutStamp++; // 布局坐标重算：边几何缓存失效
   fitToView();
   drawView();
   const nv = layout.nodeViews.length;
@@ -279,6 +370,7 @@ for (const el of [...Object.values(sliders), labelCollision]) {
     if (!layout) return;
     layout.updateOptions(buildOptions());
     layout.run();
+    layoutStamp++;
     fitToView();
     drawView();
     statusEl.textContent = `${layout.nodeViews.length} 节点 · ${layout.edgeViews.length} 边 · 纯网格布局（确定性，构造期完成）`;
@@ -286,9 +378,19 @@ for (const el of [...Object.values(sliders), labelCollision]) {
 }
 graphSel.addEventListener('change', rebuild);
 directionSel.addEventListener('change', () => {
-  layout?.updateOptions(buildOptions());
-  layout?.run();
+  if (!layout) return;
+  layout.updateOptions(buildOptions());
+  layout.run();
+  layoutStamp++;
   fitToView();
+  drawView();
+});
+// 连线风格只影响绘制几何：切换后仅重绘（布局不动）
+for (const el of [edgeStyle.path, edgeStyle.port, edgeStyle.corner, edgeStyle.crossing]) {
+  el.addEventListener('change', drawView);
+}
+edgeStyle.cr.addEventListener('input', () => {
+  syncOutputs();
   drawView();
 });
 $('restart').addEventListener('click', rebuild);
@@ -440,6 +542,27 @@ function fitCanvas(cv: HTMLCanvasElement): boolean {
   return false;
 }
 
+/** 把策略产出的段序列翻译成画布路径命令（world → screen 变换在各项点做）。 */
+function traceEdgePath(g: CanvasRenderingContext2D, path: EdgePath): void {
+  const [sx, sy] = worldToScreen(path.start.x, path.start.y);
+  g.moveTo(sx, sy);
+  for (const seg of path.segments) {
+    if (seg.kind === 'line') {
+      const [x, y] = worldToScreen(seg.to.x, seg.to.y);
+      g.lineTo(x, y);
+    } else if (seg.kind === 'arc') {
+      // 相机只有平移缩放（无旋转），圆心转屏幕、半径乘缩放、角度不变
+      const [cx, cy] = worldToScreen(seg.center.x, seg.center.y);
+      g.arc(cx, cy, seg.radius * cam.k, seg.startAngle, seg.endAngle, seg.ccw);
+    } else {
+      const [c1x, c1y] = worldToScreen(seg.cp1.x, seg.cp1.y);
+      const [c2x, c2y] = worldToScreen(seg.cp2.x, seg.cp2.y);
+      const [x, y] = worldToScreen(seg.to.x, seg.to.y);
+      g.bezierCurveTo(c1x, c1y, c2x, c2y, x, y);
+    }
+  }
+}
+
 function drawView(): void {
   fitCanvas(viewCanvas);
   const dpr = window.devicePixelRatio || 1;
@@ -472,7 +595,6 @@ function drawView(): void {
   }
 
   const nv = layout.nodeViews;
-  const edgeEnds = [...nv, ...layout.subgraphViews];
 
   // 背景层 0：subgraph 容器（嵌套按深度升序绘制）
   const hubDepth = subgraphDepthMap(layout.subgraphViews);
@@ -501,64 +623,31 @@ function drawView(): void {
     }
   }
 
-  // 边：按走线拐点画折线（A* 正交走线）；两端按真实形状贴合，末端箭头；
-  // 标签画在折线路径长度中点
-  for (const e of layout.edgeViews) {
-    const a = edgeEnds[e.sourceIndex];
-    const b = edgeEnds[e.targetIndex];
-    const wps = e.waypoints && e.waypoints.length >= 2 ? e.waypoints : [a, b];
-    const d0 = Math.hypot(wps[1]!.x - a.x, wps[1]!.y - a.y) || 1;
-    const u0x = (wps[1]!.x - a.x) / d0;
-    const u0y = (wps[1]!.y - a.y) / d0;
-    const t0 = rayShapeExit(a.shape, u0x, u0y);
-    const last = wps[wps.length - 2]!;
-    const d1 = Math.hypot(b.x - last.x, b.y - last.y) || 1;
-    const u1x = (b.x - last.x) / d1;
-    const u1y = (b.y - last.y) / d1;
-    const t1 = rayShapeExit(b.shape, -u1x, -u1y) + 3;
-    const isLine = wps.length === 2;
-    if (isLine && d1 - t1 <= t0) continue;
-    const pts = [
-      { x: a.x + u0x * t0, y: a.y + u0y * t0 },
-      ...wps.slice(1, -1),
-      { x: b.x - u1x * t1, y: b.y - u1y * t1 },
-    ];
-    const scr = pts.map((p) => worldToScreen(p.x, p.y));
+  // 边：连线风格策略管线（端点对接 → 路径 → 转弯 → 交叉）产出几何段；
+  // 渲染端只负责把 line/arc/bezier 段翻译成画布命令，末端箭头 + 标签锚点
+  // 已由管线算好。
+  for (const geo of edgeGeometries()) {
+    if (pathLength(geo.path) < 1) continue; // 两元素贴邻、端口重合：无可绘路径
     g.strokeStyle = '#64748b';
     g.lineWidth = 1.5;
     g.beginPath();
-    scr.forEach(([sx, sy], i) => (i === 0 ? g.moveTo(sx, sy) : g.lineTo(sx, sy)));
+    traceEdgePath(g, geo.path);
     g.stroke();
-    const [sx1, sy1] = scr[scr.length - 1]!;
-    const ang = Math.atan2(sy1 - scr[scr.length - 2]![1], sx1 - scr[scr.length - 2]![0]);
+
+    const { tip, dx, dy } = geo.arrow;
+    const [tx, ty] = worldToScreen(tip.x, tip.y);
+    const ang = Math.atan2(dy, dx);
     g.fillStyle = '#64748b';
     g.beginPath();
-    g.moveTo(sx1, sy1);
-    g.lineTo(sx1 - 8 * Math.cos(ang - 0.4), sy1 - 8 * Math.sin(ang - 0.4));
-    g.lineTo(sx1 - 8 * Math.cos(ang + 0.4), sy1 - 8 * Math.sin(ang + 0.4));
+    g.moveTo(tx, ty);
+    g.lineTo(tx - 8 * Math.cos(ang - 0.4), ty - 8 * Math.sin(ang - 0.4));
+    g.lineTo(tx - 8 * Math.cos(ang + 0.4), ty - 8 * Math.sin(ang + 0.4));
     g.closePath();
     g.fill();
 
-    if (e.label !== null && e.label !== '') {
-      let total = 0;
-      for (let i = 1; i < pts.length; i++) {
-        total += Math.hypot(pts[i]!.x - pts[i - 1]!.x, pts[i]!.y - pts[i - 1]!.y);
-      }
-      let remain = total / 2;
-      let mx = pts[0]!.x;
-      let my = pts[0]!.y;
-      for (let i = 1; i < pts.length; i++) {
-        const seg = Math.hypot(pts[i]!.x - pts[i - 1]!.x, pts[i]!.y - pts[i - 1]!.y);
-        if (seg >= remain) {
-          const r = seg === 0 ? 0 : remain / seg;
-          mx = pts[i - 1]!.x + (pts[i]!.x - pts[i - 1]!.x) * r;
-          my = pts[i - 1]!.y + (pts[i]!.y - pts[i - 1]!.y) * r;
-          break;
-        }
-        remain -= seg;
-      }
-      const box = estimateLabelBox(e.label, 12, 3);
-      const [smx, smy] = worldToScreen(mx, my);
+    if (geo.label !== null && geo.label !== '') {
+      const box = estimateLabelBox(geo.label, 12, 3);
+      const [smx, smy] = worldToScreen(geo.labelAnchor.x, geo.labelAnchor.y);
       const bw = Math.max(30, box.hw * 2 * cam.k);
       const bh = Math.max(14, box.hh * 2 * cam.k);
       g.fillStyle = 'rgba(255,255,255,0.92)';
@@ -567,7 +656,7 @@ function drawView(): void {
       g.font = `${Math.max(9, 12 * cam.k)}px system-ui, 'PingFang SC', sans-serif`;
       g.textAlign = 'center';
       g.textBaseline = 'middle';
-      const rows = box.rows.length > 1 && cam.k > 0.6 ? box.rows : [e.label];
+      const rows = box.rows.length > 1 && cam.k > 0.6 ? box.rows : [geo.label];
       rows.forEach((row, li) => {
         g.fillText(row.trim(), smx, smy + ((li - (rows.length - 1) / 2) * 13 * cam.k));
       });
