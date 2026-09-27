@@ -651,22 +651,23 @@ function drawView(): void {
   g.clearRect(0, 0, viewCanvas.clientWidth, viewCanvas.clientHeight);
   if (!layout) return;
 
-  // 淡色网格背景：格线 = 粗布局格胞（L × 比例尺），与节点格位对齐。
+  // 淡色网格背景：格线 = 矩形基准格（横向 cellW、纵向 cellH），与节点格位对齐。
   {
-    const lattice = Number(sliders.L.value) * layout.cellScale;
+    const latticeX = layout.cellW;
+    const latticeY = layout.cellH;
     const [wx0, wy0] = screenToWorld(0, 0);
     const [wx1, wy1] = screenToWorld(viewCanvas.clientWidth, viewCanvas.clientHeight);
-    const startX = Math.floor(wx0 / lattice) * lattice;
-    const startY = Math.floor(wy0 / lattice) * lattice;
+    const startX = Math.floor(wx0 / latticeX) * latticeX;
+    const startY = Math.floor(wy0 / latticeY) * latticeY;
     g.strokeStyle = '#e2e8f0';
     g.lineWidth = 1;
     g.beginPath();
-    for (let x = startX; x <= wx1; x += lattice) {
+    for (let x = startX; x <= wx1; x += latticeX) {
       const [sx] = worldToScreen(x, 0);
       g.moveTo(sx, 0);
       g.lineTo(sx, viewCanvas.clientHeight);
     }
-    for (let y = startY; y <= wy1; y += lattice) {
+    for (let y = startY; y <= wy1; y += latticeY) {
       const [, sy] = worldToScreen(0, y);
       g.moveTo(0, sy);
       g.lineTo(viewCanvas.clientWidth, sy);
@@ -758,7 +759,14 @@ function drawView(): void {
       g.font = `${Math.max(8, 12 * cam.k)}px system-ui, 'PingFang SC', sans-serif`;
       g.textAlign = 'center';
       g.textBaseline = 'middle';
-      g.fillText(String(nd.label), sx, labelTopOffset !== null ? sy - labelTopOffset * cam.k : sy);
+      // 与布局端同口径回绕（measureBox = estimateLabelBox(label, 12, 4)）：
+      // 节点盒按回绕行数物化，绘制按同一 rows 分行，显示与计算联动。
+      const box = estimateLabelBox(String(nd.label), 12, 4);
+      const rows = box.rows.length > 1 && cam.k > 0.6 ? box.rows : [String(nd.label)];
+      const baseY = labelTopOffset !== null ? sy - labelTopOffset * cam.k : sy;
+      rows.forEach((row, li) => {
+        g.fillText(row.trim(), sx, baseY + (li - (rows.length - 1) / 2) * 12 * cam.k);
+      });
     }
   }
 }

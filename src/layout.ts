@@ -15,6 +15,9 @@ import {
   type LayoutStrategy,
   type ResolvedLayoutOptions,
 } from './layout/strategy.js';
+import { createMetricStrategy } from './layout/metric/registry.js';
+import './layout/metric/default.js';
+import type { RenderGraph } from './layout/metric/types.js';
 import type {
   EdgeSpec,
   ElementId,
@@ -30,6 +33,8 @@ import type {
 const DEFAULTS = {
   // 唯一主引擎：纯网格布局（波纹放置 → 中心对称膨胀 → 通道压实 → A* 走线）
   algorithm: 'grid-undirected',
+  // 尺寸映射策略（逻辑布局 ↔ 现实尺寸：度量/分级/物理化，缺省矩形基准格）
+  metric: 'default',
   // 流动方向（'none' 无向放置；'TB'/'LR' 有向层级布局，全部边顺流）
   direction: 'none' as const,
   // 自然边长（格）：粗布局格胞 = 本值 × 比例尺（grade.ts 分级基准）
@@ -55,6 +60,7 @@ export class ForceLayout {
   constructor(graph: GraphSpec, options: LayoutOptions = {}) {
     this.options = { ...DEFAULTS, ...options } as ResolvedLayoutOptions;
     this.store = new GraphStore(graph);
+    this.store.setMetricStrategy(createMetricStrategy(this.options.metric));
     this.store.setLabelMetrics(this.options.labelFontSize, this.options.labelPadding);
     this.strategy = createStrategy(this.options.algorithm, this.store, this.options);
   }
@@ -74,6 +80,25 @@ export class ForceLayout {
     return this.store.cellScale;
   }
 
+  /** 矩形基准格宽（px/格，x 轴）—— 映射策略分级产出。 */
+  get cellW(): number {
+    return this.store.gradeCellW;
+  }
+
+  /** 矩形基准格高（px/格，y 轴）。 */
+  get cellH(): number {
+    return this.store.gradeCellH;
+  }
+
+  /**
+   * 可渲染图（映射策略出口：带自由坐标的纯数据；仅网格类策略产出，
+   * 其余策略为 null）。渲染端拿到出口自行决定缩放与绘制方式。
+   */
+  get renderGraph(): RenderGraph | null {
+    const graph = this.strategy as { renderGraph?: RenderGraph | null };
+    return graph.renderGraph ?? null;
+  }
+
   /** 运行时切换布局算法：图数据保留，重新布局。 */
   setStrategy(name: string): void {
     this.options = { ...this.options, algorithm: name };
@@ -83,9 +108,22 @@ export class ForceLayout {
     this.strategy = createStrategy(name, this.store, this.options);
   }
 
+  /** 运行时切换尺寸映射策略：重新分级并重算布局。 */
+  setMetricStrategy(name: string): void {
+    this.options = { ...this.options, metric: name };
+    this.store.setMetricStrategy(createMetricStrategy(name));
+    this.store.clearEdgeWaypoints();
+    this.store.clearMaterializedSizes();
+    this.strategy.refresh(this.options);
+  }
+
   /** 更新布局参数（重算布局）。 */
   updateOptions(partial: LayoutOptions): void {
     const next = { ...this.options, ...partial } as ResolvedLayoutOptions;
+    if (partial.metric !== undefined && partial.metric !== this.options.metric) {
+      this.setMetricStrategy(next.metric);
+      return;
+    }
     if (partial.algorithm !== undefined && partial.algorithm !== this.options.algorithm) {
       this.options = next;
       this.store.clearEdgeWaypoints();

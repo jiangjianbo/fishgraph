@@ -16,6 +16,7 @@
 
 import type { GraphStore } from '../graph/store.js';
 import type { LayoutOptions, RunOptions, RunResult } from '../types.js';
+import type { RenderGraph } from './metric/types.js';
 
 /** 已解析完备的布局参数（DEFAULTS 合并后）。 */
 export type ResolvedLayoutOptions = Required<LayoutOptions>;
@@ -23,6 +24,12 @@ export type ResolvedLayoutOptions = Required<LayoutOptions>;
 export interface LayoutStrategy {
   /** 注册名（即 LayoutOptions.algorithm 的取值）。 */
   readonly name: string;
+
+  /**
+   * 可渲染图（映射策略出口：带自由坐标的纯数据）。不产出可渲染图的
+   * 策略（如 circle）可不实现 —— ForceLayout.renderGraph 返回 null。
+   */
+  readonly renderGraph?: RenderGraph | null;
 
   /** 单步弛豫。返回 true 表示有被接受的移动（驱动动画帧）。 */
   step(): boolean;

@@ -48,6 +48,19 @@ export {
   type GradeBasis,
 } from './layout/grade.js';
 
+// 尺寸映射策略（逻辑布局 ↔ 现实尺寸：度量 → 矩形基准格分级 → 物理化出可渲染图）
+export { registerMetricStrategy, createMetricStrategy, listMetricStrategies } from './layout/metric/registry.js';
+export { DefaultMetricStrategy } from './layout/metric/default.js';
+export type {
+  MetricStrategy,
+  MetricElementInfo,
+  LayoutSolution,
+  LayoutRoute,
+  RenderGraph,
+  RenderNode,
+  RenderEdge,
+} from './layout/metric/types.js';
+
 // 纯网格流水线（主引擎内部件，供测试与扩展）
 export {
   coarseGridPlacement,

@@ -39,7 +39,9 @@ grid-undirected 是引擎的**唯一主算法**：节点位置在离散阶段一
 
 `coarseGridPlacement(elements, adj, naturalLength, heuristics)` 返回
 `{ grid, posOf, cell, order }`：每格一节点的 `PointGrid`、每元素的格坐标、
-格距（= `naturalLength` 格数 × `cellScale` 比例尺）、放置顺序。
+格距、放置顺序。**矩形格口径（2026-09-27）**：格距 = 矩形基准格
+（`options.cellW/cellH`，来自尺寸映射策略分级），`naturalLength` 不再
+缩放格距；物化与物理化委托 MetricStrategy（见布局核心原则「三」）。
 **波纹连通生长（BFS 层序）** + 环形扩搜评分（曼哈顿张力 − 环周长奖励 +
 环内方位分类）+ 死锁插行列，**100% 不死锁**、全固定规则。连线不占位——
 只有文字例外（第一期尚未实现虚拟文本节点，见 §8）。

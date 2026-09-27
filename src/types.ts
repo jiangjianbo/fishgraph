@@ -83,6 +83,14 @@ export interface LayoutOptions {
    */
   algorithm?: string;
   /**
+   * 尺寸映射策略（逻辑布局 ↔ 现实尺寸的映射：节点度量 → 分级定矩形
+   * 基准格与宽高格数 → 格解物理化为可渲染图）。缺省 'default'
+   * （矩形基准格：1 格 = 最小基准盒，节点物理尺寸按真实比例占格）；
+   * 可用 registerMetricStrategy 注册自定义策略，运行时切换用
+   * layout.setMetricStrategy(name)。
+   */
+  metric?: string;
+  /**
    * 流动方向（grid-undirected 的布局模式，默认 'none' = 无向放置）：
    *  - 'none'：无向波纹放置（张力 − 环周长 + 环内方位分类）；
    *  - 'TB'：有向层级布局，自顶向下（解环 + 最长路径分层，节点钉在

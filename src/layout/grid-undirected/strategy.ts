@@ -3,17 +3,20 @@
  * 主引擎）。
  *
  * 按 doc/布局核心原则.md 的「纯网格布局算法流程」组织，全程在离散网格
- * 中运行（连续坐标只是网格解的物理化表达）：
+ * 中运行（世界坐标由尺寸映射策略物理化，渲染端自由缩放）：
  *   [质点拓扑粗布局] → [节点中心对称膨胀物化为 AABB] → [通道约束压实] →
- *   [网格 A* 避障走线]
+ *   [网格 A* 避障走线] → [映射策略：格解 → 可渲染图]
  *  - 阶段 1 用 coarse.ts 的质点网格放置（波纹连通生长 + 死锁插行列）。
  *    direction = 'none'（默认）用无向放置美学（张力 − 环周长 + 环内方位
  *    分类 + 扫描序平局）；'TB'/'LR' 用有向层级放置（解环 + 最长路径
  *    分层，节点钉在自己的层级行/列上，顺流无逆边）；
- *  - 阶段 2/3 由 ExpansionGrid 承担：节点按文字/形状物化为逻辑格 AABB，
- *    中心对称扩张让位，压实把相邻行列空隙压到 channelMargin（走线走廊）；
- *  - 阶段 4 用 GridSpaceContext.routeEdge（A* 正交寻路 + 拐点惩罚）为
- *    每条边计算走线拐点，写入 edgeViews 的 waypoints；
+ *  - 阶段 2/3 由 ExpansionGrid 承担：节点按映射策略分级的宽高格数
+ *    （gw/gh = px 盒 ÷ 矩形基准格）中心对称扩张，压实把相邻行列空隙
+ *    压到 channelMargin（走线走廊）；
+ *  - 阶段 4 用 GridSpaceContext.routeEdge（A* 正交寻路 + 拐点惩罚）在
+ *    逻辑格上走线；物理化与可渲染图装配委托尺寸映射策略
+ *    （LayoutOptions.metric，缺省 DefaultMetricStrategy：1 格 = 矩形
+ *    基准格，x 轴 cellW、y 轴 cellH）；
  *  - 节点位置一旦物化不再被走线反向推开（连线不占空间，走线只在
  *    自由通道格中流转）。
  *
@@ -44,6 +47,7 @@ import type { GridPos, ProjectionAnchor } from './coarse.js';
 import { computeLevels } from './levels.js';
 import { directedHeuristics } from './directed-placement.js';
 import { ExpansionGrid } from './expansion.js';
+import type { LayoutRoute, RenderGraph } from '../metric/types.js';
 import {
   buildFoldPlan,
   chainFootprint,
@@ -119,7 +123,8 @@ export class GridUndirectedStrategy implements LayoutStrategy {
     // 阶段 1：质点拓扑粗布局。'none'（默认）用无向放置美学（张力 − 环
     // 周长 + 环内方位分类：张力同分的候选优先十字方位，45° 次之）；
     // 'TB'/'LR' 用有向层级放置（解环 + 最长路径分层，钉层级行/列）。
-    // naturalLength 为格数，粗布局格胞 = 格数 × 比例尺（px 中间量）。
+    // 格距 = 矩形基准格（applyNodeLabelSizes 已分级：gradeCellW/H 与
+    // 各元素 gw/gh 就绪）。
     const direction = this.options.direction;
     const heuristics =
       direction === 'none'
@@ -130,32 +135,32 @@ export class GridUndirectedStrategy implements LayoutStrategy {
             computeLevels(elements.length, this.store.edges).level,
             direction,
           );
-    const { grid, posOf, cell, order } = coarseGridPlacement(
+    const { grid, posOf, order } = coarseGridPlacement(
       elements,
       adj,
-      this.options.naturalLength * this.store.cellScale,
+      this.options.naturalLength,
       heuristics,
+      { cellW: this.store.gradeCellW, cellH: this.store.gradeCellH },
     );
     void grid; // 占用语义由 ExpansionGrid 接管
 
-    // 阶段 2：节点与文字轴向膨胀 —— 物理尺寸换算逻辑格宽高后逐个扩张。
+    // 阶段 2：节点与文字轴向膨胀 —— 消费映射策略分级的宽高格数
+    // （gw/gh = px 盒 ÷ 矩形基准格向上取整），不再自算。
     const expansion = new ExpansionGrid(elements.length);
     for (const i of order) {
       const p = posOf[i]!;
       expansion.place(i, p.gx, p.gy);
     }
     for (const i of order) {
-      const box = this.store.nodeBoxSize(elements[i]!);
-      const gw = Math.max(1, Math.ceil((box.w - 1e-9) / cell));
-      const gh = Math.max(1, Math.ceil((box.h - 1e-9) / cell));
-      expansion.expand(i, gw, gh);
+      const el = elements[i]!;
+      expansion.expand(i, Math.max(1, el.gw), Math.max(1, el.gh));
     }
 
     // 阶段 3：通道约束压实（Channel Safety Margin）。
     expansion.compact(this.marginCells);
 
-    // 物理化 + 走线。
-    this.finalizeLayout(expansion.boxes(), cell);
+    // 物理化 + 走线（映射策略出口：可渲染图）。
+    this.finalizeLayout(expansion.boxes());
   }
 
   /**
@@ -171,19 +176,18 @@ export class GridUndirectedStrategy implements LayoutStrategy {
   private recomputeFolded(): void {
     const plan: FoldPlan = buildFoldPlan(this.store, this.options.foldChainMin ?? DEFAULT_FOLD_CHAIN_MIN);
     this.foldPlan = plan;
-    const cell = Math.max(this.options.naturalLength * this.store.cellScale, 1e-3);
     const subLayouts = new Map<FoldScope, ScopeLayout>();
-    const rootLayout = this.layoutScope(plan.root, cell, subLayouts, [], []);
+    const rootLayout = this.layoutScope(plan.root, subLayouts, [], []);
 
     // 展开 = 刚性整体平移（唯一落位动作，此后不再有全局重排）
     const nodeBoxes: Box[] = new Array(this.store.elements.length);
-    this.unfoldScope(plan.root, rootLayout.boxes, nodeBoxes, cell, subLayouts);
+    this.unfoldScope(plan.root, rootLayout.boxes, nodeBoxes, subLayouts);
 
     // 容器框 = 全部成员实占 AABB 的并集（刚性展开下与容器 item 包裹一致）
     const boxes = this.attachContainers(nodeBoxes, plan);
-    this.finalizeLayout(boxes, cell);
-    // 物理化写回后，同步容器实占 shape（物化格包裹 + padding）
-    this.syncContainerShapes(plan, boxes, cell);
+    // 容器实占 shape（格包裹 + padding）由映射策略在物理化时产出
+    const containerPaddings = this.store.elements.map((el) => (isSubgraphNode(el) ? el.padding : null));
+    this.finalizeLayout(boxes, containerPaddings);
   }
 
   /**
@@ -223,7 +227,6 @@ export class GridUndirectedStrategy implements LayoutStrategy {
    */
   private layoutScope(
     scope: FoldScope,
-    cell: number,
     subLayouts: Map<FoldScope, ScopeLayout>,
     frames: readonly ScopeFrame[],
     anchors: readonly ProjectionAnchor[],
@@ -248,13 +251,11 @@ export class GridUndirectedStrategy implements LayoutStrategy {
     const reps = scope.items.map((item) =>
       item.kind === 'element' ? this.store.elements[item.index]! : this.store.elements[representativeOf(item)]!,
     );
-    let { posOf, order } = coarseGridPlacement(
-      reps,
-      scope.adjacency,
-      this.options.naturalLength * this.store.cellScale,
-      heuristics,
-      { ignorePlaced: true },
-    );
+    const coarseCell = { cellW: this.store.gradeCellW, cellH: this.store.gradeCellH };
+    let { posOf, order } = coarseGridPlacement(reps, scope.adjacency, this.options.naturalLength, heuristics, {
+      ignorePlaced: true,
+      ...coarseCell,
+    });
     if (anchors.length > 0) {
       // 两遍放置校正投影原点：锚点偏移以「容器质点」为原点，而膨胀阶段
       // 容器质点 ↔ 内容 AABB 中心格 —— 第一遍放置求质点包围盒中心，把
@@ -273,13 +274,11 @@ export class GridUndirectedStrategy implements LayoutStrategy {
       const cx = Math.round((minX + maxX) / 2);
       const cy = Math.round((minY + maxY) / 2);
       const shifted = anchors.map((a) => ({ item: a.item, at: { gx: a.at.gx + cx, gy: a.at.gy + cy } }));
-      ({ posOf, order } = coarseGridPlacement(
-        reps,
-        scope.adjacency,
-        this.options.naturalLength * this.store.cellScale,
-        heuristics,
-        { ignorePlaced: true, anchors: shifted },
-      ));
+      ({ posOf, order } = coarseGridPlacement(reps, scope.adjacency, this.options.naturalLength, heuristics, {
+        ignorePlaced: true,
+        ...coarseCell,
+        anchors: shifted,
+      }));
     }
 
     const margin = this.marginCells;
@@ -293,16 +292,13 @@ export class GridUndirectedStrategy implements LayoutStrategy {
       let gw = 1;
       let gh = 1;
       if (item.kind === 'element') {
-        const box = this.store.nodeBoxSize(this.store.elements[item.index]!);
-        gw = Math.max(1, Math.ceil((box.w - 1e-9) / cell));
-        gh = Math.max(1, Math.ceil((box.h - 1e-9) / cell));
+        const el = this.store.elements[item.index]!;
+        gw = Math.max(1, el.gw);
+        gh = Math.max(1, el.gh);
       } else if (item.kind === 'chain') {
         // 透明 group 展开：蛇形网格（面积最小 → 周长最小，gap=0 判据），
         // 链内 margin 格走廊物化 —— 走廊随链整体平移，不被外部改写。
-        const { width, height } = chainFootprint(
-          item.members.map((m) => this.gridSizeOf(m, cell)),
-          margin,
-        );
+        const { width, height } = chainFootprint(item.members.map((m) => this.gridSizeOf(m)), margin);
         gw = Math.max(1, width);
         gh = Math.max(1, height);
       } else {
@@ -310,7 +306,7 @@ export class GridUndirectedStrategy implements LayoutStrategy {
         // 的投影锚点由本作用域的放置帧 + 边界边构建。
         const childFrames: readonly ScopeFrame[] = [...frames, { scope, posOf }];
         const childAnchors = this.collectAnchors(item.scope, childFrames);
-        const sub = this.layoutScope(item.scope, cell, subLayouts, childFrames, childAnchors);
+        const sub = this.layoutScope(item.scope, subLayouts, childFrames, childAnchors);
         subLayouts.set(item.scope, sub);
         gw = Math.max(1, sub.width);
         gh = Math.max(1, sub.height);
@@ -387,7 +383,6 @@ export class GridUndirectedStrategy implements LayoutStrategy {
     scope: FoldScope,
     itemBoxes: Box[],
     out: Box[],
-    cell: number,
     subLayouts: Map<FoldScope, ScopeLayout>,
   ): void {
     scope.items.forEach((item, i) => {
@@ -398,120 +393,165 @@ export class GridUndirectedStrategy implements LayoutStrategy {
       }
       if (item.kind === 'chain') {
         // 透明 group 还原为长蛇：蛇形网格 + 链内走廊物化（网格化落位）。
-        unfoldChain(item.members, box, (m) => this.gridSizeOf(m, cell), out, this.marginCells);
+        unfoldChain(item.members, box, (m) => this.gridSizeOf(m), out, this.marginCells);
         return;
       }
       // 容器：成员子布局整体平移进容器包裹（容器自身不占布局位）。
       const sub = subLayouts.get(item.scope);
       if (!sub) return;
       const shifted = sub.boxes.map((b) => ({ ...b, x: b.x + box.x, y: b.y + box.y }));
-      this.unfoldScope(item.scope, shifted, out, cell, subLayouts);
+      this.unfoldScope(item.scope, shifted, out, subLayouts);
     });
   }
 
+  /** 元素的逻辑格宽高（映射策略分级产物：px 盒 ÷ 矩形基准格，至少 1×1）。 */
+  private gridSizeOf(index: number): { w: number; h: number } {
+    const el = this.store.elements[index]!;
+    return { w: Math.max(1, el.gw), h: Math.max(1, el.gh) };
+  }
+
+  /** 最近一次物理化的可渲染图（出口：带自由坐标，渲染端自行缩放绘制）。 */
+  private renderGraphOut: RenderGraph | null = null;
+
+  get renderGraph(): RenderGraph | null {
+    return this.renderGraphOut;
+  }
+
   /**
-   * 容器 shape 同步（深度序：嵌套容器先算）：shape = 布局包裹（物化格
-   * × 格距）+ 每侧 padding。布局与走线不消费 padding，渲染框按此包含
-   * 全部成员并呈现布线空间带来的留白。
+   * 物理化：格解交给尺寸映射策略产出可渲染图（世界坐标），再写回
+   * store —— 元素中心/AABB、边 waypoints、容器实占 shape（渲染框 =
+   * 格包裹 + padding；布局与走线不消费 padding）。
    */
-  private syncContainerShapes(plan: FoldPlan, boxes: Box[], cell: number): void {
-    for (const scope of [...plan.scopes].reverse()) {
-      if (scope.containerIndex < 0) continue;
-      const container = this.store.elements[scope.containerIndex]!;
-      if (!isSubgraphNode(container)) continue;
-      const b = boxes[scope.containerIndex];
-      if (!b) continue;
-      const pad = isSubgraphNode(container) ? container.padding : 0;
-      container.shape = {
-        kind: 'rect',
-        w: b.width * cell + pad * 2,
-        h: b.height * cell + pad * 2,
-      };
-    }
-  }
-
-  /** 元素的逻辑格宽高（nodeBoxSize px ÷ 格距，向上取整，至少 1×1）。 */
-  private gridSizeOf(index: number, cell: number): { w: number; h: number } {
-    const box = this.store.nodeBoxSize(this.store.elements[index]!);
-    return {
-      w: Math.max(1, Math.ceil((box.w - 1e-9) / cell)),
-      h: Math.max(1, Math.ceil((box.h - 1e-9) / cell)),
-    };
-  }
-
-  /** 物理化：AABB 中心写回坐标（质心居中）+ A* 避障走线。 */
-  private finalizeLayout(boxes: Box[], cell: number): void {
+  private finalizeLayout(boxes: Box[], containerPaddings: Array<number | null> = boxes.map(() => null)): void {
     const elements = this.store.elements;
-    const centers = boxes.map((b) => ({
-      x: (b.x + b.width / 2) * cell,
-      y: (b.y + b.height / 2) * cell,
-    }));
-    let sx = 0;
-    let sy = 0;
-    for (const c of centers) {
-      sx += c.x;
-      sy += c.y;
-    }
-    const ox = -sx / centers.length;
-    const oy = -sy / centers.length;
+    const basis = { cellW: this.store.gradeCellW, cellH: this.store.gradeCellH };
+    const routes = this.routeInCells(boxes);
+    const graph = this.store.metricStrategy.render({ boxes, routes, containerPaddings }, basis);
     for (let i = 0; i < elements.length; i++) {
       const el = elements[i]!;
-      el.x = centers[i]!.x + ox;
-      el.y = centers[i]!.y + oy;
-      el.w = boxes[i]!.width * cell;
-      el.h = boxes[i]!.height * cell;
+      const nd = graph.nodes[i]!;
+      el.x = nd.x + nd.w / 2;
+      el.y = nd.y + nd.h / 2;
+      el.w = nd.w;
+      el.h = nd.h;
+      const shape = graph.containerShapes[i];
+      if (shape) el.shape = shape;
     }
-    this.routeAll(boxes, cell, ox, oy);
+    this.store.edges.forEach((e, i) => {
+      e.waypoints = graph.edges[i]!.waypoints;
+    });
+    this.renderGraphOut = graph;
     this.finished = true;
   }
 
-  /** 为每条边计算 A* 正交走线并写入 waypoints（物理坐标）。 */
-  private routeAll(boxes: Box[], cell: number, ox: number, oy: number): void {
+  /**
+   * 格上走线：端口锚点（两端口径同渲染 dominantSide）+ A* 正交避障，
+   * 产出逻辑格走线（物理化由映射策略完成）。无可行正交路径（贴邻节点
+   * 顶死）时降级直线：cells 给两端中心格、exact 给元素几何中心的精确格
+   * 坐标 —— 物理化直接乘格距，不做格心偏移。
+   */
+  private routeInCells(boxes: Box[]): LayoutRoute[] {
+    const elements = this.store.elements;
     const ctx = new GridSpaceContext();
     const centers = boxes.map((b) => ({
       x: b.x + Math.floor(b.width / 2),
       y: b.y + Math.floor(b.height / 2),
     }));
-    // A* 端点 = 两端「对端主导侧」的边界中点格 —— 与渲染端口同一
-    // dominantSide 口径，骨架天然贴端口方向出入；两端对位时退化为直线，
-    // 消除"绕到容器内部再折回端口"的多余折段。
-    const portAnchor = (i: number, toward: { x: number; y: number }): Point => {
+    // 边中点沿边方向的锚点格：奇数尺寸 = 中心格（格心即边中点）；偶数
+    // 尺寸边中点落在两格交界，取靠对端侧的格 —— 锚点格心与渲染端口
+    // （边界中点）的半格偏差恒朝对端方向，渲染缝合的切向滑动段与连线
+    // 主方向一致，不出现反向段（折线单调性原则）。
+    const midCell = (lo: number, size: number, towardDelta: number): number => {
+      const k = Math.floor(size / 2);
+      if (size % 2 === 1) return lo + k;
+      return towardDelta >= 0 ? lo + k : lo + k - 1;
+    };
+    // 端口锚点 = 两端「对端主导侧」的边界格 + 外法向 —— 与渲染端口同一
+    // dominantSide 口径。
+    const portAnchor = (
+      i: number,
+      toward: { x: number; y: number },
+    ): { point: Point; normal: Point } => {
       const b = boxes[i]!;
       const c = centers[i]!;
       switch (dominantSide(toward.x - c.x, toward.y - c.y)) {
         case 'right':
-          return { x: b.x + b.width - 1, y: c.y };
+          return { point: { x: b.x + b.width - 1, y: midCell(b.y, b.height, toward.y - c.y) }, normal: { x: 1, y: 0 } };
         case 'left':
-          return { x: b.x, y: c.y };
+          return { point: { x: b.x, y: midCell(b.y, b.height, toward.y - c.y) }, normal: { x: -1, y: 0 } };
         case 'bottom':
-          return { x: c.x, y: b.y + b.height - 1 };
+          return { point: { x: midCell(b.x, b.width, toward.x - c.x), y: b.y + b.height - 1 }, normal: { x: 0, y: 1 } };
         case 'top':
-          return { x: c.x, y: b.y };
+          return { point: { x: midCell(b.x, b.width, toward.x - c.x), y: b.y }, normal: { x: 0, y: -1 } };
       }
     };
-    const toPhys = (p: { x: number; y: number }): { x: number; y: number } => ({
-      x: (p.x + 0.5) * cell + ox,
-      y: (p.y + 0.5) * cell + oy,
+    // 障碍 = 全部非容器节点 AABB（含两端自身：A* 端点在盒外一格，首末段
+    // 因此必然沿端口法向穿出/进入，不会折回节点内部）。
+    const obstacles = boxes.filter((_, i) => !isSubgraphNode(elements[i]!));
+    return this.store.edges.map((e) => {
+      const sa = portAnchor(e.sourceIndex, centers[e.targetIndex]!);
+      const ta = portAnchor(e.targetIndex, centers[e.sourceIndex]!);
+      // A* 端点 = 锚点沿外法向外移一格（盒外）：骨架首末步强制沿端口
+      // 法向，渲染端 portToward 从骨架首末段推断的端口侧与锚点侧恒一致
+      // —— 消除"从侧面进入锚点格导致端口跑到另一侧 + 缝合碎拐"。
+      const startOut = { x: sa.point.x + sa.normal.x, y: sa.point.y + sa.normal.y };
+      const goalOut = { x: ta.point.x + ta.normal.x, y: ta.point.y + ta.normal.y };
+      const path = ctx.routeEdge(startOut, goalOut, obstacles);
+      if (path) {
+        // 正对位直线升级：两锚点同列/同行且 A* 解为无拐点直线（通道畅通
+        // 由 A* 自证）时，改走经两端端口边界中点的精确直线 —— 偶数格尺寸
+        // 盒的锚点格心与端口边中点错开半格（正对位时「靠对端侧」无方向
+        // 可依），格列直线在渲染端需要两端缝合反向横滑，折成 C 形；中线
+        // 直线让骨架与端口同轴，零拐弯直连。
+        const vertical = sa.point.x === ta.point.x;
+        const horizontal = !vertical && sa.point.y === ta.point.y;
+        const straight =
+          (vertical && path.every((p) => p.x === startOut.x)) ||
+          (horizontal && path.every((p) => p.y === startOut.y));
+        if (straight) {
+          const sb = boxes[e.sourceIndex]!;
+          const tb = boxes[e.targetIndex]!;
+          // 端口在盒边界线上（格坐标）：法向正侧 = 盒底/右边界线，负侧 = 盒顶/左边界线。
+          const se = {
+            x: vertical ? sb.x + sb.width / 2 : sa.normal.x > 0 ? sb.x + sb.width : sb.x,
+            y: vertical ? (sa.normal.y > 0 ? sb.y + sb.height : sb.y) : sb.y + sb.height / 2,
+          };
+          const te = {
+            x: vertical ? tb.x + tb.width / 2 : ta.normal.x > 0 ? tb.x + tb.width : tb.x,
+            y: vertical ? (ta.normal.y > 0 ? tb.y + tb.height : tb.y) : tb.y + tb.height / 2,
+          };
+          return {
+            source: e.sourceIndex,
+            target: e.targetIndex,
+            cells: [sa.point, ta.point],
+            exact: [se, te],
+          };
+        }
+        const cells = [sa.point, ...path, ta.point];
+        // 贴邻对位：两端外一格重合（A* 单点路径），锚点三点可能成 V 形
+        // —— 入端前补一个拐点保正交，末段仍沿目标法向贴边。
+        if (path.length === 1) {
+          const v = startOut;
+          if (v.x !== ta.point.x && v.y !== ta.point.y) {
+            const corner =
+              ta.normal.x !== 0 ? { x: v.x, y: ta.point.y } : { x: ta.point.x, y: v.y };
+            cells.splice(cells.length - 1, 0, corner);
+          }
+        }
+        return { source: e.sourceIndex, target: e.targetIndex, cells };
+      }
+      const a = boxes[e.sourceIndex]!;
+      const b = boxes[e.targetIndex]!;
+      return {
+        source: e.sourceIndex,
+        target: e.targetIndex,
+        cells: [centers[e.sourceIndex]!, centers[e.targetIndex]!],
+        exact: [
+          { x: a.x + a.width / 2, y: a.y + a.height / 2 },
+          { x: b.x + b.width / 2, y: b.y + b.height / 2 },
+        ],
+      };
     });
-    const elements = this.store.elements;
-    for (const e of this.store.edges) {
-      // 障碍 = 全部非容器节点 AABB（含两端自身：仅起终点格豁免，首末段
-      // 因此必然沿端口法向穿出/进入，不会折回节点内部）。
-      const obstacles = boxes.filter((_, i) => !isSubgraphNode(elements[i]!));
-      const start = portAnchor(e.sourceIndex, centers[e.targetIndex]!);
-      const goal = portAnchor(e.targetIndex, centers[e.sourceIndex]!);
-      const path = ctx.routeEdge(start, goal, obstacles);
-      const a = this.store.elements[e.sourceIndex]!;
-      const b = this.store.elements[e.targetIndex]!;
-      // 无可行正交路径（贴邻节点顶死）时降级直线：可通行性由压实保证的
-      // 通道承担，输出仍需首尾两点供渲染。
-      e.waypoints = path
-        ? [toPhys(start), ...path.slice(1, -1).map(toPhys), toPhys(goal)]
-        : [
-            { x: a.x, y: a.y },
-            { x: b.x, y: b.y },
-          ];
-    }
   }
 
   // ── LayoutStrategy（无迭代力学：流水线构造期一次完成）─────

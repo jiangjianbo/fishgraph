@@ -155,12 +155,12 @@ describe('路径风格策略', () => {
       const b = pts[i]!;
       expect(a.x === b.x || a.y === b.y).toBe(true);
     }
-    // 端口 breakout 沿法向出盒；骨架内部点不出现在路径中；共线碎段
-    // （breakout 6px 段）合并为单段
+    // 端口 breakout 沿法向出盒；骨架内部点不出现在路径中；接入臂与
+    // 贴边段同轴合并 —— 末段为长直线（尾巴充足，拐点 (40,30) 距端点 22）
     expect(pts).toEqual([
       { x: 0, y: -12 },
-      { x: 0, y: 58 },
-      { x: 40, y: 58 },
+      { x: 0, y: 30 },
+      { x: 40, y: 30 },
       { x: 40, y: 52 },
     ]);
     expect(pts.some((p) => p.x === 0 && p.y === 10)).toBe(false);
@@ -190,13 +190,14 @@ describe('路径风格策略', () => {
       const b = pts[i]!;
       expect(a.x === b.x || a.y === b.y).toBe(true);
     }
-    // 拐点在 breakout 行 (20,-18)：先沿面滑动再下行，全程不进入节点内部
+    // 拐点在 breakout 行 (20,-18)：先沿面滑动再下行，全程不进入节点内部；
+    // 接入臂与贴边段同轴 —— 末段为长直线（(40,5) 距端点 57，尾巴充足）
     expect(pts).toEqual([
       { x: 0, y: -12 },
       { x: 0, y: -18 },
       { x: 20, y: -18 },
-      { x: 20, y: -58 },
-      { x: 40, y: -58 },
+      { x: 20, y: 5 },
+      { x: 40, y: 5 },
       { x: 40, y: -52 },
     ]);
   });
@@ -347,9 +348,22 @@ describe('贴合方式策略', () => {
     expect(p.nx).toBeCloseTo(10 / Math.hypot(10, 3));
   });
 
-  it('中心贴合：端点 = 元素中心，法向保留端口法向', () => {
+  it('中心基准贴合：中心定方向，端点外延到物化盒边界（不在元素内部）', () => {
     const p = new CenterEndpointFitStrategy().fit(PORT, ROUND_BOX);
-    expect([p.x, p.y, p.nx, p.ny]).toEqual([0, 0, 1, 0]);
+    // 端口 (10,3) 已在 AABB 边界上：中心 → 端口射线与边界的交点 = 端口
+    // 本身，法向取径向（中心指向贴合点）
+    expect(p.x).toBeCloseTo(10);
+    expect(p.y).toBeCloseTo(3);
+    expect(p.nx).toBeCloseTo(10 / Math.hypot(10, 3));
+    expect(p.ny).toBeCloseTo(3 / Math.hypot(10, 3));
+    // 端点恒在盒边界上（|x| = hw 或 |y| = hh），绝不在元素中心 —— 箭头
+    // 贴边可见，不被节点绘制层遮盖
+    const onBoundary = Math.abs(Math.abs(p.x) - ROUND_BOX.hw) < 1e-9 || Math.abs(Math.abs(p.y) - ROUND_BOX.hh) < 1e-9;
+    expect(onBoundary).toBe(true);
+    // 斜向端口：射线在更近的轴上先出界（hh=5 的横扁盒，陡峭方向从上边界出）
+    const steep = new CenterEndpointFitStrategy().fit({ x: 2, y: 5, nx: 0, ny: 1 }, ROUND_BOX);
+    expect(steep.y).toBeCloseTo(5); // 上边界
+    expect(Math.abs(steep.x)).toBeLessThan(ROUND_BOX.hw); // 交点 x 在边界内
   });
 });
 

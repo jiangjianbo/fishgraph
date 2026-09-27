@@ -14,7 +14,9 @@
  */
 
 import { estimateLabelBox } from '../label.js';
-import { GRADE_TOLERANCE, gradeBoxes } from '../layout/grade.js';
+import { createMetricStrategy } from '../layout/metric/registry.js';
+import '../layout/metric/default.js';
+import type { MetricStrategy } from '../layout/metric/types.js';
 import { DEFAULT_SHAPE, boundingRadius, clampPointToShape, halfExtentsOf } from '../geometry.js';
 import type {
   EdgeSpec,
@@ -290,6 +292,19 @@ export class GraphStore {
     return Math.sqrt(this.gradeCellW * this.gradeCellH);
   }
 
+  /** 尺寸映射策略（度量/分级/物理化的可替换接缝，缺省 'default'）。 */
+  private metric: MetricStrategy = createMetricStrategy('default');
+
+  /** 注入尺寸映射策略（重新分级，基准格与格数随策略更新）。 */
+  setMetricStrategy(metric: MetricStrategy): void {
+    this.metric = metric;
+    this.refreshGrades();
+  }
+
+  get metricStrategy(): MetricStrategy {
+    return this.metric;
+  }
+
   constructor(graph: GraphSpec) {
     graph.nodes.forEach((spec) => this.insertNode(spec));
     // subgraph 先于边物化：外部边可以直接以 group.id 为端点
@@ -520,11 +535,17 @@ export class GraphStore {
   }
 
   /**
-   * 元素的物理 AABB 尺寸（形状声明与文字盒取较大者，px）。
-   * 网格布局（grid-undirected）用本尺寸换算节点的逻辑格宽高；
+   * 元素的物理 AABB 尺寸（px）—— 委托尺寸映射策略的度量钩子（缺省：
+   * 形状声明与文字盒取较大者）。网格布局用本尺寸换算节点的逻辑格宽高；
    * 注意不含 subgraph 容器的成员包裹（容器按声明形状参与网格布局）。
    */
   nodeBoxSize(el: LayoutElement): { w: number; h: number } {
+    const measured = this.metric.measureBox?.({
+      label: el.label,
+      shape: el.shape,
+      font: { size: this.labelFontSize, padding: this.labelPadding },
+    });
+    if (measured) return measured;
     const he = halfExtentsOf(el.shape);
     let w = 2 * he.hw;
     let h = 2 * he.hh;
@@ -538,12 +559,13 @@ export class GraphStore {
 
   /**
    * 尺寸分级（格单位架构 · 初始化）：以 nodeBoxSize（含文字物化的物理盒）
-   * 做宽/高独立容差聚类，写入各元素占用格数 gw/gh 与基准格 gradeCellW/H。
-   * 挂在 applyNodeLabelSizes 统一入口之后 —— 盒尺寸的全部变化源（标签
-   * 度量、形状、文字开关）都已被该入口消费。与布局无关，行为零影响。
+   * 交给尺寸映射策略分级，写入基准格 gradeCellW/H 与各元素占用格数
+   * gw/gh（矩形格口径：宽高独立）。挂在 applyNodeLabelSizes 统一入口
+   * 之后 —— 盒尺寸的全部变化源（标签度量、形状、文字开关）都已被该
+   * 入口消费。与布局无关，行为零影响。
    */
-  refreshGrades(tolerance: number = GRADE_TOLERANCE): void {
-    const basis = gradeBoxes(this.elements.map((el) => this.nodeBoxSize(el)), tolerance);
+  refreshGrades(): void {
+    const basis = this.metric.grade(this.elements.map((el) => this.nodeBoxSize(el)));
     this.gradeCellW = basis.cellW;
     this.gradeCellH = basis.cellH;
     for (let i = 0; i < this.elements.length; i++) {

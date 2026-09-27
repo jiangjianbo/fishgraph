@@ -99,6 +99,12 @@ export interface CoarsePlacementOptions {
    */
   ignorePlaced?: boolean;
   /**
+   * 矩形格距（px）：placed 连续坐标反算占格的分母（x÷cellW、y÷cellH）。
+   * 缺省 = naturalLength 方格。矩形基准格口径由尺寸映射策略分级产出。
+   */
+  cellW?: number;
+  cellH?: number;
+  /**
    * 固定投影锚点（子图坐标系隔离联动）：外部质点在子作用域网格中的
    * 映射。锚点只对所连视图项产生牵引（评分加项），不进占用表 ——
    * 不占格、可被成员踏过，且永不参与插行列推挤（投影坐标固定不变，
@@ -632,6 +638,8 @@ export function coarseGridPlacement(
   const n = elements.length;
   if (n === 0) return { grid: new PointGrid(), posOf: [], cell: Math.max(naturalLength, 1e-3), order: [] };
   const cell = Math.max(naturalLength, 1e-3);
+  const cellW = Math.max(options.cellW ?? naturalLength, 1e-3);
+  const cellH = Math.max(options.cellH ?? naturalLength, 1e-3);
   const grid = new PointGrid();
   const posOf: GridPos = new Array(n).fill(null);
   const order: number[] = [];
@@ -660,8 +668,8 @@ export function coarseGridPlacement(
   for (let i = 0; i < n; i++) {
     const el = elements[i];
     if (!el.placed || ignorePlaced) continue;
-    let gx = Math.round(el.x / cell);
-    const gy = Math.round(el.y / cell);
+    let gx = Math.round(el.x / cellW);
+    const gy = Math.round(el.y / cellH);
     while (grid.has(gx, gy)) gx++;
     grid.place({ gx, gy }, i);
     posOf[i] = { gx, gy };

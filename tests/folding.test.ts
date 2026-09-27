@@ -10,8 +10,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { ForceLayout } from '../src/index.js';
-import { chainGridLayout } from '../src/layout/grid-undirected/fold.js';
+import { ForceLayout, GraphStore } from '../src/index.js';
+import { buildFoldPlan, chainGridLayout } from '../src/layout/grid-undirected/fold.js';
 import { coarseGridPlacement, undirectedHeuristics } from '../src/layout/grid-undirected/coarse.js';
 import type { GraphSpec } from '../src/index.js';
 import type { LayoutElement } from '../src/graph/store.js';
@@ -42,12 +42,15 @@ describe('折叠布局', () => {
     const views = layout.nodeViews;
     expect(views).toHaveLength(6);
     const byId = new Map(views.map((v) => [Number(v.id), v]));
-    // 链序蛇形相邻：相邻链节点的中心距 = 成员格 + 布线插入的通道格 = 2 格
-    const cellDist = 2 * 6 * layout.cellScale;
+    // 链序蛇形相邻：相邻中心距 = 成员格 + 通道格 = 2 格（矩形格：同行
+    // 对 2×cellW、换行对 2×cellH）。3×2 行优先蛇形的换行对 = (2,3)。
+    const distX = 2 * layout.cellW;
+    const distY = 2 * layout.cellH;
+    const expected = [distX, distX, distY, distX, distX];
     for (let i = 0; i < 5; i++) {
       const a = byId.get(i)!;
       const b = byId.get(i + 1)!;
-      expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeCloseTo(cellDist, 6);
+      expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeCloseTo(expected[i]!, 6);
     }
     // 包裹 = 3×2 格（面积/周长最优），行内成员共行
     expect(Math.abs(byId.get(0)!.y - byId.get(1)!.y)).toBeLessThan(1e-6);
@@ -364,5 +367,102 @@ describe('投影锚点（外部质点在子作用域内的固定映射）', () =
     const m2a = member(alone, 'm2');
     // 对照：投影方向不同，m3 不在同列下方（扫描序方位）
     expect(m3a.x).not.toBeCloseTo(m2a.x, 6);
+  });
+});
+
+describe('subgraph 质点化的虚拟连线（跨边界边提升）', () => {
+  it('外部节点与内部成员的连线折叠为一条外部质点 ↔ 容器质点的虚拟连线（多连线去重）', () => {
+    // ext1 连 m1、m3（两条边）、ext2 连 m2（一条边）：折叠后视图里
+    // 只应出现 ext1—容器、ext2—容器 两条虚拟连线，成员端不再出现。
+    const store = new GraphStore({
+      nodes: [
+        { id: 'ext1', label: 'ext1' },
+        { id: 'ext2', label: 'ext2' },
+        { id: 'm1', label: 'm1' },
+        { id: 'm2', label: 'm2' },
+        { id: 'm3', label: 'm3' },
+      ],
+      edges: [
+        { source: 'ext1', target: 'm1' },
+        { source: 'ext1', target: 'm3' },
+        { source: 'ext2', target: 'm2' },
+      ],
+      subgraphs: [
+        { id: 'sub', shape: { kind: 'rect', w: 100, h: 100 }, label: 'sub', members: ['m1', 'm2', 'm3'] },
+      ],
+    });
+    const plan = buildFoldPlan(store, 3);
+    const idx = (id: string) => store.elements.findIndex((e) => e.id === id);
+    const ci = idx('sub');
+    const root = plan.root;
+    // 提升：全部跨边界边的成员端替换为容器元素 —— 视图边只剩 外部↔容器
+    for (const [a, b] of root.elementEdges) {
+      expect([a, b]).not.toContain(idx('m1'));
+      expect([a, b]).not.toContain(idx('m2'));
+      expect([a, b]).not.toContain(idx('m3'));
+    }
+    expect(root.elementEdges).toContainEqual([idx('ext1'), ci]);
+    expect(root.elementEdges).toContainEqual([idx('ext2'), ci]);
+    // 视图邻接（放置消费的虚拟连线）：容器项与两个外部质点相邻，
+    // ext1 的两条连线去重为一条虚拟连线（邻居集只有容器项）
+    const ciItem = root.itemOfElement.get(ci)!;
+    const ext1Item = root.itemOfElement.get(idx('ext1'))!;
+    const ext2Item = root.itemOfElement.get(idx('ext2'))!;
+    expect(root.adjacency[ext1Item]!.has(ciItem)).toBe(true);
+    expect(root.adjacency[ext1Item]!.size).toBe(1);
+    expect(root.adjacency[ext2Item]!.has(ciItem)).toBe(true);
+    expect(root.adjacency[ext2Item]!.size).toBe(1);
+    expect(root.adjacency[ciItem]!.has(ext1Item)).toBe(true);
+    expect(root.adjacency[ciItem]!.has(ext2Item)).toBe(true);
+    // 成员归属最深（容器）作用域；容器项只存在于父（root）视图
+    const subScope = plan.scopes.find((s) => s.containerIndex === ci);
+    expect(plan.scopeOfElement.get(idx('m1'))).toBe(subScope);
+    expect(root.itemOfElement.has(idx('m1'))).toBe(false);
+    expect(root.itemOfElement.get(ci)).toBe(ciItem);
+  });
+
+  it('虚拟连线生效：外部质点与容器质点在放置中相互吸引（集成）', () => {
+    // ext1 与容器内 m1、m3 连线：折叠放置后容器应贴邻 ext1 落位
+    // （虚拟连线即邻接关系，参与张力/锚点评分），且布局无重叠。
+    const spec: GraphSpec = {
+      nodes: [
+        { id: 'ext1', label: 'ext1' },
+        { id: 'ext2', label: 'ext2' },
+        { id: 'm1', label: 'm1' },
+        { id: 'm2', label: 'm2' },
+        { id: 'm3', label: 'm3' },
+      ],
+      edges: [
+        { source: 'ext1', target: 'm1' },
+        { source: 'ext1', target: 'm3' },
+        { source: 'ext2', target: 'm2' },
+      ],
+      subgraphs: [
+        { id: 'sub', shape: { kind: 'rect', w: 100, h: 100 }, label: 'sub', members: ['m1', 'm2', 'm3'] },
+      ],
+    };
+    const layout = new ForceLayout(spec, { folding: true, foldChainMin: 99, naturalLength: 6, seed: 5 });
+    layout.run();
+    const boxes = layout.nodeViews.map((v) => ({
+      x: v.x - v.w! / 2,
+      y: v.y - v.h! / 2,
+      width: v.w!,
+      height: v.h!,
+    }));
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        expect(overlapping(layout.nodeViews[i]!, layout.nodeViews[j]!)).toBe(false);
+      }
+    }
+    // 虚拟连线把容器质点与两个外部质点绑成邻位簇：多连线去重为一条后
+    // 两侧引力对等，容器落在 ext1 与 ext2 之间。中心距 = 质点贴邻 1 格
+    // + 容器包裹半宽 + 通道余量，上界 4.5 格距。
+    const byId = new Map(layout.nodeViews.map((v) => [String(v.id), v]));
+    const sub = layout.subgraphViews.find((v) => v.id === 'sub')!;
+    const gridDist = 6 * layout.cellScale;
+    const d = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+      Math.hypot(a.x - b.x, a.y - b.y);
+    expect(d(sub, byId.get('ext1')!)).toBeLessThanOrEqual(4.5 * gridDist + 1e-6);
+    expect(d(sub, byId.get('ext2')!)).toBeLessThanOrEqual(4.5 * gridDist + 1e-6);
   });
 });

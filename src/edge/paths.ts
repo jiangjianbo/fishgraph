@@ -117,13 +117,37 @@ function appendAxisFirst(pts: Vec2[], b: Vec2, nx: number, ny: number): void {
 }
 
 /**
- * a → entry 的正交 L 连接，且末段垂直于给定法向轴（entry → target 段
- * 沿法向贴边）：先沿法向轴对齐 entry，再垂直接入 —— 到达方向与最终
- * 贴边段恒成 90° 拐角。
+ * a → entry 的正交 L 连接，且末段沿给定法向轴（entry → target 沿法向
+ * 贴边）：默认先沿切向轴对齐 entry、再沿法向接入 —— 与 appendAxisFirst
+ * 对称，切向臂与最终贴边段同轴，simplify 合并后末段 = 从最后一个拐点
+ * 到端点的单一直线，长度由骨架末点与端口的实际距离决定（骨架末点在
+ * 锚点外一格，恒 ≥ 半格距 > 箭头长度），保证箭头之后有足够「尾巴」
+ * 才开始转向。
+ *
+ * 例外：切向臂与骨架来路同轴反向（原路往返，simplify 会把骨架末拐点
+ * 一并对消）时退回法向轴先对齐 —— 保留走线骨架，代价是末段回落为
+ * breakout 短段。
  */
 function appendApproach(pts: Vec2[], entry: Vec2, nx: number, ny: number): void {
-  if (Math.abs(nx) >= Math.abs(ny)) pushPoint(pts, { x: entry.x, y: pts[pts.length - 1]!.y });
-  else pushPoint(pts, { x: pts[pts.length - 1]!.x, y: entry.y });
+  const last = pts[pts.length - 1]!;
+  const prev = pts.length >= 2 ? pts[pts.length - 2]! : null;
+  const axisX = Math.abs(nx) >= Math.abs(ny);
+  const armX = axisX ? 0 : entry.x - last.x;
+  const armY = axisX ? entry.y - last.y : 0;
+  let collision = false;
+  if (prev) {
+    const inX = last.x - prev.x;
+    const inY = last.y - prev.y;
+    if (armX !== 0 && inX !== 0) collision = inX * armX < 0 && inY === 0;
+    else if (armY !== 0 && inY !== 0) collision = inY * armY < 0 && inX === 0;
+  }
+  if (collision) {
+    // 法向轴先对齐（末段垂直于法向，保骨架拐点）
+    pushPoint(pts, axisX ? { x: entry.x, y: last.y } : { x: last.x, y: entry.y });
+  } else {
+    // 切向轴先对齐（末段沿法向直入，尾巴充足）
+    pushPoint(pts, axisX ? { x: last.x, y: entry.y } : { x: entry.x, y: last.y });
+  }
   pushPoint(pts, entry);
 }
 

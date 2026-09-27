@@ -2,9 +2,9 @@
  * 贴合方式策略实现：端口点（AABB 侧边上选出）→ 元素真实几何上的最终端点。
  *
  * PortStrategy 回答"连在元素哪个面的哪个位置"，本文件回答"该点如何落到
- * 元素几何上"。四种口径由粗到细：包围圆 → AABB → 声明形状边界 → 不贴合
- * （中心）。非轴向贴合点的法向取径向（圆心指向贴合点），保证 breakout
- * 沿边界外法向伸出。
+ * 元素几何上"。四种口径由粗到细：包围圆 → AABB → 声明形状边界 → 中心
+ * 基准（中心定方向、端点外延到盒边界）。非轴向贴合点的法向取径向
+ * （圆心指向贴合点），保证 breakout 沿边界外法向伸出。
  */
 
 import { boundingRadius, rayShapeExit } from '../geometry.js';
@@ -50,11 +50,20 @@ export class CircleEndpointFitStrategy implements EndpointFitStrategy {
   }
 }
 
-/** 不贴合：端点 = 元素中心（线体伸入节点内部，供特殊渲染口径）。 */
+/**
+ * 元素中心基准：端点 = 中心沿「中心 → 端口方向」外延到物化盒边界。
+ * 中心只参与方向计算，端点恒落在节点边界上 —— 箭头贴边可见，不会
+ * 因端点落在元素内部而被节点绘制层遮盖。
+ */
 export class CenterEndpointFitStrategy implements EndpointFitStrategy {
   readonly name = 'center';
 
   fit(port: PortWithNormal, box: EdgeEndpointBox): PortWithNormal {
-    return { x: box.x, y: box.y, nx: port.nx, ny: port.ny };
+    const u = portDirection(port, box);
+    // 中心射线与 AABB 边界交点：各轴 t = 半尺寸 / |方向分量|，取最小。
+    const tx = Math.abs(u.x) > 1e-12 ? box.hw / Math.abs(u.x) : Infinity;
+    const ty = Math.abs(u.y) > 1e-12 ? box.hh / Math.abs(u.y) : Infinity;
+    const dist = Math.min(tx, ty);
+    return { x: box.x + u.x * dist, y: box.y + u.y * dist, nx: u.x, ny: u.y };
   }
 }
