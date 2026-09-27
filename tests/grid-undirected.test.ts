@@ -333,4 +333,93 @@ describe('ExpansionGrid 中心对称膨胀', () => {
     // 中心 AABB 覆盖 [-2,3)×[-2,3)：质点格 (0,0) 为中心格
     expect(boxes[0]).toEqual({ x: -2, y: -2, width: 5, height: 5 });
   });
+
+  it('带内推挤：向右扩张只推目标行带内的右侧元素，其他行不受扰动', () => {
+    const g = new ExpansionGrid(3);
+    g.place(0, 0, 0); // 中心
+    g.place(1, 3, 0); // 右侧、与中心同行（行带内 → 被推）
+    g.place(2, 3, 4); // 右侧、但在其他行（行带外 → 不动）
+    g.expand(0, 3, 1); // 仅横向扩张，行带 = 第 0 行
+    const boxes = g.boxes();
+    expect(boxes[0]).toEqual({ x: -1, y: 0, width: 3, height: 1 });
+    expect(boxes[1]).toEqual({ x: 4, y: 0, width: 1, height: 1 }); // 同行右邻让位
+    expect(boxes[2]).toEqual({ x: 3, y: 4, width: 1, height: 1 }); // 异行右侧不连带
+  });
+
+  it('带内推挤级联：高元素被推时，其带外延展扫掠撞到的元素一并让位', () => {
+    const g = new ExpansionGrid(4);
+    g.place(0, 0, 0); // 中心
+    g.place(1, 2, 0);
+    g.expand(1, 1, 5); // 高元素：行 [-2,2] 的右侧立柱，跨越中心所在行
+    g.place(2, 3, 2); // 立柱延展行上的右邻（扫掠路径上 → 级联入组）
+    g.place(3, 3, 6); // 立柱行带外的右邻（扫掠不到 → 不动）
+    g.expand(0, 3, 1); // 中心向右扩张 1 格，行带 = 第 0 行
+    const boxes = g.boxes();
+    expect(boxes[0]).toEqual({ x: -1, y: 0, width: 3, height: 1 });
+    expect(boxes[1]).toEqual({ x: 3, y: -2, width: 1, height: 5 }); // 立柱被推
+    expect(boxes[2]).toEqual({ x: 4, y: 2, width: 1, height: 1 }); // 延展行右邻级联
+    expect(boxes[3]).toEqual({ x: 3, y: 6, width: 1, height: 1 }); // 带外不受扰动
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i]!;
+        const b = boxes[j]!;
+        const overlap =
+          a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+        expect(overlap).toBe(false);
+      }
+    }
+  });
+
+  it('横跨锚点列的宽元素不属于任一侧：由垂直推挤整体让位，不被撕裂', () => {
+    const g = new ExpansionGrid(2);
+    g.place(0, 0, -1);
+    g.expand(0, 7, 1); // 宽元素：列 [-3,3]，横跨原点正上方
+    g.place(1, 0, 0); // 中心质点在宽元素正下方
+    g.expand(1, 5, 5); // 中心膨胀 5×5，目标区含宽元素中段
+    const boxes = g.boxes();
+    // 宽元素不属左/右任一侧，水平推挤不动它；垂直推挤（列带相交且完全
+    // 在上方）把它整体上推 —— AABB 保持 7×1 完整
+    expect(boxes[0]).toEqual({ x: -3, y: -3, width: 7, height: 1 });
+    expect(boxes[1]).toEqual({ x: -2, y: -2, width: 5, height: 5 });
+  });
+
+  it('随机场景：带内推挤 + 压实后全部 AABB 两两无重叠（固定种子）', () => {
+    let seed = 20260927;
+    const rand = (n: number): number => {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return seed % n;
+    };
+    for (let iter = 0; iter < 300; iter++) {
+      const n = 2 + rand(8);
+      const g = new ExpansionGrid(n);
+      const taken = new Set<string>();
+      for (let i = 0; i < n; i++) {
+        // 质点互不重合地随机放置（1×1 天然无重叠）
+        let gx = 0;
+        let gy = 0;
+        do {
+          gx = rand(15) - 7;
+          gy = rand(15) - 7;
+        } while (taken.has(`${gx},${gy}`));
+        taken.add(`${gx},${gy}`);
+        g.place(i, gx, gy);
+      }
+      for (let i = 0; i < n; i++) {
+        g.expand(i, 1 + rand(5), 1 + rand(5));
+      }
+      g.compact(rand(3));
+      const boxes = g.boxes();
+      for (let i = 0; i < boxes.length; i++) {
+        for (let j = i + 1; j < boxes.length; j++) {
+          const a = boxes[i]!;
+          const b = boxes[j]!;
+          const overlap =
+            a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+          if (overlap) {
+            throw new Error(`iter ${iter}: boxes ${i} 与 ${j} 重叠：${JSON.stringify([a, b])}`);
+          }
+        }
+      }
+    }
+  });
 });

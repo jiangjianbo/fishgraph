@@ -241,7 +241,11 @@ export function endArrow(path: EdgePath): { tip: Vec2; dx: number; dy: number } 
   const last = path.segments[path.segments.length - 1];
   if (!last) return { tip: { ...path.start }, dx: 1, dy: 0 };
   if (last.kind === 'line') {
-    return tipWith(last.to, last.to.x - path.start.x, last.to.y - path.start.y);
+    // 切向 = 末段自身的行进方向（末段起点 → 终点）。多段折线（正交
+    // 走线）的整体位移不沿末段轴向，不能代表箭头进入端口的方向。
+    const from =
+      path.segments.length >= 2 ? segmentEnd(path.segments[path.segments.length - 2]!) : path.start;
+    return tipWith(last.to, last.to.x - from.x, last.to.y - from.y);
   }
   if (last.kind === 'bezier') return tipWith(last.to, last.to.x - last.cp2.x, last.to.y - last.cp2.y);
   // arc 末端切向：半径向量旋转 ±90°（依行进方向）

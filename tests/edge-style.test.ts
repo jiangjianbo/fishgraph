@@ -355,6 +355,33 @@ describe('两端形态策略（端帽）', () => {
   });
 });
 
+describe('末端箭头切向', () => {
+  it('多段折线：箭头切向 = 末段行进方向，而非整条路径的总位移', () => {
+    // L 形正交走线：先向右、再向下进入目标（末段方向 = (0,1)）。
+    // 回归：旧实现用「终点 − 路径起点」算切向，多段时得到斜向，
+    // 箭头与连线末段方向不一致（demo 有向流程图无向布局可见）。
+    const path: EdgePath = {
+      start: { x: 0, y: 0 },
+      segments: [
+        { kind: 'line', to: { x: 100, y: 0 } },
+        { kind: 'line', to: { x: 100, y: 60 } },
+      ],
+    };
+    const arrow = endArrow(path);
+    expect(arrow.tip).toEqual({ x: 100, y: 60 });
+    expect(arrow.dx).toBe(0);
+    expect(arrow.dy).toBe(1);
+    // 单段路径退化为整体位移，行为不变。
+    const straight: EdgePath = {
+      start: { x: 0, y: 0 },
+      segments: [{ kind: 'line', to: { x: 30, y: 40 } }],
+    };
+    const arrow2 = endArrow(straight);
+    expect(arrow2.dx).toBeCloseTo(0.6, 9);
+    expect(arrow2.dy).toBeCloseTo(0.8, 9);
+  });
+});
+
 describe('EdgeStyleRenderer 装配', () => {
   it('端到端：两端独立端点样式（起点无帽 + 终点箭头）', () => {
     const renderer = new EdgeStyleRenderer({
@@ -402,12 +429,16 @@ describe('EdgeStyleRenderer 装配', () => {
     expect(geo.path.start).toEqual({ x: 10, y: 0 });
     const arrow = endArrow(geo.path);
     expect(arrow.tip).toEqual({ x: 90, y: 60 });
+    // 末段沿端口法向水平进入目标（左侧端口，向右行进）——箭头与连线同向
+    expect(arrow.dx).toBe(1);
+    expect(arrow.dy).toBe(0);
     // 两端独立：起点无装饰、终点有箭头；起点切向指向路径外部（向左）
     expect(geo.caps.source.fills).toBeUndefined();
     expect(geo.caps.target.fills).toHaveLength(1);
     const start = startTangent(geo.path);
     expect(start.tip).toEqual({ x: 10, y: 0 });
-    expect(start.dx).toBeLessThan(0);
+    expect(start.dx).toBe(-1);
+    expect(start.dy).toBe(0);
     expect(geo.label).toBe('连接');
     expect(Number.isFinite(geo.labelAnchor.x)).toBe(true);
   });
