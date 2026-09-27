@@ -73,7 +73,10 @@ export class OpenEndCapStrategy implements EndCapStrategy {
   }
 }
 
-/** 实心圆点端帽。 */
+/**
+ * 实心圆点端帽：圆心沿"路径外部"方向偏移一个半径 —— 圆点完整贴在
+ * 端点外侧，不嵌入节点（端点本身在元素边界上）。
+ */
 export class DotEndCapStrategy implements EndCapStrategy {
   readonly name = 'dot';
 
@@ -82,7 +85,9 @@ export class DotEndCapStrategy implements EndCapStrategy {
     private radius = 3,
   ) {}
 
-  decorate(tip: Vec2, _dx: number, _dy: number, _at: 'source' | 'target'): EndCapDecoration {
-    return { dots: [{ center: { ...tip }, radius: this.radius }] };
+  decorate(tip: Vec2, dx: number, dy: number, _at: 'source' | 'target'): EndCapDecoration {
+    return {
+      dots: [{ center: { x: tip.x + dx * this.radius, y: tip.y + dy * this.radius }, radius: this.radius }],
+    };
   }
 }

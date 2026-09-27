@@ -349,9 +349,9 @@ describe('两端形态策略（端帽）', () => {
     }
   });
 
-  it('圆点：圆心在端点、半径可配', () => {
+  it('圆点：圆心沿外部方向偏移一个半径，不嵌入节点', () => {
     const cap = new DotEndCapStrategy(3).decorate({ x: 40, y: 0 }, 1, 0, 'target');
-    expect(cap.dots).toEqual([{ center: { x: 40, y: 0 }, radius: 3 }]);
+    expect(cap.dots).toEqual([{ center: { x: 43, y: 0 }, radius: 3 }]);
   });
 });
 

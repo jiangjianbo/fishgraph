@@ -109,6 +109,14 @@ export interface LayoutOptions {
    * Safety Margin）。默认 1；0 = 不留通道（压到贴邻）。
    */
   channelMargin?: number;
+  /**
+   * 折叠布局（默认关闭）：开启后先把"长蛇阵"（度 ≤ 2 的链，长度 ≥
+   * foldChainMin）包成透明 group、subgraph 整体收成单质点，质点布局
+   * 完成后再递归展开 —— 链沿主轴排开还原，容器按子布局评估尺寸。
+   */
+  folding?: boolean;
+  /** 链折叠的最小长度（默认 3；低于该长度的链不折叠）。 */
+  foldChainMin?: number;
 }
 
 export interface RunOptions {

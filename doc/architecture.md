@@ -49,8 +49,10 @@ graph TD
 | `src/layout/grade.ts` | 尺寸分级：px 盒 → 整数格占用（宽/高独立聚类定基准格） |
 | `src/layout/circle/strategy.ts` | circle 策略：连通分量摆正多边形环（无力学，接缝示例） |
 | `src/graph/store.ts` | GraphStore：GraphSpec 物化、邻接表、文字度量、增删改查 |
-| `src/edge/types.ts` | 连线风格策略接缝：Port / Path / Corner / Crossing 四接口 + PathSegment 段模型 |
+| `src/edge/types.ts` | 连线风格策略接缝：Port / Fit / Cap / Path / Corner / Crossing 接口 + PathSegment 段模型 |
 | `src/edge/ports.ts` | 端点对接策略：固定四点（FixedPort）/ 同侧均匀分布（DistributedPort） |
+| `src/edge/fit.ts` | 贴合方式策略：AABB 边界 / 声明形状边界 / 包围圆 / 元素中心 |
+| `src/edge/caps.ts` | 两端形态策略（端帽）：无 / 实心箭头 / 开放箭头 / 圆点 |
 | `src/edge/paths.ts` | 路径风格策略：正交折线 / 直线 / 贝塞尔 / 斜折线分散 |
 | `src/edge/corners.ts` | 转弯风格策略：直角（尖点）/ 圆角（相切圆弧替代拐点） |
 | `src/edge/crossings.ts` | 交叉风格策略：平交 / 立交（交点跳线弧） |
@@ -87,29 +89,66 @@ GraphSpec ──▶ GraphStore（节点/容器/边物化 + 邻接表 + 文字盒
 
 ## 6. 连线风格管线
 
-每条边依序经过四个策略，前者的输出是后者的输入：
+每条边依序经过策略管线，**起、终端的端点样式（端口 + 贴合 + 端帽）独立
+配置**（`EdgeEndpointStyle`），路径/转弯/交叉为全边策略：
 
 ```
 edgeViews.waypoints ─┐
-nodeViews/subgraphs ─┴─▶ PortStrategy（端口 + 外法向）
+nodeViews/subgraphs ─┴─▶ PortStrategy（AABB 侧边端口 + 外法向）
+                        ──▶ EndpointFitStrategy（端口贴合到元素真实几何）
                         ──▶ PathStrategy（EdgePath：line 段序列）
                         ──▶ CornerStrategy（拐点 → 尖点或圆弧）
                         ──▶ CrossingStrategy（按绘制序对先画边跳线）
-                        ──▶ EdgeGeometry（段序列 + 标签锚点 + 箭头切向）
+                        ──▶ EndCapStrategy（起/终端装饰，各自独立）
+                        ──▶ EdgeGeometry（段序列 + 端帽 + 标签锚点 + 切向）
 ```
 
 - 端口分组：同侧边按「对端方向主导轴」分组、沿侧边自然序给 slot；
   平行边（同端点对）按声明序给 bundle slot —— 分散类策略据此横移避让。
+- 贴合：AABB 口径即端口原样；shape/circle 口径沿「中心 → 端口」射线收放，
+  法向取径向；center 不贴合（端点 = 元素中心）。
 - 走线骨架裁剪：A\* waypoints 首尾段位于元素 AABB 内部（从中心格出发），
   路径策略按两端 AABB 裁掉内部段，端口 breakout 后不再反向穿回节点；
   与节点重叠的连接段由渲染端「节点层后画且有填充」遮盖。
 
-## 7. 测试
+## 7. 折叠布局（folding，可选预处理）
+
+`LayoutOptions.folding`（默认关闭）启用，由 `src/layout/grid-undirected/fold.ts`
++ strategy 的 `layoutScope`/`unfoldScope`/`adjustLayout` 实现，流水线变为：
+
+```
+[折叠] 长蛇阵（链节点：度 2 且两邻居不同，≥ foldChainMin，不含环）
+       包成透明 group；subgraph 整体收成单质点（含嵌套）
+──▶ [质点布局] 折叠视图（虚拟 elements + adjacency）上跑既有 coarse
+──▶ [扩展] 逐视图项扩张：单元素按 nodeBoxSize；透明 group 按蛇形
+       网格展开（面积最小 → 周长最小，与容器展开同一紧凑准则）；
+       subgraph 递归子布局评估（成员包裹，**不加 padding**）
+──▶ [调整布局] 展开后的真实节点按「AABB 中心为锚」进膨胀网格逐个
+       让位（左上→右下确定序），消除展开期贴邻/重叠、保持相对方位
+       —— 这是最后一次布局动作
+──▶ [布线准备] 节点之间插入空行/空列到 channelMargin（保序重映射，
+       整体布局不变）；容器框 = 成员实占包裹，随布线空间自然呈现
+──▶ 物理化 + 走线（容器不入障碍集 —— 成员才是实体）
+```
+
+关键机制：
+- **作用域树**：root + 每个 subgraph 一个作用域；元素归属最内层容器
+  作用域，容器元素归属父作用域；跨作用域边归 LCA 作用域的视图
+  （unit 内边 / 连自身容器的边提升后成自环，丢弃）。
+- **折叠视图 = 虚拟下标域**：coarse / ExpansionGrid 零改动复用；
+  视图项代表元素仅作 coarse 占位（placed 被忽略）。
+- 链识别为确定性规则：从下标最小的可行种子向两端延伸（取下标最小
+  邻居），成环与分叉不折叠；替换视图项后重建 itemOfElement。
+- **容器不占布局位**：质点布局定容器宏观方位后，扩展/展开只落位真实
+  节点；容器 AABB = 成员实占并集（深度序计算），布局不消费 padding。
+
+## 8. 测试
 
 - `tests/grid-undirected.test.ts` —— 流水线不变量（成行成列、无重叠、
   通道宽度、正交走线、确定性、rebuild 重放）+ 膨胀对称性单元测试
 - `tests/shape-contract.test.ts` —— 用户口径形状契约 12 场景硬性验收
 - `tests/grade.test.ts` —— 尺寸分级
 - `tests/strategy.test.ts` —— 策略接缝（注册/热切换/图变更）
-- `tests/edge-style.test.ts` —— 连线风格策略（端口/路径/转弯/交叉 + 装配器端到端）
+- `tests/edge-style.test.ts` —— 连线风格策略（端口/贴合/端帽/路径/转弯/交叉 + 装配器端到端）
+- `tests/folding.test.ts` —— 折叠布局（链还原/阈值/递归评估/不变量/确定性）
 - `tests/architecture.test.ts` —— 架构边界（src 不含图实例数据）

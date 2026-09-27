@@ -42,6 +42,9 @@ const DEFAULTS = {
   seed: 42,
   // 走线通道宽度（格）：相邻节点 AABB 之间的最小空行/列数
   channelMargin: 1,
+  // 折叠布局：长蛇阵 / subgraph 收成质点，布局后递归展开
+  folding: false,
+  foldChainMin: 3,
 };
 
 export class ForceLayout {

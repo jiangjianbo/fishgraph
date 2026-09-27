@@ -272,6 +272,7 @@ const outs = {
   cm: $<HTMLOutputElement>('cmv'),
 };
 const labelCollision = $<HTMLInputElement>('lc');
+const foldToggle = $<HTMLInputElement>('fold');
 const edgeStyle = {
   path: $<HTMLSelectElement>('pathStyle'),
   port: $<HTMLSelectElement>('portStyle'),
@@ -293,6 +294,7 @@ function buildOptions() {
     naturalLength: Number(sliders.L.value),
     channelMargin: Number(sliders.cm.value),
     labelCollision: labelCollision.checked,
+    folding: foldToggle.checked,
     seed: 42,
   };
 }
@@ -404,7 +406,7 @@ function rebuild(): void {
   statusEl.textContent = `${nv} 节点 · ${ev} 边 · 纯网格布局（确定性，构造期完成）`;
 }
 
-for (const el of [...Object.values(sliders), labelCollision]) {
+for (const el of [...Object.values(sliders), labelCollision, foldToggle]) {
   el.addEventListener('input', () => {
     syncOutputs();
     if (!layout) return;
