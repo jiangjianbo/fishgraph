@@ -26,8 +26,9 @@
 
 import type { GraphStore } from '../../graph/store.js';
 import { isSubgraphNode } from '../../graph/store.js';
-import type { Box } from './space-types.js';
+import type { Box, Point } from './space-types.js';
 import { GridSpaceContext } from './grid-context.js';
+import { dominantSide } from '../../edge/ports.js';
 import { registerStrategy } from '../strategy.js';
 import type { LayoutStrategy, ResolvedLayoutOptions } from '../strategy.js';
 import type { RunOptions, RunResult } from '../../types.js';
@@ -381,30 +382,45 @@ export class GridUndirectedStrategy implements LayoutStrategy {
   /** 为每条边计算 A* 正交走线并写入 waypoints（物理坐标）。 */
   private routeAll(boxes: Box[], cell: number, ox: number, oy: number): void {
     const ctx = new GridSpaceContext();
-    // A* 端点 = AABB 中心格；障碍 = 其余全部节点 AABB（两端自身豁免，
-    // 否则多格 AABB 会挡住自己的出口）。
     const centers = boxes.map((b) => ({
       x: b.x + Math.floor(b.width / 2),
       y: b.y + Math.floor(b.height / 2),
     }));
+    // A* 端点 = 两端「对端主导侧」的边界中点格 —— 与渲染端口同一
+    // dominantSide 口径，骨架天然贴端口方向出入；两端对位时退化为直线，
+    // 消除"绕到容器内部再折回端口"的多余折段。
+    const portAnchor = (i: number, toward: { x: number; y: number }): Point => {
+      const b = boxes[i]!;
+      const c = centers[i]!;
+      switch (dominantSide(toward.x - c.x, toward.y - c.y)) {
+        case 'right':
+          return { x: b.x + b.width - 1, y: c.y };
+        case 'left':
+          return { x: b.x, y: c.y };
+        case 'bottom':
+          return { x: c.x, y: b.y + b.height - 1 };
+        case 'top':
+          return { x: c.x, y: b.y };
+      }
+    };
     const toPhys = (p: { x: number; y: number }): { x: number; y: number } => ({
       x: (p.x + 0.5) * cell + ox,
       y: (p.y + 0.5) * cell + oy,
     });
     const elements = this.store.elements;
     for (const e of this.store.edges) {
-      // 容器不是实体障碍（成员才是）——容器 AABB 不入障碍集，跨容器边
-      // 才可能从容器包裹内正常走线。
-      const obstacles = boxes.filter(
-        (_, i) => i !== e.sourceIndex && i !== e.targetIndex && !isSubgraphNode(elements[i]!),
-      );
-      const path = ctx.routeEdge(centers[e.sourceIndex]!, centers[e.targetIndex]!, obstacles);
+      // 障碍 = 全部非容器节点 AABB（含两端自身：仅起终点格豁免，首末段
+      // 因此必然沿端口法向穿出/进入，不会折回节点内部）。
+      const obstacles = boxes.filter((_, i) => !isSubgraphNode(elements[i]!));
+      const start = portAnchor(e.sourceIndex, centers[e.targetIndex]!);
+      const goal = portAnchor(e.targetIndex, centers[e.sourceIndex]!);
+      const path = ctx.routeEdge(start, goal, obstacles);
       const a = this.store.elements[e.sourceIndex]!;
       const b = this.store.elements[e.targetIndex]!;
       // 无可行正交路径（贴邻节点顶死）时降级直线：可通行性由压实保证的
       // 通道承担，输出仍需首尾两点供渲染。
       e.waypoints = path
-        ? [{ x: a.x, y: a.y }, ...path.slice(1, -1).map(toPhys), { x: b.x, y: b.y }]
+        ? [toPhys(start), ...path.slice(1, -1).map(toPhys), toPhys(goal)]
         : [
             { x: a.x, y: a.y },
             { x: b.x, y: b.y },

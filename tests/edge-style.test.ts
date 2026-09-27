@@ -155,11 +155,50 @@ describe('路径风格策略', () => {
       const b = pts[i]!;
       expect(a.x === b.x || a.y === b.y).toBe(true);
     }
-    // 端口 breakout 沿法向出盒；骨架内部点不得出现在路径中
-    expect(pts[1]).toEqual({ x: 0, y: -18 });
+    // 端口 breakout 沿法向出盒；骨架内部点不出现在路径中；共线碎段
+    // （breakout 6px 段）合并为单段
+    expect(pts).toEqual([
+      { x: 0, y: -12 },
+      { x: 0, y: 58 },
+      { x: 40, y: 58 },
+      { x: 40, y: 52 },
+    ]);
     expect(pts.some((p) => p.x === 0 && p.y === 10)).toBe(false);
     expect(pts.some((p) => p.x === 40 && p.y === 34)).toBe(false);
-    expect(pts[pts.length - 1]).toEqual({ x: 40, y: 52 });
+  });
+
+  it('正交折线：首段接入先沿 breakout 行滑动，骨架首点偏侧时不穿过节点', () => {
+    // 顶部端口向上 breakout；骨架首点 (20,5) 在右侧、与出口不同法向线。
+    // 回归：旧实现先沿法向轴下行到骨架行，竖直段会反向穿过节点内部。
+    const path = new OrthogonalPolylinePathStrategy().route(
+      routeCtx({
+        source: { x: 0, y: -12, nx: 0, ny: -1 },
+        target: { x: 40, y: -52, nx: 0, ny: -1 },
+        sourceBox: { x: 0, y: 0, hw: 12, hh: 12, shape: { kind: 'circle', r: 12 } },
+        targetBox: { x: 40, y: -40, hw: 12, hh: 12, shape: { kind: 'circle', r: 12 } },
+        waypoints: [
+          { x: 0, y: 0 },
+          { x: 20, y: 5 }, // 骨架首点：横向偏侧，不在出口法向线上
+          { x: 40, y: -34 }, // target AABB 内部（应被裁掉）
+          { x: 40, y: -40 },
+        ],
+      }),
+    );
+    const pts = vertices(path);
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1]!;
+      const b = pts[i]!;
+      expect(a.x === b.x || a.y === b.y).toBe(true);
+    }
+    // 拐点在 breakout 行 (20,-18)：先沿面滑动再下行，全程不进入节点内部
+    expect(pts).toEqual([
+      { x: 0, y: -12 },
+      { x: 0, y: -18 },
+      { x: 20, y: -18 },
+      { x: 20, y: -58 },
+      { x: 40, y: -58 },
+      { x: 40, y: -52 },
+    ]);
   });
 
   it('斜折线分散：平行边沿法向错开、互不重叠', () => {
@@ -424,14 +463,15 @@ describe('EdgeStyleRenderer 装配', () => {
     });
     expect(geos).toHaveLength(1);
     const geo = geos[0]!;
-    expect(pathLength(geo.path)).toBeGreaterThan(150);
-    // 端口贴元素边界（固定四点：对端主导轴为水平 → 左侧中点）
+    expect(pathLength(geo.path)).toBe(140);
+    // 端口贴元素边界：source 按骨架首段取右侧中点；target 按骨架末段
+    // 行进方向取顶面中点（与走线入盒方向一致）
     expect(geo.path.start).toEqual({ x: 10, y: 0 });
     const arrow = endArrow(geo.path);
-    expect(arrow.tip).toEqual({ x: 90, y: 60 });
-    // 末段沿端口法向水平进入目标（左侧端口，向右行进）——箭头与连线同向
-    expect(arrow.dx).toBe(1);
-    expect(arrow.dy).toBe(0);
+    expect(arrow.tip).toEqual({ x: 100, y: 50 });
+    // 末段沿端口法向进入目标（顶面端口，向下行进）——箭头与连线同向
+    expect(arrow.dx).toBe(0);
+    expect(arrow.dy).toBe(1);
     // 两端独立：起点无装饰、终点有箭头；起点切向指向路径外部（向左）
     expect(geo.caps.source.fills).toBeUndefined();
     expect(geo.caps.target.fills).toHaveLength(1);

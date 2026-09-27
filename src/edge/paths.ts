@@ -80,31 +80,51 @@ export class OrthogonalPolylinePathStrategy implements PathStrategy {
     const exit = { x: source.x + source.nx * this.breakout, y: source.y + source.ny * this.breakout };
     pushPoint(pts, exit);
     const core = coreWaypoints(ctx);
-    const entry = { x: target.x + target.nx * this.breakout, y: target.y + target.ny * this.breakout };
     if (core.length > 0) {
       appendAxisFirst(pts, core[0]!, source.nx, source.ny);
       for (let i = 1; i < core.length; i++) appendOrthogonal(pts, core[i]!);
     }
-    // 入盒：末段沿端口外法向垂直贴边（箭头方向与端口侧一致）。
-    const pre = {
-      x: entry.x - target.nx * this.breakout,
-      y: entry.y - target.ny * this.breakout,
-    };
-    appendOrthogonal(pts, pre);
-    pushPoint(pts, entry);
+    // 入盒：骨架先以垂直于法向的末段接入 entry（entry → target 沿法向
+    // 贴边）—— 到达方向与最终段恒成直角，杜绝"伸出又折回"的回绕针。
+    const entry = { x: target.x + target.nx * this.breakout, y: target.y + target.ny * this.breakout };
+    appendApproach(pts, entry, target.nx, target.ny);
     pushPoint(pts, { x: target.x, y: target.y });
+    simplify(pts);
     return toPath(pts);
   }
 }
 
+/** 合并共线中间点：同轴延续的碎段收敛为单段（breakout 6px 段不再碎裂）。 */
+function simplify(pts: Vec2[]): void {
+  let i = 1;
+  while (i + 1 < pts.length) {
+    const p = pts[i - 1]!;
+    const c = pts[i]!;
+    const n = pts[i + 1]!;
+    if ((p.x === c.x && c.x === n.x) || (p.y === c.y && c.y === n.y)) pts.splice(i, 1);
+    else i++;
+  }
+}
+
 /**
- * a → b 的正交 L 连接，且首段沿给定法向轴（端口 breakout 语义：
- * 先沿离开边界的方向走到目标的切向坐标，再转入骨架）。
+ * a → b 的正交 L 连接，且首段沿给定法向轴（端口 breakout 语义：先沿
+ * 端口面的切向滑动，再转入骨架轴 —— 反序会反向穿过节点形成回绕）。
  */
 function appendAxisFirst(pts: Vec2[], b: Vec2, nx: number, ny: number): void {
-  if (Math.abs(ny) >= Math.abs(nx)) pushPoint(pts, { x: pts[pts.length - 1]!.x, y: b.y });
+  if (Math.abs(nx) >= Math.abs(ny)) pushPoint(pts, { x: pts[pts.length - 1]!.x, y: b.y });
   else pushPoint(pts, { x: b.x, y: pts[pts.length - 1]!.y });
   pushPoint(pts, b);
+}
+
+/**
+ * a → entry 的正交 L 连接，且末段垂直于给定法向轴（entry → target 段
+ * 沿法向贴边）：先沿法向轴对齐 entry，再垂直接入 —— 到达方向与最终
+ * 贴边段恒成 90° 拐角。
+ */
+function appendApproach(pts: Vec2[], entry: Vec2, nx: number, ny: number): void {
+  if (Math.abs(nx) >= Math.abs(ny)) pushPoint(pts, { x: entry.x, y: pts[pts.length - 1]!.y });
+  else pushPoint(pts, { x: pts[pts.length - 1]!.x, y: entry.y });
+  pushPoint(pts, entry);
 }
 
 /** 直线：两端口直连（忽略走线拐点）。 */

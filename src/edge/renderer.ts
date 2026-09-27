@@ -76,8 +76,18 @@ export class EdgeStyleRenderer {
       const b = boxes[e.targetIndex]!;
       const sourceStyle = this.options.source;
       const targetStyle = this.options.target;
-      const portA = sourceStyle.ports.port(a, { x: b.x - a.x, y: b.y - a.y }, slots[i]!.a.slot, slots[i]!.a.count);
-      const portB = targetStyle.ports.port(b, { x: a.x - b.x, y: a.y - b.y }, slots[i]!.b.slot, slots[i]!.b.count);
+      const portA = sourceStyle.ports.port(
+        a,
+        portToward(e.waypoints, 'source', a, b),
+        slots[i]!.a.slot,
+        slots[i]!.a.count,
+      );
+      const portB = targetStyle.ports.port(
+        b,
+        portToward(e.waypoints, 'target', a, b),
+        slots[i]!.b.slot,
+        slots[i]!.b.count,
+      );
       // 贴合：把 AABB 侧边端口收放到元素真实几何上（口径由各端策略决定）
       const fitA = sourceStyle.fit.fit(portA, a);
       const fitB = targetStyle.fit.fit(portB, b);
@@ -167,6 +177,30 @@ function recordEnd(
   const item = { edge, at, key };
   if (list) list.push(item);
   else bySide.set(side, [item]);
+}
+
+/**
+ * 端口朝向：优先取走线骨架首段（source 出盒方向）/ 末段反方向
+ * （target 入盒面朝向）—— 端口面与骨架实际出入方向一致，消除
+ * 「中心连线 45° 平局」下端口侧向与走线相悖的回绕；无骨架
+ * （waypoints 少于两点）回退两端中心连线方向。
+ */
+function portToward(
+  waypoints: readonly Vec2[] | undefined,
+  at: 'source' | 'target',
+  a: EdgeEndpointBox,
+  b: EdgeEndpointBox,
+): Vec2 {
+  const wp = waypoints ?? [];
+  if (wp.length >= 2) {
+    const last = wp.length - 1;
+    return at === 'source'
+      ? { x: wp[1]!.x - wp[0]!.x, y: wp[1]!.y - wp[0]!.y }
+      : { x: wp[last - 1]!.x - wp[last]!.x, y: wp[last - 1]!.y - wp[last]!.y };
+  }
+  return at === 'source'
+    ? { x: b.x - a.x, y: b.y - a.y }
+    : { x: a.x - b.x, y: a.y - b.y };
 }
 
 /** 平行边分组：同端点对（无序）的边为一组，组内按声明序给 slot。 */
