@@ -10,10 +10,23 @@
  * 的全局连带平移。被推元素整体平移同一增量：组内相对位置不变（保序、
  * 保 AABB 连续）；被推元素在带外的延展部分（高/宽元素）扫掠撞到的元
  * 素级联入组，横跨锚点列/行的元素由正交方向的推挤整体让位 —— 元素
- * AABB 全程完整，无重叠由构造保证。膨胀完成后做**通道约束压实**：
- * 相邻占用行/列之间的空隙压缩到恰好不小于 channelMargin 格 —— 全局
- * 紧凑的同时，相邻节点 AABB 之间天然留出走线走廊（Channel Safety
- * Margin）。
+ * AABB 全程完整，无重叠由构造保证。
+ *
+ * 物化后整理（布局核心原则 §4.4~§4.7）按阶段拆分，全部为单轴保序重
+ * 映射或扫掠级联整体平移，无重叠由构造保证：
+ *  - `deflectEdgeCrossings`（阶段 4 膨胀后调整）：质点口径判定的连线
+ *    零压线在元素加宽后可能失效——两端中心格直线落进第三方 AABB。以
+ *    真实格 AABB 迭代校验，压线的第三方元素沿背离连线的方向推离 1 格
+ *    （级联让位），有界迭代；
+ *  - `tighten`（阶段 5 行列扫描合并·收紧）：相邻占用行/列间隔 >1 的
+ *    全部收紧为贴邻（回收空隙，尽量合并）；
+ *  - `mergeLines`（阶段 5 行列扫描合并·对齐）：把独居元素吸附到邻近
+ *    主线（锚点数 ≥2 的列/行线），可并线的散落元素对齐成列/成行；
+ *  - `ensureCorridor`（阶段 6 走廊插入）：相邻占用行/列之间确保至少
+ *    margin 格空隙（不足插出、超出保留）；
+ *  - `compact`（阶段 7 通道压实）：空隙统一为恰好 margin 格（回收
+ *    超出 + 补足不足）。tighten + ensureCorridor 与 compact 最终状态
+ *    一致（同一重映射的三段分解）。
  */
 
 import type { Box } from './space-types.js';
@@ -76,15 +89,109 @@ export class ExpansionGrid {
   }
 
   /**
-   * 通道约束压实：相邻占用行/列之间的空隙统一调整为恰好 margin 格 ——
-   * 不足 margin 的（贴邻）扩张出走线走廊，超出 margin 的（大片空白）
-   * 压缩回收。margin = 0 时全部压到贴邻。全局因此成行成列、走线走廊
-   * 均匀；AABB 内部格全为占用坐标（间隔 0），重映射不影响其连续性，
+   * 阶段 5 行列扫描合并：扫描全部占用行/列，把可以合并的合并 —— 相邻
+   * 占用坐标的空隙全部回收（间隔 >1 收紧为贴邻）。保序重映射，元素
+   * AABB 连续性不变；同轴投影原本分离的元素收紧后仍分离（新间距 ≥ 1），
    * 无重叠由构造保证。
    */
+  tighten(): void {
+    this.remapAxis('x', () => 1);
+    this.remapAxis('y', () => 1);
+  }
+
+  /**
+   * 阶段 6 走廊插入：相邻占用行/列之间确保至少 margin 格空隙作为走线
+   * 走廊（不足插出、超出保留）。作用于 tighten 之后时，全部间距恰被
+   * 抬到 1 + margin。
+   */
+  ensureCorridor(margin: number): void {
+    this.remapAxis('x', (_prev, gap) => Math.max(gap, 1 + margin));
+    this.remapAxis('y', (_prev, gap) => Math.max(gap, 1 + margin));
+  }
+
+  /**
+   * 阶段 5 行列对齐合并：把「独居」（所在列/行线上没有其他元素锚点）的
+   * 元素吸附到邻近主线（锚点数 ≥ 2 的列/行线），使可并线的散落元素
+   * 对齐成列/成行。候选主线按距离升序尝试，平局取更靠近包围盒中心的
+   * 一条；约束：平移后与任何元素 AABB 无重叠、且不扩大全局包围盒，
+   * 全部候选不可行则保持原位。迭代至不动点（有界）。异宽元素对齐的是
+   * 格线（左缘对齐）；同宽元素即中心对齐。
+   */
+  mergeLines(): void {
+    this.mergeAxis('x');
+    this.mergeAxis('y');
+  }
+
+  /** 单轴对齐合并：主线频次统计 → 独居元素按距离序试吸附 → 不动点迭代。 */
+  private mergeAxis(axis: 'x' | 'y'): void {
+    const n = this.anchorOf.length;
+    if (n === 0) return;
+    const coordOf = (i: number): number => (axis === 'x' ? this.anchorOf[i]!.gx : this.anchorOf[i]!.gy);
+    const projOf = (r: Rect): { lo: number; hi: number } =>
+      axis === 'x' ? { lo: r.minX, hi: r.maxX } : { lo: r.minY, hi: r.maxY };
+    for (let round = 0; round < n; round++) {
+      let moved = false;
+      const counts = new Map<number, number>();
+      for (let i = 0; i < n; i++) counts.set(coordOf(i), (counts.get(coordOf(i)) ?? 0) + 1);
+      const lines = [...counts.entries()]
+        .filter(([, c]) => c >= 2)
+        .map(([c]) => c)
+        .sort((a, b) => a - b);
+      if (lines.length === 0) return;
+      let lo = Infinity;
+      let hi = -Infinity;
+      for (let i = 0; i < n; i++) {
+        const p = projOf(this.rectOf(i));
+        lo = Math.min(lo, p.lo);
+        hi = Math.max(hi, p.hi);
+      }
+      const mid = (lo + hi) / 2;
+      for (let i = 0; i < n; i++) {
+        const cur = coordOf(i);
+        if ((counts.get(cur) ?? 0) >= 2) continue; // 已在主线
+        const candidates = [...lines].sort(
+          (a, b) => Math.abs(a - cur) - Math.abs(b - cur) || Math.abs(a - mid) - Math.abs(b - mid) || a - b,
+        );
+        for (const t of candidates) {
+          if (t === cur) continue;
+          const delta = t - cur;
+          const p = projOf(this.rectOf(i));
+          if (p.lo + delta < lo || p.hi + delta > hi) continue; // 包围盒不扩大
+          const r = this.rectOf(i);
+          const shifted = axis === 'x' ? { ...r, minX: r.minX + delta, maxX: r.maxX + delta } : { ...r, minY: r.minY + delta, maxY: r.maxY + delta };
+          let clash = false;
+          for (let j = 0; j < n && !clash; j++) {
+            if (j === i || !this.anchorOf[j]) continue;
+            const q = this.rectOf(j);
+            clash =
+              shifted.minX <= q.maxX &&
+              q.minX <= shifted.maxX &&
+              shifted.minY <= q.maxY &&
+              q.minY <= shifted.maxY;
+          }
+          if (clash) continue;
+          const a = this.anchorOf[i]!;
+          if (axis === 'x') a.gx += delta;
+          else a.gy += delta;
+          counts.set(cur, (counts.get(cur) ?? 0) - 1);
+          counts.set(t, (counts.get(t) ?? 0) + 1);
+          moved = true;
+          break;
+        }
+      }
+      if (!moved) return;
+    }
+  }
+
+  /**
+   * 阶段 7 通道约束压实：相邻占用行/列之间的空隙统一调整为恰好 margin
+   * 格 —— 不足 margin 的（贴邻）扩张出走线走廊，超出 margin 的（大片
+   * 空白）压缩回收。margin = 0 时全部压到贴邻。全局因此成行成列、走线
+   * 走廊均匀。
+   */
   compact(margin: number): void {
-    this.compactAxis('x', margin);
-    this.compactAxis('y', margin);
+    this.remapAxis('x', () => 1 + margin);
+    this.remapAxis('y', () => 1 + margin);
   }
 
   /** 全部元素的格 AABB（下标 = elements 下标）。 */
@@ -169,8 +276,41 @@ export class ExpansionGrid {
     return dir === 1 ? lo > mHi && lo <= mHi + delta : hi < mLo && hi >= mLo - delta;
   }
 
-  /** 单轴压实：占用坐标重映射，相邻空隙统一为 margin 格。 */
-  private compactAxis(axis: 'x' | 'y', margin: number): void {
+  /**
+   * 把元素 i 沿 axis/dir 平移 1 格：平移扫掠撞到的元素级联入组（与 i
+   * 的另一轴投影相交、落在扫掠区间内），全组同一增量整体平移（相对
+   * 位置不变）—— 落点必空、不越留置元素，无重叠由构造保证。消压线
+   * 调整的让位基元：推的是压线元素自身（pushSide 推的是让位邻居）。
+   */
+  nudge(i: number, axis: 'x' | 'y', dir: 1 | -1): void {
+    const moved = new Set<number>([i]);
+    const queue: number[] = [i];
+    while (queue.length > 0) {
+      const m = this.rectOf(queue.pop()!);
+      // 已入组元素的另一轴投影即级联判定的带。
+      const crossBand: Span = { min: axis === 'x' ? m.minY : m.minX, max: axis === 'x' ? m.maxY : m.maxX };
+      for (let j = 0; j < this.anchorOf.length; j++) {
+        if (moved.has(j) || !this.anchorOf[j]) continue;
+        const r = this.rectOf(j);
+        if (this.inBand(axis, r, crossBand) && this.swept(axis, dir, 1, m, r)) {
+          moved.add(j);
+          queue.push(j);
+        }
+      }
+    }
+    for (const j of moved) {
+      const a = this.anchorOf[j]!;
+      if (axis === 'x') a.gx += dir;
+      else a.gy += dir;
+    }
+  }
+
+  /**
+   * 单轴保序重映射基元：收集全部占用坐标排序后，第 k 对相邻坐标的新
+   * 间距由 gapOf 给出；锚点（AABB 左上格）按映射平移，AABB 内部格跟随
+   * 锚点、连续性不变。gapOf 约定返回值 ≥ 1，无重叠由构造保证。
+   */
+  private remapAxis(axis: 'x' | 'y', gapOf: (prev: number, cur: number) => number): void {
     const coords = new Set<number>();
     for (let i = 0; i < this.anchorOf.length; i++) {
       if (!this.anchorOf[i]) continue;
@@ -181,12 +321,11 @@ export class ExpansionGrid {
     }
     const sorted = [...coords].sort((a, b) => a - b);
     if (sorted.length <= 1) return;
-    // 保序重映射：每对相邻占用坐标的空隙统一为 margin 格。
     const remap = new Map<number, number>();
     let next = sorted[0]!;
     remap.set(sorted[0]!, next);
     for (let k = 1; k < sorted.length; k++) {
-      next += 1 + margin;
+      next += gapOf(sorted[k - 1]!, sorted[k]!);
       remap.set(sorted[k]!, next);
     }
     for (const a of this.anchorOf) {
@@ -194,5 +333,90 @@ export class ExpansionGrid {
       if (axis === 'x') a.gx = remap.get(a.gx)!;
       else a.gy = remap.get(a.gy)!;
     }
+  }
+}
+
+/** 边的元素对（两端为 elements/视图项下标）。 */
+export interface EdgePair {
+  u: number;
+  v: number;
+}
+
+/** 元素 AABB 中心格（与 A* 中心格同口径：anchor + ⌊size/2⌋）。 */
+function centerCellOf(g: ExpansionGrid, i: number): { x: number; y: number } {
+  const a = g.anchorOf[i]!;
+  const s = g.sizeOf[i]!;
+  return { x: a.gx + Math.floor(s.w / 2), y: a.gy + Math.floor(s.h / 2) };
+}
+
+/** 两格之间的格直线（Bresenham，含两端点）。 */
+function lineCells(from: { x: number; y: number }, to: { x: number; y: number }): Array<{ x: number; y: number }> {
+  const cells: Array<{ x: number; y: number }> = [];
+  let x = from.x;
+  let y = from.y;
+  const dx = Math.abs(to.x - x);
+  const dy = Math.abs(to.y - y);
+  const sx = to.x >= x ? 1 : -1;
+  const sy = to.y >= y ? 1 : -1;
+  let err = dx - dy;
+  for (;;) {
+    cells.push({ x, y });
+    if (x === to.x && y === to.y) break;
+    const e2 = 2 * err;
+    if (e2 > -dy) {
+      err -= dy;
+      x += sx;
+    }
+    if (e2 < dx) {
+      err += dx;
+      y += sy;
+    }
+  }
+  return cells;
+}
+
+/**
+ * 阶段 4 膨胀后调整（消压线）：质点放置判定的连线零压线（R7）以 1×1
+ * 质点为口径；膨胀使元素加宽，两端中心格的直线可能落进变宽后的第三方
+ * AABB。以真实格 AABB 迭代校验：压线的第三方元素沿背离连线的方向推离
+ * 1 格（nudge 级联让位），直至无压线或达到迭代上限（有界尽力；走线
+ * 阶段的 A\* 避障始终兜底不穿 AABB）。skip 中的元素不参与判定
+ * （subgraph 容器/容器视图项 —— 与走线障碍同口径，成员才是实体）。
+ */
+export function deflectEdgeCrossings(
+  g: ExpansionGrid,
+  edges: readonly EdgePair[],
+  skip: ReadonlySet<number> = new Set(),
+  maxPasses = 8,
+): void {
+  const n = g.anchorOf.length;
+  for (let pass = 0; pass < maxPasses; pass++) {
+    let moved = false;
+    for (const { u, v } of edges) {
+      const cells = lineCells(centerCellOf(g, u), centerCellOf(g, v));
+      for (let w = 0; w < n; w++) {
+        if (w === u || w === v || skip.has(w) || !g.anchorOf[w]) continue;
+        const a = g.anchorOf[w]!;
+        const s = g.sizeOf[w]!;
+        const hit = cells.some((c) => c.x >= a.gx && c.x < a.gx + s.w && c.y >= a.gy && c.y < a.gy + s.h);
+        if (!hit) continue;
+        // 推离方向：w 中心相对连线 u→v 的侧向（叉积符号），沿主导法向
+        // 轴推；中心恰在线上时推正方向（固定规则保确定性）。
+        const p = centerCellOf(g, w);
+        const cu = centerCellOf(g, u);
+        const cv = centerCellOf(g, v);
+        const dx = cv.x - cu.x;
+        const dy = cv.y - cu.y;
+        const cross = dx * (p.y - cu.y) - dy * (p.x - cu.x);
+        if (Math.abs(dx) >= Math.abs(dy)) {
+          g.nudge(w, 'y', cross >= 0 ? 1 : -1);
+        } else {
+          g.nudge(w, 'x', cross >= 0 ? 1 : -1);
+        }
+        moved = true;
+        break; // 本边几何已变，下一轮 pass 重扫
+      }
+    }
+    if (!moved) return;
   }
 }

@@ -2,18 +2,21 @@
  * GridUndirectedStrategy —— grid-first 网格布局策略（纯网格流水线，唯一
  * 主引擎）。
  *
- * 按 doc/布局核心原则.md 的「纯网格布局算法流程」组织，全程在离散网格
+ * 按 doc/布局核心原则.md §4「流水线骨架」组织，全程在离散网格
  * 中运行（世界坐标由尺寸映射策略物理化，渲染端自由缩放）：
- *   [质点拓扑粗布局] → [节点中心对称膨胀物化为 AABB] → [通道约束压实] →
+ *   [质点拓扑粗布局] → [节点中心对称膨胀物化为 AABB] → [膨胀后调整
+ *   （消压线）] → [行列整理（扫描合并 → 走廊插入 → 通道压实）] →
  *   [网格 A* 避障走线] → [映射策略：格解 → 可渲染图]
- *  - 阶段 1 用 coarse.ts 的质点网格放置（波纹连通生长 + 死锁插行列）。
+ *  - 阶段 2 用 coarse.ts 的质点网格放置（波纹连通生长 + 死锁插行列）。
  *    direction = 'none'（默认）用无向放置美学（张力 − 环周长 + 环内方位
  *    分类 + 扫描序平局）；'TB'/'LR' 用有向层级放置（解环 + 最长路径
  *    分层，节点钉在自己的层级行/列上，顺流无逆边）；
- *  - 阶段 2/3 由 ExpansionGrid 承担：节点按映射策略分级的宽高格数
- *    （gw/gh = px 盒 ÷ 矩形基准格）中心对称扩张，压实把相邻行列空隙
- *    压到 channelMargin（走线走廊）；
- *  - 阶段 4 用 GridSpaceContext.routeEdge（A* 正交寻路 + 拐点惩罚）在
+ *  - 阶段 3~7 由 ExpansionGrid 承担：节点按映射策略分级的宽高格数
+ *    （gw/gh = px 盒 ÷ 矩形基准格）中心对称扩张（阶段 3）→ 消压线
+ *    （阶段 4：deflectEdgeCrossings）→ 行列扫描合并（阶段 5：tighten）
+ *    → 走廊插入（阶段 6：ensureCorridor）→ 通道压实（阶段 7：compact，
+ *    相邻行列空隙统一到 channelMargin 走线走廊）；
+ *  - 阶段 8 用 GridSpaceContext.routeEdge（A* 正交寻路 + 拐点惩罚）在
  *    逻辑格上走线；物理化与可渲染图装配委托尺寸映射策略
  *    （LayoutOptions.metric，缺省 DefaultMetricStrategy：1 格 = 矩形
  *    基准格，x 轴 cellW、y 轴 cellH）；
@@ -46,7 +49,7 @@ import { coarseGridPlacement, undirectedHeuristics } from './coarse.js';
 import type { GridPos, ProjectionAnchor } from './coarse.js';
 import { computeLevels } from './levels.js';
 import { directedHeuristics } from './directed-placement.js';
-import { ExpansionGrid } from './expansion.js';
+import { ExpansionGrid, deflectEdgeCrossings } from './expansion.js';
 import type { LayoutRoute, RenderGraph } from '../metric/types.js';
 import {
   buildFoldPlan,
@@ -120,7 +123,7 @@ export class GridUndirectedStrategy implements LayoutStrategy {
       return;
     }
 
-    // 阶段 1：质点拓扑粗布局。'none'（默认）用无向放置美学（张力 − 环
+    // 阶段 2：质点拓扑粗布局。'none'（默认）用无向放置美学（张力 − 环
     // 周长 + 环内方位分类：张力同分的候选优先十字方位，45° 次之）；
     // 'TB'/'LR' 用有向层级放置（解环 + 最长路径分层，钉层级行/列）。
     // 格距 = 矩形基准格（applyNodeLabelSizes 已分级：gradeCellW/H 与
@@ -144,7 +147,7 @@ export class GridUndirectedStrategy implements LayoutStrategy {
     );
     void grid; // 占用语义由 ExpansionGrid 接管
 
-    // 阶段 2：节点与文字轴向膨胀 —— 消费映射策略分级的宽高格数
+    // 阶段 3：节点与文字轴向膨胀 —— 消费映射策略分级的宽高格数
     // （gw/gh = px 盒 ÷ 矩形基准格向上取整），不再自算。
     const expansion = new ExpansionGrid(elements.length);
     for (const i of order) {
@@ -156,7 +159,22 @@ export class GridUndirectedStrategy implements LayoutStrategy {
       expansion.expand(i, Math.max(1, el.gw), Math.max(1, el.gh));
     }
 
-    // 阶段 3：通道约束压实（Channel Safety Margin）。
+    // 阶段 4：膨胀后调整（消压线）——质点口径判定的零压线在元素加宽后
+    // 可能失效，以真实格 AABB 迭代推离压线元素（容器不入判定，与走线
+    // 障碍同口径）。阶段 5~7：行列扫描合并 → 走廊插入 → 通道压实。
+    const containers = new Set<number>();
+    this.store.elements.forEach((el, i) => {
+      if (isSubgraphNode(el)) containers.add(i);
+    });
+    deflectEdgeCrossings(
+      expansion,
+      this.store.edges.map((e) => ({ u: e.sourceIndex, v: e.targetIndex })),
+      containers,
+    );
+    expansion.tighten();
+    expansion.mergeLines();
+    expansion.ensureCorridor(this.marginCells);
+    // 阶段 7：通道约束压实（Channel Safety Margin）。
     expansion.compact(this.marginCells);
 
     // 物理化 + 走线（映射策略出口：可渲染图）。
@@ -313,6 +331,20 @@ export class GridUndirectedStrategy implements LayoutStrategy {
       }
       expansion.expand(i, gw, gh);
     }
+    // 阶段 4~7（作用域内执行，展开为纯平移不受影响）：消压线以视图项
+    // 为判定实体，容器 item 不入判定（展开后容器框 = 成员实占并集）。
+    const containerItems = new Set<number>();
+    scope.items.forEach((it, i) => {
+      if (it.kind === 'subgraph') containerItems.add(i);
+    });
+    deflectEdgeCrossings(
+      expansion,
+      viewEdges.map((e) => ({ u: e.sourceIndex, v: e.targetIndex })),
+      containerItems,
+    );
+    expansion.tighten();
+    expansion.mergeLines();
+    expansion.ensureCorridor(margin);
     expansion.compact(margin);
 
     // 包围盒归一（左上角 → 0,0），得到作用域内相对布局。
