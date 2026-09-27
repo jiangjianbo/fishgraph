@@ -12,7 +12,9 @@
 import { describe, expect, it } from 'vitest';
 import { ForceLayout } from '../src/index.js';
 import { chainGridLayout } from '../src/layout/grid-undirected/fold.js';
+import { coarseGridPlacement, undirectedHeuristics } from '../src/layout/grid-undirected/coarse.js';
 import type { GraphSpec } from '../src/index.js';
+import type { LayoutElement } from '../src/graph/store.js';
 
 /** 相邻元素 AABB 是否重叠（半开区间：相切不算）。 */
 function overlapping(a: { x: number; y: number; w?: number; h?: number }, b: { x: number; y: number; w?: number; h?: number }): boolean {
@@ -161,6 +163,70 @@ describe('折叠布局', () => {
     }
   });
 
+  it('子图坐标系隔离：外部增删节点改变插行插列，成员相对坐标不变', () => {
+    const subNodes = [
+      { id: 'in-a', label: 'in-a' },
+      { id: 'in-b', label: 'in-b' },
+      { id: 'in-c', label: 'in-c' },
+      { id: 'in-d', label: 'in-d' },
+    ];
+    const subEdges = [
+      { source: 'in-a', target: 'in-b' },
+      { source: 'in-b', target: 'in-c' },
+      { source: 'in-c', target: 'in-d' },
+      { source: 'in-d', target: 'in-a' },
+    ];
+    const subgraph = {
+      id: 'sub',
+      shape: { kind: 'rect' as const, w: 380, h: 280 },
+      label: '子图',
+      members: ['in-a', 'in-b', 'in-c', 'in-d'],
+    };
+    // 少外部节点 vs 拥堵外部（多条外部边迫使父作用域让位/插空行列）
+    const sparse: GraphSpec = {
+      nodes: [...subNodes, { id: 'ext-1', label: '外部1' }],
+      edges: [...subEdges, { source: 'sub', target: 'ext-1' }],
+      subgraphs: [subgraph],
+    };
+    const crowd: GraphSpec = {
+      nodes: [
+        ...subNodes,
+        { id: 'ext-1', label: '外部1' },
+        { id: 'ext-2', label: '外部2' },
+        { id: 'ext-3', label: '外部3' },
+        { id: 'ext-4', label: '外部4' },
+        { id: 'ext-5', label: '外部5' },
+      ],
+      edges: [
+        ...subEdges,
+        { source: 'sub', target: 'ext-1' },
+        { source: 'ext-2', target: 'ext-3' },
+        { source: 'ext-3', target: 'ext-4' },
+        { source: 'ext-4', target: 'ext-5' },
+        { source: 'ext-5', target: 'ext-2' },
+        { source: 'ext-1', target: 'ext-3' },
+      ],
+      subgraphs: [subgraph],
+    };
+    const opts = { folding: true, foldChainMin: 3, naturalLength: 6, seed: 42 };
+    const a = new ForceLayout(sparse, opts);
+    a.run();
+    const b = new ForceLayout(crowd, opts);
+    b.run();
+    const rel = (l: ForceLayout) => {
+      const ms = ['in-a', 'in-b', 'in-c', 'in-d'].map(
+        (id) => l.nodeViews.find((v) => v.id === id)!,
+      );
+      return ms.map((m) => `${(m.x - ms[0]!.x).toFixed(6)},${(m.y - ms[0]!.y).toFixed(6)}`).join('|');
+    };
+    // 成员相对坐标只由子作用域布局决定：外部拓扑变化不改写
+    expect(rel(b)).toBe(rel(a));
+    // 空转防护：外部布局确实不同 —— 容器绝对位置随外部布局改变
+    const subA = a.subgraphViews.find((v) => v.id === 'sub')!;
+    const subB = b.subgraphViews.find((v) => v.id === 'sub')!;
+    expect(subA.x === subB.x && subA.y === subB.y).toBe(false);
+  });
+
   it('端到端：groups 图折叠后成员不与容器外元素重叠', () => {
     const spec: GraphSpec = {
       nodes: [
@@ -232,5 +298,71 @@ describe('链展开的蛇形网格（面积最小 → 周长最小）', () => {
     expect(grid.height).toBe(4);
     expect(grid.positions[1]).toEqual({ x: 0, y: 1 });
     expect(grid.positions[2]).toEqual({ x: 0, y: 2 });
+  });
+});
+
+describe('投影锚点（外部质点在子作用域内的固定映射）', () => {
+  const mkElements = (n: number): LayoutElement[] =>
+    Array.from({ length: n }, (_, i) => ({ id: i })) as unknown as LayoutElement[];
+
+  it('质点放置：锚点只牵引所连项，自身不入占用表、坐标不变', () => {
+    // 路径 1—0—2，种子 0 在原点。无锚点时扫描序把 1 放在上方 (0,−1)；
+    // 给 1 一个下方锚点 (0,5)：牵引把 1 拉到种子下方 —— 方位偏置生效。
+    const adjacency = [new Set([1, 2]), new Set([0]), new Set([0])];
+    const heuristics = undirectedHeuristics(adjacency, { directionClass: true });
+    const free = coarseGridPlacement(mkElements(3), adjacency, 6, heuristics, { ignorePlaced: true });
+    expect(free.posOf[1]!.gy).toBeLessThan(0); // 扫描序基线：上方
+
+    const pulled = coarseGridPlacement(mkElements(3), adjacency, 6, heuristics, {
+      ignorePlaced: true,
+      anchors: [{ item: 1, at: { gx: 0, gy: 5 } }],
+    });
+    expect(pulled.posOf[1]!.gy).toBeGreaterThan(0); // 被拉到种子下方
+    // 锚点不占格：占用表只有 3 个成员，锚点格 (0,5) 上没有元素
+    expect(pulled.grid.occ.size).toBe(3);
+    expect(pulled.grid.has(0, 5)).toBe(false);
+    // 1×1 质点口径：posOf 无锚点项
+    expect(pulled.posOf).toHaveLength(3);
+  });
+
+  it('子图投影联动：牵引方向跟随外部质点的实际方位', () => {
+    // 子图 = 路径 m1—m2—m3（foldChainMin 高，不折叠）；ext 接 m3。
+    // 有 z1：根布局把 ext 顶到容器上方，投影向下 → m3 落到 m2 正下方；
+    // 无 z1：ext 落在容器上方 → 投影向上，m3 保持扫描序的上/左方位。
+    const mk = (withZ: boolean): GraphSpec => ({
+      nodes: [
+        { id: 'm1', label: 'm1' },
+        { id: 'm2', label: 'm2' },
+        { id: 'm3', label: 'm3' },
+        { id: 'ext', label: 'ext' },
+        ...(withZ ? [{ id: 'z1', label: 'z1' }] : []),
+      ],
+      edges: [
+        { source: 'm1', target: 'm2' },
+        { source: 'm2', target: 'm3' },
+        { source: 'ext', target: 'm3' },
+        ...(withZ ? [{ source: 'z1', target: 'ext' }] : []),
+      ],
+      subgraphs: [
+        { id: 'sub', shape: { kind: 'rect', w: 100, h: 100 }, label: 'sub', members: ['m1', 'm2', 'm3'] },
+      ],
+    });
+    const opts = { folding: true, foldChainMin: 5, naturalLength: 6, seed: 42 };
+    const member = (l: ForceLayout, id: string) => l.nodeViews.find((v) => v.id === id)!;
+
+    const withZ = new ForceLayout(mk(true), opts);
+    withZ.run();
+    const m3z = member(withZ, 'm3');
+    const m2z = member(withZ, 'm2');
+    // 投影在下方：m3 被拉到 m2 正下方（同列、严格在下）
+    expect(m3z.y).toBeGreaterThan(m2z.y);
+    expect(Math.abs(m3z.x - m2z.x)).toBeLessThan(1e-6);
+
+    const alone = new ForceLayout(mk(false), opts);
+    alone.run();
+    const m3a = member(alone, 'm3');
+    const m2a = member(alone, 'm2');
+    // 对照：投影方向不同，m3 不在同列下方（扫描序方位）
+    expect(m3a.x).not.toBeCloseTo(m2a.x, 6);
   });
 });

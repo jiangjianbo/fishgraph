@@ -37,6 +37,8 @@ const W_LEVEL = 3;
 const W_DIR = 0.5;
 /** 死锁判定的层级容忍行数：最佳候选偏离超过它 → 层级行拥堵，插列。 */
 const DEV_CAP = 2;
+/** 投影牵引权重（与无向实现同口径：方位级偏置，不与层级罚竞争）。 */
+const ANCHOR_PULL = 0.5;
 
 /** TB 死锁插列方向（±x，不动层级行）。 */
 const DIRS_COLUMN: readonly PushDir[] = [
@@ -153,6 +155,14 @@ export function directedHeuristics(
 
     deadlock(grid, anchor, posOf) {
       return insertLine(grid, anchor.gx, anchor.gy, posOf, deadlockDirs);
+    },
+
+    /** 投影牵引（曼哈顿距离 × 权重）：层级罚/方向罚之外的同族偏置，
+     *  只影响 cross 轴内的择位倾向 —— flow 轴归层级行管，不被投影拉走。 */
+    anchorTerm(gx, gy, anchors) {
+      let sum = 0;
+      for (const a of anchors) sum += Math.abs(gx - a.gx) + Math.abs(gy - a.gy);
+      return ANCHOR_PULL * sum;
     },
 
     /** 种子也钉在自己的层级行上（否则微调期流动弹簧要把它硬拉回层级）。 */

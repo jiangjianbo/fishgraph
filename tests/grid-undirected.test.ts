@@ -13,6 +13,16 @@ import {
 import type { GraphSpec } from '../src/types.js';
 import { estimateLabelBox } from '../src/label.js';
 import { ExpansionGrid } from '../src/layout/grid-undirected/expansion.js';
+import {
+  coarseGridPlacement,
+  isCollinearRay,
+  liesBetween,
+  midCells,
+  PointGrid,
+  segmentBlocked,
+  undirectedHeuristics,
+} from '../src/layout/grid-undirected/coarse.js';
+import type { LayoutElement } from '../src/graph/store.js';
 
 const CELL = 100; // 粗布局格胞 px 值（断言用）；naturalLength 以格数传入
 
@@ -518,5 +528,165 @@ describe('ExpansionGrid 中心对称膨胀', () => {
         }
       }
     }
+  });
+});
+
+describe('同起点连线零共线（阶段 2 规则 4：同起点两线夹角不得为 0）', () => {
+  const mkElements = (n: number): LayoutElement[] =>
+    Array.from({ length: n }, (_, i) => ({ id: i })) as unknown as LayoutElement[];
+
+  /** p、q 相对原点 u 是否同向平行（夹角 0）。 */
+  const sameRay = (p: { gx: number; gy: number }, q: { gx: number; gy: number }): boolean =>
+    p.gx * q.gy - p.gy * q.gx === 0 && p.gx * q.gx + p.gy * q.gy > 0;
+
+  it('isCollinearRay：同向共线命中，反向对冲/垂直/未放邻居不命中', () => {
+    // u=0 的邻居：1（右）、2（未放占位）、3（下）；候选 v=4
+    const adjacency = [new Set([1, 2, 3, 4]), new Set([0]), new Set([0]), new Set([0]), new Set([0])];
+    const posOf = [
+      { gx: 0, gy: 0 },
+      { gx: 1, gy: 0 }, // w=1 在 u 右侧
+      null as unknown as { gx: number; gy: number }, // w=2 未放置
+      { gx: 0, gy: 1 },
+      { gx: 0, gy: 0 },
+    ];
+    // 候选在 u 右侧射线上（w=1 同向）→ 命中
+    expect(isCollinearRay(adjacency, posOf, 4, 0, posOf[0]!, 2, 0)).toBe(true);
+    // 候选在 u 左侧（与 w=1 反向对冲，180°）→ 不命中
+    expect(isCollinearRay(adjacency, posOf, 4, 0, posOf[0]!, -1, 0)).toBe(false);
+    // 候选在 u 下方（与 w=3 同向）→ 命中
+    expect(isCollinearRay(adjacency, posOf, 4, 0, posOf[0]!, 0, 2)).toBe(true);
+    // 候选斜向 → 不命中
+    expect(isCollinearRay(adjacency, posOf, 4, 0, posOf[0]!, 1, 1)).toBe(false);
+    // 唯一候选射线上的邻居未放置 → 不命中
+    const onlyUnplaced = [new Set([2, 4]), new Set([0]), new Set([0]), new Set([0]), new Set([0])];
+    expect(isCollinearRay(onlyUnplaced, posOf, 4, 0, posOf[0]!, 2, 0)).toBe(false);
+  });
+
+  it('9 叶星：叶不得落在中心其他叶的射线上（共线位全部拒绝）', () => {
+    // 中心 0 + 9 个邻居：前 8 叶占满 ring1 后，ring2 四个轴位 (±2,0)/(0,±2)
+    // 全部与前 4 叶同射线 —— 无规则时第 9 叶按扫描序落 (0,-2)（共线）；
+    // 规则生效后必须落到非共线格。
+    const n = 10;
+    const adjacency = Array.from({ length: n }, () => new Set<number>());
+    for (let i = 1; i < n; i++) {
+      adjacency[0]!.add(i);
+      adjacency[i]!.add(0);
+    }
+    const { posOf } = coarseGridPlacement(mkElements(n), adjacency, 6, undirectedHeuristics(adjacency));
+    // 放置完成且互不重合
+    expect(posOf).toHaveLength(n);
+    expect(new Set(posOf.map((p) => `${p!.gx},${p!.gy}`)).size).toBe(n);
+    // 中心 0 的任意两条连线在 0 端夹角非 0（无同向平行对）
+    const leaves = [...adjacency[0]!].map((i) => posOf[i]!);
+    for (let a = 0; a < leaves.length; a++) {
+      for (let b = a + 1; b < leaves.length; b++) {
+        const ri = { gx: leaves[a]!.gx, gy: leaves[a]!.gy };
+        const rj = { gx: leaves[b]!.gx, gy: leaves[b]!.gy };
+        expect(sameRay(ri, rj), `叶 ${a + 1} 与叶 ${b + 1} 在中心射线上共线`).toBe(false);
+      }
+    }
+  });
+
+  it('链图不误伤：放置完成且中间节点的 180° 对冲邻居合法保留', () => {
+    const n = 4;
+    const adjacency = Array.from({ length: n }, () => new Set<number>());
+    for (let i = 0; i + 1 < n; i++) {
+      adjacency[i]!.add(i + 1);
+      adjacency[i + 1]!.add(i);
+    }
+    const { posOf } = coarseGridPlacement(mkElements(n), adjacency, 6, undirectedHeuristics(adjacency));
+    // 放置完成且互不重合
+    expect(new Set(posOf.map((p) => `${p!.gx},${p!.gy}`)).size).toBe(n);
+    // 全局不变式：任意节点引出的两条边都不共线同向（180° 对冲不在禁令内）
+    for (let u = 0; u < n; u++) {
+      const nbrs = [...adjacency[u]!].map((i) => posOf[i]!);
+      for (let a = 0; a < nbrs.length; a++) {
+        for (let b = a + 1; b < nbrs.length; b++) {
+          const ra = { gx: nbrs[a]!.gx - posOf[u]!.gx, gy: nbrs[a]!.gy - posOf[u]!.gy };
+          const rb = { gx: nbrs[b]!.gx - posOf[u]!.gx, gy: nbrs[b]!.gy - posOf[u]!.gy };
+          expect(sameRay(ra, rb), `节点 ${u} 的两条连线共线同向`).toBe(false);
+        }
+      }
+    }
+  });
+});
+
+describe('节点压线禁令（阶段 2 规则 5：节点不得落在两节点连线线段上）', () => {
+  const el = (id: number, placed?: { x: number; y: number }): LayoutElement =>
+    ({ id, ...placed }) as unknown as LayoutElement;
+
+  it('midCells / liesBetween / segmentBlocked 几何单元', () => {
+    expect(midCells({ gx: 0, gy: 0 }, { gx: 2, gy: 0 })).toEqual([{ gx: 1, gy: 0 }]);
+    expect(midCells({ gx: 0, gy: 0 }, { gx: 3, gy: 0 })).toEqual([
+      { gx: 1, gy: 0 },
+      { gx: 2, gy: 0 },
+    ]);
+    expect(midCells({ gx: 0, gy: 0 }, { gx: -2, gy: 0 })).toEqual([{ gx: -1, gy: 0 }]);
+    expect(midCells({ gx: 0, gy: 0 }, { gx: 2, gy: 2 })).toEqual([{ gx: 1, gy: 1 }]); // 45°
+    expect(midCells({ gx: 0, gy: 0 }, { gx: 2, gy: 1 })).toEqual([]); // 互质方向无中间格点
+    expect(midCells({ gx: 0, gy: 0 }, { gx: 0, gy: 0 })).toEqual([]);
+    // 压线 = 共线且居中；延长线/端点/异线不算
+    expect(liesBetween({ gx: 0, gy: 0 }, { gx: 2, gy: 0 }, { gx: 1, gy: 0 })).toBe(true);
+    expect(liesBetween({ gx: 0, gy: 0 }, { gx: 2, gy: 2 }, { gx: 1, gy: 1 })).toBe(true);
+    expect(liesBetween({ gx: 0, gy: 0 }, { gx: 2, gy: 0 }, { gx: 3, gy: 0 })).toBe(false);
+    expect(liesBetween({ gx: 0, gy: 0 }, { gx: 2, gy: 0 }, { gx: -1, gy: 0 })).toBe(false);
+    expect(liesBetween({ gx: 0, gy: 0 }, { gx: 2, gy: 0 }, { gx: 0, gy: 0 })).toBe(false);
+    expect(liesBetween({ gx: 0, gy: 0 }, { gx: 2, gy: 0 }, { gx: 1, gy: 1 })).toBe(false);
+    // 线段穿点：中间格点被占用即命中
+    const grid = new PointGrid();
+    grid.place({ gx: 1, gy: 0 }, 9);
+    expect(segmentBlocked({ gx: 0, gy: 0 }, { gx: 2, gy: 0 }, grid)).toBe(true);
+    expect(segmentBlocked({ gx: 0, gy: 0 }, { gx: 2, gy: 2 }, grid)).toBe(false);
+  });
+
+  it('长边上的种子：孤儿落格回避压线位（A—C 长边，B 不落中点）', () => {
+    // A(0,0) 与 C(2,0) 用户预置且相邻（长边，中点 (1,0)）；B 连接 A、C。
+    // 无禁令时紧凑落格选 touch 最高的 (1,0)（压线）；禁令生效后必须绕开。
+    const adjacency = [new Set([1, 2]), new Set([0, 2]), new Set([0, 1])];
+    const elements = [el(0, { x: 0, y: 0 }), el(1), el(2, { x: 2, y: 0 })];
+    const { posOf } = coarseGridPlacement(
+      elements,
+      adjacency,
+      1,
+      undirectedHeuristics(adjacency),
+      { ignorePlaced: false },
+    );
+    expect(posOf).toHaveLength(3);
+    expect(new Set(posOf.map((p) => `${p!.gx},${p!.gy}`)).size).toBe(3);
+    expect(`${posOf[1]!.gx},${posOf[1]!.gy}`).not.toBe('1,0'); // 不压 A—C 线段
+  });
+
+  it('出队放置：候选压在已放长边线段上时出局，改选次优格', () => {
+    // A(0,0)—C(2,0) 预置长边；F/G/H 占掉 B 周围三面 → B 落 (1,-1)，
+    // E（连 B）的唯一张力最优格是 (1,0)（压 A—C 线段）——禁令拒绝后
+    // 必须改选 (0,-2) 等次优格。
+    const adjacency = [
+      new Set([1, 2]),
+      new Set([0, 2, 3]),
+      new Set([0, 1]),
+      new Set([1]),
+      new Set<number>(),
+      new Set<number>(),
+      new Set<number>(),
+    ];
+    const elements = [
+      el(0, { x: 0, y: 0 }),
+      el(1),
+      el(2, { x: 2, y: 0 }),
+      el(3),
+      el(4, { x: 1, y: -2 }),
+      el(5, { x: 0, y: -1 }),
+      el(6, { x: 2, y: -1 }),
+    ];
+    const { posOf } = coarseGridPlacement(
+      elements,
+      adjacency,
+      1,
+      undirectedHeuristics(adjacency),
+      { ignorePlaced: false },
+    );
+    expect(posOf).toHaveLength(7);
+    expect(new Set(posOf.map((p) => `${p!.gx},${p!.gy}`)).size).toBe(7);
+    expect(`${posOf[3]!.gx},${posOf[3]!.gy}`).not.toBe('1,0'); // E 不压 A—C 线段
   });
 });

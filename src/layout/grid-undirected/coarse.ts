@@ -12,9 +12,18 @@
  * 阶段 2（质点弹性网格放置）：所有节点一律视为 1×1 无面积质点，碰撞检查
  * 退化为格子占用查询（O(1)）。节点按「波纹连通生长」（BFS 层序队列）
  * 逐个放置：度数最高者占据网格中心 (0,0)；后续节点以 heuristics.anchor
- * 为中心环形扩搜空格，按 heuristics.score 择优。搜索预算内无合格空格时
+ * 为中心环形扩搜空格，按 heuristics.score 择优；候选格另受两道连线禁令
+ * 约束 ——「同起点零共线」（isCollinearRay：u 的两条连线在 u 端夹角不得
+ * 为 0，即视觉重叠成 A→B→C 一条线）与「节点压线」（liesBetween /
+ * segmentBlocked：任何节点不得落在两节点连线线段上、线段不得穿过第三
+ * 节点，与划线风格无关）。搜索预算内无合格空格时
  * 触发死锁机制：heuristics.deadlock 把已放置节点整体推开一格，强行挤出
  * 新空间 —— 保障放置 100% 不死锁。
+ *
+ * 子作用域放置可携带固定投影锚点（CoarsePlacementOptions.anchors）：
+ * 外部质点在子作用域内的映射，只对所连节点产生牵引（heuristics.anchorTerm
+ * 偏置，不计入死锁判定）；锚点不入占用表 —— 不占格、不参与插行列推挤，
+ * 自身坐标全程不变。
  *
  * 阶段 3（轴向膨胀与压实）：压实阶段收集占用行/列并删除全部空行空列
  * （推箱子式消灭大片空白），再按行/列上的最大包围半径计算相邻占用行/列
@@ -30,6 +39,50 @@ import type { LayoutElement } from '../../graph/store.js';
 
 /** 邻居环形扩搜的半径上限（格）。超出仍无合格空格即触发死锁机制。 */
 const SEARCH_RING_CAP = 5;
+
+/** 非负整数辗转相除。 */
+function gcd(a: number, b: number): number {
+  while (b !== 0) [a, b] = [b, a % b];
+  return a;
+}
+
+/**
+ * 线段 a→b 的中间格点（gcd 步进）：仅 gcd(|dx|,|dy|) > 1 的线段存在中
+ * 间格点，贴邻边（距离 1）与互质方向线段（如 (2,1)）天然无中间点。
+ */
+export function midCells(a: Cell, b: Cell): Cell[] {
+  const dx = b.gx - a.gx;
+  const dy = b.gy - a.gy;
+  const g = gcd(Math.abs(dx), Math.abs(dy));
+  const cells: Cell[] = [];
+  for (let k = 1; k < g; k++) {
+    cells.push({ gx: a.gx + (dx / g) * k, gy: a.gy + (dy / g) * k });
+  }
+  return cells;
+}
+
+/**
+ * 点 p 是否共线且严格位于线段 a–b 之间（节点压线判定）：压线 = 第三
+ * 节点落在两节点的直线连线途经处；线段端点的延长线不算（共线但不居
+ * 中），那是零共线禁令（isCollinearRay）的管辖范围。
+ */
+export function liesBetween(a: Cell, b: Cell, p: Cell): boolean {
+  const abx = b.gx - a.gx;
+  const aby = b.gy - a.gy;
+  const apx = p.gx - a.gx;
+  const apy = p.gy - a.gy;
+  if (abx * apy - aby * apx !== 0) return false;
+  const dot = apx * abx + apy * aby;
+  return dot > 0 && dot < abx * abx + aby * aby;
+}
+
+/** 线段 a→b 是否穿过某个已放置节点（中间格点查占用表）。 */
+export function segmentBlocked(a: Cell, b: Cell, grid: PointGrid): boolean {
+  for (const m of midCells(a, b)) {
+    if (grid.has(m.gx, m.gy)) return true;
+  }
+  return false;
+}
 /** 格坐标键（列, 行）。 */
 function cellKey(gx: number, gy: number): string {
   return `${gx},${gy}`;
@@ -45,6 +98,21 @@ export interface CoarsePlacementOptions {
    * 为未定位（否则 placed 成员会被留在局部布局之外，污染块包围盒）。
    */
   ignorePlaced?: boolean;
+  /**
+   * 固定投影锚点（子图坐标系隔离联动）：外部质点在子作用域网格中的
+   * 映射。锚点只对所连视图项产生牵引（评分加项），不进占用表 ——
+   * 不占格、可被成员踏过，且永不参与插行列推挤（投影坐标固定不变，
+   * 只有子图内节点位置可动）。
+   */
+  anchors?: readonly ProjectionAnchor[];
+}
+
+/** 固定投影锚点：外部质点在子作用域坐标系中的映射。 */
+export interface ProjectionAnchor {
+  /** 被牵引的视图项下标（本次放置输入的下标域）。 */
+  item: number;
+  /** 投影固定格。 */
+  at: Cell;
 }
 
 export interface Cell {
@@ -196,6 +264,12 @@ export interface CoarseHeuristics {
    * 行卡住（逆流）。
    */
   placeSeed?(grid: PointGrid, v: number): Cell;
+  /**
+   * 投影锚点牵引项（可选，缺省 0）：候选格相对固定投影锚点的偏好成本，
+   * 越小越被吸引。只参与候选比较，**不参与死锁判定** —— 投影在容器
+   * 边界之外，成员够不着投影是常态而非拥堵，计入死锁会误触插行列。
+   */
+  anchorTerm?(gx: number, gy: number, anchors: readonly Cell[]): number;
 }
 
 /**
@@ -228,6 +302,8 @@ export function undirectedHeuristics(
   // 方位分类能量：十字 0 < 对角 0.25 < 杂角 0.5（量级压在张力每格 1 之下）。
   const DIAGONAL_COST = 0.25;
   const OBLIQUE_COST = 0.5;
+  /** 投影牵引权重：每格 0.5 —— 方位级偏置（同方向冲突时让位于张力维）。 */
+  const ANCHOR_PULL = 0.5;
 
   /** 计算候选格的张力项。 */
   const tension = (gx: number, gy: number, neighbors: readonly Cell[]): number => {
@@ -298,31 +374,116 @@ export function undirectedHeuristics(
     deadlock(grid, anchor, posOf) {
       return insertLine(grid, anchor.gx, anchor.gy, posOf);
     },
+    anchorTerm(gx, gy, anchors) {
+      let sum = 0;
+      for (const a of anchors) sum += Math.abs(gx - a.gx) + Math.abs(gy - a.gy);
+      return ANCHOR_PULL * sum;
+    },
   };
 }
 
-/** 放置一个已放置邻居的节点：环形扩搜 + 评分择优，必要时走死锁机制。 */
+/**
+ * 同起点连线零共线禁令（doc/布局核心原则.md 无向图阶段 2 规则 4）：
+ * 候选格落在 u 的某条已有连线射线上（同起点夹角为 0）则不合格 ——
+ * 否则两条边视觉上重叠成 A→B→C 一条线。u 为 v 的已放置邻居，w 为 u
+ * 的另一个已放置邻居：candidate−u 与 w−u 同向平行（叉积为 0 且点积
+ * > 0）即共线。adjacency 为无向邻接，同起点/同终点对称适用 —— 几何
+ * 重叠只取决于 u 的两个邻居落在同一射线，与边的有向语义无关；反向
+ * （180°）共线是两条边对冲，不算重叠。
+ */
+export function isCollinearRay(
+  adjacency: Array<Set<number>>,
+  posOf: GridPos,
+  v: number,
+  u: number,
+  posU: Cell,
+  gx: number,
+  gy: number,
+): boolean {
+  const dx = gx - posU.gx;
+  const dy = gy - posU.gy;
+  if (dx === 0 && dy === 0) return false;
+  for (const w of adjacency[u]) {
+    if (w === v) continue;
+    const p = posOf[w];
+    if (!p) continue;
+    const wx = p.gx - posU.gx;
+    const wy = p.gy - posU.gy;
+    if (dx * wy - dy * wx === 0 && dx * wx + dy * wy > 0) return true;
+  }
+  return false;
+}
+
+/**
+ * 放置一个已放置邻居的节点：环形扩搜 + 评分择优，必要时走死锁机制。
+ *
+ * anchors 为 v 的固定投影锚点（可空）：牵引项加进候选比较，但不进
+ * 死锁判定（见 CoarseHeuristics.anchorTerm）；有锚点时禁用「已达理论
+ * 最优提前收工」—— 同分候选仍要按牵引方向裁决。
+ *
+ * 零共线禁令作用于全部候选格（含环 0 锚点格）：被禁格直接出局，搜索
+ * 预算内无合格空格时走既有死锁机制（插行列推挤）。死锁落位后不做二
+ * 次共线复查 —— 死锁解法优先保证放置完成性（拥堵处允许放弃部分美学
+ * 约束保无重叠，与软层级的拥堵语义一致），二次复查会造成推挤-复查
+ * 死循环。
+ *
+ * 压线禁令（节点压边 / 边压节点）与零共线同层作用：候选格落在某条
+ * 已放长边（线段含中间格点的边）线段上，或新边 v–u 的线段穿过已放
+ * 置节点，均不合格。与零共线互补：零共线管「u 的邻居在 u→v 射线上」
+ * （两条边重叠成 A→B→C），压线管「线段途经任意已放置节点」（与邻接
+ * 无关）—— 长边列表由 coarseGridPlacement 在边两端就位时登记。
+ */
 function placeWithHeuristics(
   grid: PointGrid,
   v: number,
   placedNeighborIdx: number[],
   posOf: GridPos,
   heuristics: CoarseHeuristics,
+  adjacency: Array<Set<number>>,
+  longEdges: ReadonlyArray<readonly [number, number]>,
+  anchors: readonly Cell[] = [],
 ): Cell {
+  /** v 的候选格是否命中同起点零共线禁令。 */
+  const collides = (gx: number, gy: number): boolean => {
+    for (const u of placedNeighborIdx) {
+      if (isCollinearRay(adjacency, posOf, v, u, posOf[u]!, gx, gy)) return true;
+    }
+    return false;
+  };
+  /** v 的候选格是否命中压线禁令（候选压在已有长边上 / 新边穿过节点）。 */
+  const crossesLine = (gx: number, gy: number): boolean => {
+    const cand = { gx, gy };
+    for (const [a, b] of longEdges) {
+      if (liesBetween(posOf[a]!, posOf[b]!, cand)) return true;
+    }
+    for (const u of placedNeighborIdx) {
+      if (segmentBlocked(posOf[u]!, cand, grid)) return true;
+    }
+    return false;
+  };
+  /** 候选格是否不合格（占用 / 零共线 / 压线）。 */
+  const ineligible = (gx: number, gy: number): boolean =>
+    grid.has(gx, gy) || collides(gx, gy) || crossesLine(gx, gy);
   const neighbors = placedNeighborIdx.map((u) => posOf[u]!);
   const anchor = heuristics.anchor(v, neighbors);
   const cx = anchor.gx;
   const cy = anchor.gy;
   const theoreticalMin = neighbors.length;
+  const hasAnchors = anchors.length > 0 && !!heuristics.anchorTerm;
+  const pull = (gx: number, gy: number): number =>
+    hasAnchors ? heuristics.anchorTerm!(gx, gy, anchors) : 0;
   let bestCell: Cell | null = null;
   let bestScore = Infinity;
+  let bestGraphScore = Infinity;
 
-  // 环 0：锚点格本身（邻居均值的取整格）为空时直接参评——两个已放置
-  // 邻居分居其对角/两侧时，均值格恰是张力最小的理想位（环搜从 1 起步
-  // 会永远错过它，实测把网格图的末行挤出去一行）。
-  if (!grid.has(cx, cy)) {
+  // 环 0：锚点格本身（邻居均值的取整格）为空且不违规时直接参评——两个
+  // 已放置邻居分居其对角/两侧时，均值格恰是张力最小的理想位（环搜从 1
+  // 起步会永远错过它，实测把网格图的末行挤出去一行）。
+  if (!ineligible(cx, cy)) {
     bestCell = { gx: cx, gy: cy };
     bestScore = heuristics.score(v, cx, cy, neighbors, placedNeighborIdx);
+    bestGraphScore = bestScore;
+    bestScore += pull(cx, cy);
   }
 
   for (let ring = 1; ring <= SEARCH_RING_CAP; ring++) {
@@ -331,8 +492,9 @@ function placeWithHeuristics(
         if (Math.max(Math.abs(dx), Math.abs(dy)) !== ring) continue; // 只看环缘
         const gx = cx + dx;
         const gy = cy + dy;
-        if (grid.has(gx, gy)) continue;
-        const score = heuristics.score(v, gx, gy, neighbors, placedNeighborIdx);
+        if (ineligible(gx, gy)) continue;
+        const graphScore = heuristics.score(v, gx, gy, neighbors, placedNeighborIdx);
+        const score = graphScore + pull(gx, gy);
         // 平局显式裁决为扫描序 (gy, gx) 升序（先填满一行再开新行）：对称
         // 图（网格/环）的镜像候选得分完全相等，遍历序平局会让不同"生长
         // 前锋"朝相反方向分叉，把矩阵图折成 6 行（实测）。显式扫描序让
@@ -345,17 +507,19 @@ function placeWithHeuristics(
         if (bestCell === null || better) {
           bestCell = { gx, gy };
           bestScore = score;
+          bestGraphScore = graphScore;
         }
       }
     }
-    // 已达理论最优（全部邻居贴邻）提前收工；前几环后不再扩大搜索。
-    if (bestScore <= theoreticalMin) break;
+    // 已达理论最优（全部邻居贴邻）提前收工（有投影锚点时同分候选仍需
+    // 按牵引方向裁决，不提前收工）；前几环后不再扩大搜索。
+    if (!hasAnchors && bestScore <= theoreticalMin) break;
     if (ring >= 3 && bestCell) break;
   }
 
   if (
     !bestCell ||
-    heuristics.isDeadlock(v, bestScore, theoreticalMin, neighbors.length, bestCell)
+    heuristics.isDeadlock(v, bestGraphScore, theoreticalMin, neighbors.length, bestCell)
   ) {
     // 候选点周围被完全占满：按最近邻居格为锚插行列挤出新空间。
     let near = neighbors[0]!;
@@ -380,52 +544,60 @@ function placeWithHeuristics(
  * 贴靠得分 = 2×边邻接 + 1×角邻接（边共享比角接触更紧凑）；平局取离
  * 区域质心切比雪夫距离最近者，再平局按 (gx, gy) 升序保证确定性。
  *
+ * avoid 为可选禁令过滤（压线禁令的种子路径接入）：被禁格不参评。全
+ * 部空格都被禁时退回无过滤结果 —— 放置完成性优先（与死锁解法同一取
+ * 舍），宁可压线也不让放置失败。
+ *
  * 旧口径「贴已放置区域右缘外侧」会把全部孤立节点排成一行：线形是
  * 弛豫动力学的横向鞍点（横向扰动无恢复力），力学位形无法自行展开，
  * 布局被锁死在一条直线上。3 个不相关节点应成品字、4 个应成器字
  * （tests/shape-baseline.test.ts 基线）。
  */
-export function placeOrphan(grid: PointGrid): Cell {
+export function placeOrphan(grid: PointGrid, avoid?: (cell: Cell) => boolean): Cell {
   if (grid.occ.size === 0) return { gx: 0, gy: 0 };
-  const cx = (grid.minGx + grid.maxGx) / 2;
-  const cy = (grid.minGy + grid.maxGy) / 2;
-  let best: Cell | null = null;
-  let bestTouch = -1;
-  let bestRing = Infinity;
-  let bestManhattan = Infinity;
-  for (let gy = grid.minGy - 1; gy <= grid.maxGy + 1; gy++) {
-    for (let gx = grid.minGx - 1; gx <= grid.maxGx + 1; gx++) {
-      if (grid.has(gx, gy)) continue;
-      // 8 邻接贴靠计分：边共享（4 邻）权重 2，角接触权重 1
-      let touch = 0;
-      if (grid.has(gx - 1, gy)) touch += 2;
-      if (grid.has(gx + 1, gy)) touch += 2;
-      if (grid.has(gx, gy - 1)) touch += 2;
-      if (grid.has(gx, gy + 1)) touch += 2;
-      if (grid.has(gx - 1, gy - 1)) touch += 1;
-      if (grid.has(gx + 1, gy - 1)) touch += 1;
-      if (grid.has(gx - 1, gy + 1)) touch += 1;
-      if (grid.has(gx + 1, gy + 1)) touch += 1;
-      const ring = Math.max(Math.abs(gx - cx), Math.abs(gy - cy));
-      const manhattan = Math.abs(gx - cx) + Math.abs(gy - cy);
-      const better =
-        touch > bestTouch ||
-        (touch === bestTouch &&
-          (ring < bestRing ||
-            (ring === bestRing &&
-              (manhattan < bestManhattan ||
-                (manhattan === bestManhattan &&
-                  best !== null &&
-                  (gx < best.gx || (gx === best.gx && gy < best.gy)))))));
-      if (better) {
-        best = { gx, gy };
-        bestTouch = touch;
-        bestRing = ring;
-        bestManhattan = manhattan;
+  const pick = (skip: (cell: Cell) => boolean): Cell | null => {
+    const cx = (grid.minGx + grid.maxGx) / 2;
+    const cy = (grid.minGy + grid.maxGy) / 2;
+    let best: Cell | null = null;
+    let bestTouch = -1;
+    let bestRing = Infinity;
+    let bestManhattan = Infinity;
+    for (let gy = grid.minGy - 1; gy <= grid.maxGy + 1; gy++) {
+      for (let gx = grid.minGx - 1; gx <= grid.maxGx + 1; gx++) {
+        if (grid.has(gx, gy) || skip({ gx, gy })) continue;
+        // 8 邻接贴靠计分：边共享（4 邻）权重 2，角接触权重 1
+        let touch = 0;
+        if (grid.has(gx - 1, gy)) touch += 2;
+        if (grid.has(gx + 1, gy)) touch += 2;
+        if (grid.has(gx, gy - 1)) touch += 2;
+        if (grid.has(gx, gy + 1)) touch += 2;
+        if (grid.has(gx - 1, gy - 1)) touch += 1;
+        if (grid.has(gx + 1, gy - 1)) touch += 1;
+        if (grid.has(gx - 1, gy + 1)) touch += 1;
+        if (grid.has(gx + 1, gy + 1)) touch += 1;
+        const ring = Math.max(Math.abs(gx - cx), Math.abs(gy - cy));
+        const manhattan = Math.abs(gx - cx) + Math.abs(gy - cy);
+        const better =
+          touch > bestTouch ||
+          (touch === bestTouch &&
+            (ring < bestRing ||
+              (ring === bestRing &&
+                (manhattan < bestManhattan ||
+                  (manhattan === bestManhattan &&
+                    best !== null &&
+                    (gx < best.gx || (gx === best.gx && gy < best.gy)))))));
+        if (better) {
+          best = { gx, gy };
+          bestTouch = touch;
+          bestRing = ring;
+          bestManhattan = manhattan;
+        }
       }
     }
-  }
-  return best!;
+    return best;
+  };
+  const filtered = pick((c) => !!avoid?.(c));
+  return filtered ?? pick(() => false)!;
 }
 
 /**
@@ -464,6 +636,25 @@ export function coarseGridPlacement(
   const posOf: GridPos = new Array(n).fill(null);
   const order: number[] = [];
   const ignorePlaced = options.ignorePlaced ?? false;
+  // 投影锚点按视图项归组（只牵引，不入占用表，永不移动）。
+  const anchorsOf: Cell[][] = Array.from({ length: n }, () => []);
+  for (const a of options.anchors ?? []) {
+    if (a.item >= 0 && a.item < n) anchorsOf[a.item]!.push(a.at);
+  }
+
+  // 已放长边（线段含中间格点的边）：压线禁令的查询基准。存元素下标对、
+  // 查询时读 posOf 当前坐标 —— 插行列推挤平移坐标后天然保持有效。
+  const longEdges: Array<[number, number]> = [];
+  /** v 与其已放置邻居之间的新边若线段含中间格点，登记为长边。 */
+  const registerLongEdges = (v: number, placedNbrs: readonly number[]): void => {
+    for (const u of placedNbrs) {
+      if (u !== v && posOf[u] && midCells(posOf[u]!, posOf[v]!).length > 0) longEdges.push([u, v]);
+    }
+  };
+  /** 种子落格的压线回避：不落在任何已放长边的线段上（有向 placeSeed
+   *  钩子自行落格，不经此过滤 —— 有向种子的层级行落位是另一套边界）。 */
+  const avoidCrossed = (c: Cell): boolean =>
+    longEdges.some(([a, b]) => liesBetween(posOf[a]!, posOf[b]!, c));
 
   // 用户显式定位的元素：连续坐标反算占格（冲突时向右找相邻空格）。
   for (let i = 0; i < n; i++) {
@@ -475,6 +666,7 @@ export function coarseGridPlacement(
     grid.place({ gx, gy }, i);
     posOf[i] = { gx, gy };
     order.push(i);
+    registerLongEdges(i, [...adjacency[i]]);
   }
 
   // 波纹连通生长（BFS 层序）：从全局度数最高的节点开始，候选集按先进
@@ -512,12 +704,13 @@ export function coarseGridPlacement(
       }
       const cellPos = heuristics.placeSeed
         ? heuristics.placeSeed(grid, seed)
-        : placeOrphan(grid);
+        : placeOrphan(grid, avoidCrossed);
       grid.place(cellPos, seed);
       posOf[seed] = cellPos;
       done[seed] = true;
       remaining--;
       order.push(seed);
+      registerLongEdges(seed, [...adjacency[seed]]);
       enqueueNeighbors(seed);
       continue;
     }
@@ -528,13 +721,23 @@ export function coarseGridPlacement(
     const placed = [...adjacency[v]].filter((u) => posOf[u]);
     const cellPos =
       placed.length > 0
-        ? placeWithHeuristics(grid, v, placed, posOf, heuristics)
-        : placeOrphan(grid);
+        ? placeWithHeuristics(
+            grid,
+            v,
+            placed,
+            posOf,
+            heuristics,
+            adjacency,
+            longEdges,
+            anchorsOf[v]!,
+          )
+        : placeOrphan(grid, avoidCrossed);
     grid.place(cellPos, v);
     posOf[v] = cellPos;
     done[v] = true;
     remaining--;
     order.push(v);
+    registerLongEdges(v, placed);
     enqueueNeighbors(v);
   }
 

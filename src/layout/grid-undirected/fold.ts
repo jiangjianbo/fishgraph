@@ -18,10 +18,11 @@
  *   - 链识别：作用域内元素-元素边上度 ≤ 2 的极简单链，从下标最小的
  *     可行种子向两端延伸（取下标最小的可行邻居，确定性）。
  *
- * 展开（unfold）：chain → 成员沿主轴按格尺寸排开（间隙 1 格走线走廊，
- * 垂直于主轴在 AABB 内居中）；subgraph → 子作用域相对布局平移进容器
- * AABB（padding 偏移）后递归展开。展开产物 = 每个真实元素的格 AABB，
- * 交回主流水线物理化与走线。
+ * 展开（unfold）：chain → 蛇形网格形状（gap=0 判据）加链内走廊物化后
+ * 网格化落位；subgraph → 子作用域相对布局整体平移进容器 AABB 后递归
+ * 展开。展开是纯平移：容器内部相对坐标只由子作用域布局决定，外部的
+ * 让位 / 插空行列以容器为原子单元，不改写子图内部坐标。展开产物 =
+ * 每个真实元素的格 AABB，交回主流水线物理化与走线。
  */
 
 import type { GraphStore, LayoutSubgraphNode } from '../../graph/store.js';
@@ -31,7 +32,8 @@ import type { Box } from './space-types.js';
 /**
  * 链内相邻成员的格间隙。默认 0（成员紧贴成块）：紧贴时折叠块面积恒为
  * 成员格数之和，「面积最小」退化为常数，**周长最小成为形状判据** ——
- * 展开 / subgraph 紧凑准则由此落到近方形状。
+ * 展开 / subgraph 紧凑准则由此落到近方形状。链内走线走廊不参与形状
+ * 判据，由 chainFootprint 按通道宽在物化 footprint 中兑现。
  */
 export const CHAIN_GAP = 0;
 
@@ -61,6 +63,8 @@ export interface FoldPlan {
   root: FoldScope;
   /** 全部作用域（含 root；构建序）。 */
   scopes: FoldScope[];
+  /** 元素 → 最深所属作用域（容器元素 → 父作用域）。 */
+  scopeOfElement: Map<number, FoldScope>;
 }
 
 /** 元素 → 所属作用域（容器元素 → 父作用域）的映射在 buildFoldPlan 内构建。 */
@@ -157,13 +161,53 @@ export function buildFoldPlan(store: GraphStore, minChainLength: number): FoldPl
     }
   }
 
-  return { root, scopes };
+  return { root, scopes, scopeOfElement };
 }
 
 function requireScope(map: Map<number, FoldScope>, idx: number): FoldScope {
   const s = map.get(idx);
   if (!s) throw new Error(`element ${idx} not in any fold scope`);
   return s;
+}
+
+/**
+ * 元素 el 从 target 作用域视图看到的下标：沿容器链逐级把元素替换为
+ * 所退出容器的下标（与边归属提升同一口径），到达 target 即返回；
+ * el 不在 target 子树内时返回 null。
+ */
+export function liftElementToScope(
+  scopeOfElement: Map<number, FoldScope>,
+  el: number,
+  target: FoldScope,
+): number | null {
+  let s: FoldScope | null | undefined = scopeOfElement.get(el);
+  let e = el;
+  while (s && s !== target) {
+    e = s.containerIndex;
+    s = s.parent;
+  }
+  return s === target ? e : null;
+}
+
+/** 两作用域的最近公共祖先。 */
+export function commonAncestor(a: FoldScope, b: FoldScope): FoldScope {
+  let s = a;
+  let t = b;
+  while (depthOf(s) > depthOf(t)) s = s.parent!;
+  while (depthOf(t) > depthOf(s)) t = t.parent!;
+  while (s !== t) {
+    s = s.parent!;
+    t = t.parent!;
+  }
+  return s;
+}
+
+/** scope 是否为 ancestor 的后代或其自身。 */
+export function isWithinScope(scope: FoldScope, ancestor: FoldScope): boolean {
+  for (let s: FoldScope | null = scope; s; s = s.parent) {
+    if (s === ancestor) return true;
+  }
+  return false;
 }
 
 function requireParent(scope: FoldScope): FoldScope {
@@ -337,17 +381,59 @@ export function chainGridLayout(
 }
 
 /**
- * 链展开落位：按蛇形网格布局把成员写回 out[成员元素下标]
- * （相对格位平移到链 AABB 原点）。
+ * 链物化布局：蛇形网格（形状判据按 gap=0 评估）+ 链内走廊物化 ——
+ * 同一行内每对相邻成员的落位格之间插入 corridor 格走线通道。走廊不
+ * 改变形状判据的行列选择，只按所选结构在物化 footprint 中兑现；行内
+ * 列序按 x 排名（蛇形反序行同样成立），包裹尺寸取成员实占范围，供
+ * 尺寸评估与展开落位共用同一口径。
+ */
+export function chainFootprint(
+  sizes: ReadonlyArray<{ w: number; h: number }>,
+  corridor: number,
+): ChainGridLayout {
+  const layout = chainGridLayout(sizes);
+  if (corridor <= 0 || layout.positions.length === 0) return layout;
+  // 行 = 同 y；行内列序 = x 排名（与蛇形方向无关，右对齐行同样正确）。
+  const rowOfY = new Map<number, number[]>();
+  layout.positions.forEach((p, i) => {
+    const row = rowOfY.get(p.y) ?? rowOfY.set(p.y, []).get(p.y)!;
+    row.push(i);
+  });
+  const colOf: number[] = new Array(layout.positions.length);
+  for (const row of rowOfY.values()) {
+    row.sort((a, b) => layout.positions[a]!.x - layout.positions[b]!.x);
+    row.forEach((i, col) => {
+      colOf[i] = col;
+    });
+  }
+  const rowOrdOfY = new Map<number, number>();
+  [...rowOfY.keys()].sort((a, b) => a - b).forEach((y, ord) => rowOrdOfY.set(y, ord));
+  const positions = layout.positions.map((p, i) => ({
+    x: p.x + corridor * colOf[i]!,
+    y: p.y + corridor * rowOrdOfY.get(p.y)!,
+  }));
+  let width = 0;
+  let height = 0;
+  positions.forEach((p, i) => {
+    width = Math.max(width, p.x + sizes[i]!.w);
+    height = Math.max(height, p.y + sizes[i]!.h);
+  });
+  return { positions, width, height };
+}
+
+/**
+ * 链展开落位：按蛇形网格 + 链内走廊的物化布局把成员写回 out[成员元素
+ * 下标]（相对格位平移到链 AABB 原点）。
  */
 export function unfoldChain(
   members: readonly number[],
   box: Box,
   sizeOf: (el: number) => { w: number; h: number },
   out: Box[],
+  corridor = 0,
 ): void {
   const sizes = members.map((m) => sizeOf(m));
-  const layout = chainGridLayout(sizes);
+  const layout = chainFootprint(sizes, corridor);
   members.forEach((m, i) => {
     const p = layout.positions[i]!;
     out[m] = { x: box.x + p.x, y: box.y + p.y, width: sizes[i]!.w, height: sizes[i]!.h };

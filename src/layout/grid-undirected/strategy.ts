@@ -17,6 +17,13 @@
  *  - 节点位置一旦物化不再被走线反向推开（连线不占空间，走线只在
  *    自由通道格中流转）。
  *
+ * 折叠模式（options.folding）：折叠 → 各作用域内独立布局 → 纯平移
+ * 展开。让位与插空行列只发生在作用域内部、以视图项为原子单元（容器
+ * = 单个 item）—— 子图内部坐标只由子作用域布局决定，外部操作只整体
+ * 平移容器，两者坐标系相互隔离。有外部连线的子图在内部布局时以「外
+ * 部质点的投影」参与：投影固定在外部质点相对容器质点的位置，只牵引
+ * 所连内部项（决定子图朝向与包裹尺寸），自身坐标永不改变。
+ *
  * 网格解即最终解：确定性、成行成列、构造保证无重叠。坐标修正
  * （coordinateSystem）不适用——网格解本身就是格点。
  *
@@ -33,12 +40,16 @@ import { registerStrategy } from '../strategy.js';
 import type { LayoutStrategy, ResolvedLayoutOptions } from '../strategy.js';
 import type { RunOptions, RunResult } from '../../types.js';
 import { coarseGridPlacement, undirectedHeuristics } from './coarse.js';
+import type { GridPos, ProjectionAnchor } from './coarse.js';
 import { computeLevels } from './levels.js';
 import { directedHeuristics } from './directed-placement.js';
 import { ExpansionGrid } from './expansion.js';
 import {
   buildFoldPlan,
-  chainGridLayout,
+  chainFootprint,
+  commonAncestor,
+  isWithinScope,
+  liftElementToScope,
   unfoldChain,
   type FoldItem,
   type FoldPlan,
@@ -57,6 +68,13 @@ interface ScopeLayout {
   height: number;
 }
 
+/** 祖先作用域的已完成放置帧：后代作用域构建投影锚点时查外部质点位置。 */
+interface ScopeFrame {
+  scope: FoldScope;
+  /** 该作用域的质点放置结果（下标 = 视图项下标）。 */
+  posOf: GridPos;
+}
+
 /** 折叠单元的代表元素下标（coarse 输入占位；placed 被忽略，仅占位）。 */
 function representativeOf(item: FoldItem): number {
   return item.kind === 'chain' ? item.members[0]! : item.index;
@@ -68,11 +86,19 @@ export class GridUndirectedStrategy implements LayoutStrategy {
   /** 构造期即完成整条流水线（纯网格计算，无迭代）。 */
   private finished = false;
 
+  /** 当前折叠计划（recomputeFolded 期间有效，供投影锚点查询作用域归属）。 */
+  private foldPlan: FoldPlan | null = null;
+
   constructor(
     private store: GraphStore,
     private options: ResolvedLayoutOptions,
   ) {
     this.recompute();
+  }
+
+  /** 走线通道宽（格）：向下取整、非负。 */
+  private get marginCells(): number {
+    return Math.max(0, Math.floor(this.options.channelMargin ?? DEFAULT_CHANNEL_MARGIN));
   }
 
   /** 整条网格流水线：放置 → 膨胀 → 压实 → 物理化 → 走线。 */
@@ -126,64 +152,38 @@ export class GridUndirectedStrategy implements LayoutStrategy {
     }
 
     // 阶段 3：通道约束压实（Channel Safety Margin）。
-    const margin = Math.max(0, Math.floor(this.options.channelMargin ?? DEFAULT_CHANNEL_MARGIN));
-    expansion.compact(margin);
+    expansion.compact(this.marginCells);
 
     // 物理化 + 走线。
     this.finalizeLayout(expansion.boxes(), cell);
   }
 
   /**
-   * 折叠流水线：折叠 → 质点布局 → 扩展容器（不加 padding）→ 调整布局
-   * （最后一次布局动作）→ 布线准备（节点间插入空行/空列，保序不改布局）
-   * → 物理化 + 走线。
+   * 折叠流水线：折叠 → 作用域内布局（质点放置 → 膨胀 → 作用域内压实，
+   * 以视图项为原子单元）→ 纯平移展开 → 物理化 + 走线。
    *
-   * 容器不占布局位：质点布局定容器宏观方位后，扩展/展开只落位真实节点；
-   * 容器框 = 成员实占包裹，随布线空间自然出现（核心布局不消费 padding）。
+   * 让位与插空行列只发生在各作用域内部：子图内部坐标只由子作用域布局
+   * 决定，跨作用域的操作（父作用域压实）以容器为原子单元，只整体平移
+   * 容器，不改写成员相对位置 —— 子图坐标系与外部隔离。
+   * 容器不占布局位：质点布局定容器宏观方位后，展开只落位真实节点；
+   * 容器框 = 成员实占包裹。
    */
   private recomputeFolded(): void {
     const plan: FoldPlan = buildFoldPlan(this.store, this.options.foldChainMin ?? DEFAULT_FOLD_CHAIN_MIN);
+    this.foldPlan = plan;
     const cell = Math.max(this.options.naturalLength * this.store.cellScale, 1e-3);
     const subLayouts = new Map<FoldScope, ScopeLayout>();
-    const rootLayout = this.layoutScope(plan.root, cell, subLayouts, false);
+    const rootLayout = this.layoutScope(plan.root, cell, subLayouts, [], []);
 
-    // 展开：真实节点的初始格位（容器不占位，成员跟随子布局落位）
+    // 展开 = 刚性整体平移（唯一落位动作，此后不再有全局重排）
     const nodeBoxes: Box[] = new Array(this.store.elements.length);
     this.unfoldScope(plan.root, rootLayout.boxes, nodeBoxes, cell, subLayouts);
 
-    // 调整布局（最后一次布局）：以展开锚点让位消重叠，保持相对方位
-    const adjusted = this.adjustLayout(nodeBoxes);
-
-    // 容器大小调整（布线之前）：基于调整后的布局，框 = 成员实占包裹
-    let boxes = this.attachContainers(adjusted.boxes(), plan);
-
-    // 布线准备：节点之间插入空行/空列（保序，整体布局不变）
-    adjusted.compact(Math.max(0, Math.floor(this.options.channelMargin ?? DEFAULT_CHANNEL_MARGIN)));
-
-    // 容器跟随布线空间重算（成员平移后仍包含全部成员）
-    boxes = this.attachContainers(adjusted.boxes(), plan);
+    // 容器框 = 全部成员实占 AABB 的并集（刚性展开下与容器 item 包裹一致）
+    const boxes = this.attachContainers(nodeBoxes, plan);
     this.finalizeLayout(boxes, cell);
     // 物理化写回后，同步容器实占 shape（物化格包裹 + padding）
     this.syncContainerShapes(plan, boxes, cell);
-  }
-
-  /**
-   * 调整布局：展开后的真实节点按「AABB 中心为锚」进膨胀网格逐个让位
-   * （左上→右下确定序），消除展开期可能的贴邻/重叠，同时保持粗布局给
-   * 出的相对方位。输出无重叠的节点格 AABB。
-   */
-  private adjustLayout(nodeBoxes: Box[]): ExpansionGrid {
-    const expansion = new ExpansionGrid(this.store.elements.length);
-    const order = nodeBoxes
-      .map((b, i) => ({ b, i }))
-      .filter(({ b, i }) => !!b && !isSubgraphNode(this.store.elements[i]!))
-      .sort((p, q) => p.b!.x - q.b!.x || p.b!.y - q.b!.y || p.i - q.i);
-    for (const { b, i } of order) {
-      const box = b!;
-      expansion.place(i, box.x + Math.floor(box.width / 2), box.y + Math.floor(box.height / 2));
-      expansion.expand(i, box.width, box.height);
-    }
-    return expansion;
   }
 
   /**
@@ -212,12 +212,22 @@ export class GridUndirectedStrategy implements LayoutStrategy {
   }
 
   /**
-   * 作用域布局（递归）：折叠视图上跑质点粗布局 → 逐项扩展（单元素 /
-   * 链蛇形网格 / 容器递归子布局包裹，不加 padding）。compactAfter 控制
-   * 是否在本作用域内压实（子作用域 true —— 容器内部成员间保留走线通道；
-   * root false —— 由展开后的「调整布局 + 布线准备」接管）。
+   * 作用域布局（递归）：折叠视图上跑质点粗布局（带外部投影锚点牵引）
+   * → 逐项扩展（单元素 / 链蛇形网格 + 走廊物化 / 容器递归子布局包裹，
+   * 不加 padding）→ 作用域内压实 —— 以视图项为原子单元：容器整体参与
+   * 插空行列，成员坐标不受扰动（容器内部通道由子作用域自己的压实负
+   * 责）。包围盒归一（左上角 → 0,0）后输出作用域内相对布局。
+   *
+   * frames 为祖先作用域的放置帧（供子作用域构建投影锚点）；anchors 为
+   * 本作用域的投影锚点（由调用方按边界边构建，root 为空）。
    */
-  private layoutScope(scope: FoldScope, cell: number, subLayouts: Map<FoldScope, ScopeLayout>, compactAfter: boolean): ScopeLayout {
+  private layoutScope(
+    scope: FoldScope,
+    cell: number,
+    subLayouts: Map<FoldScope, ScopeLayout>,
+    frames: readonly ScopeFrame[],
+    anchors: readonly ProjectionAnchor[],
+  ): ScopeLayout {
     const n = scope.items.length;
     if (n === 0) return { boxes: [], width: 0, height: 0 };
     const direction = this.options.direction;
@@ -238,15 +248,41 @@ export class GridUndirectedStrategy implements LayoutStrategy {
     const reps = scope.items.map((item) =>
       item.kind === 'element' ? this.store.elements[item.index]! : this.store.elements[representativeOf(item)]!,
     );
-    const { posOf, order } = coarseGridPlacement(
+    let { posOf, order } = coarseGridPlacement(
       reps,
       scope.adjacency,
       this.options.naturalLength * this.store.cellScale,
       heuristics,
       { ignorePlaced: true },
     );
+    if (anchors.length > 0) {
+      // 两遍放置校正投影原点：锚点偏移以「容器质点」为原点，而膨胀阶段
+      // 容器质点 ↔ 内容 AABB 中心格 —— 第一遍放置求质点包围盒中心，把
+      // 锚点平移到内容中心坐标系后放置第二遍。
+      let minX = Infinity;
+      let maxX = -Infinity;
+      let minY = Infinity;
+      let maxY = -Infinity;
+      for (const p of posOf) {
+        if (!p) continue;
+        minX = Math.min(minX, p.gx);
+        maxX = Math.max(maxX, p.gx);
+        minY = Math.min(minY, p.gy);
+        maxY = Math.max(maxY, p.gy);
+      }
+      const cx = Math.round((minX + maxX) / 2);
+      const cy = Math.round((minY + maxY) / 2);
+      const shifted = anchors.map((a) => ({ item: a.item, at: { gx: a.at.gx + cx, gy: a.at.gy + cy } }));
+      ({ posOf, order } = coarseGridPlacement(
+        reps,
+        scope.adjacency,
+        this.options.naturalLength * this.store.cellScale,
+        heuristics,
+        { ignorePlaced: true, anchors: shifted },
+      ));
+    }
 
-    const margin = Math.max(0, Math.floor(this.options.channelMargin ?? DEFAULT_CHANNEL_MARGIN));
+    const margin = this.marginCells;
     const expansion = new ExpansionGrid(n);
     for (const i of order) {
       const p = posOf[i]!;
@@ -261,23 +297,27 @@ export class GridUndirectedStrategy implements LayoutStrategy {
         gw = Math.max(1, Math.ceil((box.w - 1e-9) / cell));
         gh = Math.max(1, Math.ceil((box.h - 1e-9) / cell));
       } else if (item.kind === 'chain') {
-        // 透明 group 展开：蛇形网格（面积最小 → 周长最小，与容器展开
-        // 同一紧凑准则），链内 1 格间隙走线。
-        const { width, height } = chainGridLayout(
+        // 透明 group 展开：蛇形网格（面积最小 → 周长最小，gap=0 判据），
+        // 链内 margin 格走廊物化 —— 走廊随链整体平移，不被外部改写。
+        const { width, height } = chainFootprint(
           item.members.map((m) => this.gridSizeOf(m, cell)),
+          margin,
         );
         gw = Math.max(1, width);
         gh = Math.max(1, height);
       } else {
-        // 容器：递归子布局评估尺寸（成员包裹，不加 padding）。
-        const sub = this.layoutScope(item.scope, cell, subLayouts, true);
+        // 容器：递归子布局评估尺寸（成员包裹，不加 padding）。子作用域
+        // 的投影锚点由本作用域的放置帧 + 边界边构建。
+        const childFrames: readonly ScopeFrame[] = [...frames, { scope, posOf }];
+        const childAnchors = this.collectAnchors(item.scope, childFrames);
+        const sub = this.layoutScope(item.scope, cell, subLayouts, childFrames, childAnchors);
         subLayouts.set(item.scope, sub);
         gw = Math.max(1, sub.width);
         gh = Math.max(1, sub.height);
       }
       expansion.expand(i, gw, gh);
     }
-    if (compactAfter) expansion.compact(margin);
+    expansion.compact(margin);
 
     // 包围盒归一（左上角 → 0,0），得到作用域内相对布局。
     const boxes = expansion.boxes();
@@ -296,7 +336,53 @@ export class GridUndirectedStrategy implements LayoutStrategy {
     return { boxes, width, height };
   }
 
-  /** 展开作用域：视图项 AABB → 真实元素 AABB（递归容器与链）。 */
+  /**
+   * 收集子作用域 child 的投影锚点：每条跨 child 边界的边（一端在 child
+   * 内、另一端在外，按 store 原始边与作用域归属判定）生成一个固定投影
+   * —— 位置 = 外部质点在 LCA 作用域放置帧中相对容器质点的偏移，牵引
+   * child 内所连视图项（深层成员经容器链归到其可见项）。投影只牵引不
+   * 占位，自身坐标在 child 布局过程中永不改变。
+   */
+  private collectAnchors(child: FoldScope, frames: readonly ScopeFrame[]): ProjectionAnchor[] {
+    const plan = this.foldPlan;
+    if (!plan) return [];
+    const anchors: ProjectionAnchor[] = [];
+    const seen = new Set<string>();
+    for (const e of this.store.edges) {
+      const su = plan.scopeOfElement.get(e.sourceIndex);
+      const sv = plan.scopeOfElement.get(e.targetIndex);
+      if (!su || !sv) continue;
+      const uIn = isWithinScope(su, child);
+      const vIn = isWithinScope(sv, child);
+      if (uIn === vIn) continue; // 内部边或与 child 无关
+      const insideEl = uIn ? e.sourceIndex : e.targetIndex;
+      const outsideEl = uIn ? e.targetIndex : e.sourceIndex;
+      const lca = commonAncestor(su, sv);
+      const frame = frames.find((f) => f.scope === lca);
+      if (!frame) continue; // LCA 必为 child 的真祖先（防御：帧缺失即跳过）
+      const insideAtL = liftElementToScope(plan.scopeOfElement, insideEl, lca);
+      const outsideAtL = liftElementToScope(plan.scopeOfElement, outsideEl, lca);
+      const itemInChild = liftElementToScope(plan.scopeOfElement, insideEl, child);
+      if (insideAtL === null || outsideAtL === null || itemInChild === null) continue;
+      const innerItem = frame.scope.itemOfElement.get(insideAtL);
+      const outerItem = frame.scope.itemOfElement.get(outsideAtL);
+      const posInner = innerItem !== undefined ? frame.posOf[innerItem] : undefined;
+      const posOuter = outerItem !== undefined ? frame.posOf[outerItem] : undefined;
+      const target = child.itemOfElement.get(itemInChild);
+      if (!posInner || !posOuter || target === undefined) continue;
+      const offset = { gx: posOuter.gx - posInner.gx, gy: posOuter.gy - posInner.gy };
+      const key = `${target}:${offset.gx},${offset.gy}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      anchors.push({ item: target, at: offset });
+    }
+    return anchors;
+  }
+
+  /**
+   * 展开作用域：视图项 AABB → 真实元素 AABB（递归容器与链）。纯刚性
+   * 平移：成员相对坐标 = 子作用域布局产物，父作用域只提供整体偏移。
+   */
   private unfoldScope(
     scope: FoldScope,
     itemBoxes: Box[],
@@ -311,8 +397,8 @@ export class GridUndirectedStrategy implements LayoutStrategy {
         return;
       }
       if (item.kind === 'chain') {
-        // 透明 group 还原为长蛇：成员按蛇形网格排开（微调 = 网格化落位）。
-        unfoldChain(item.members, box, (m) => this.gridSizeOf(m, cell), out);
+        // 透明 group 还原为长蛇：蛇形网格 + 链内走廊物化（网格化落位）。
+        unfoldChain(item.members, box, (m) => this.gridSizeOf(m, cell), out, this.marginCells);
         return;
       }
       // 容器：成员子布局整体平移进容器包裹（容器自身不占布局位）。
