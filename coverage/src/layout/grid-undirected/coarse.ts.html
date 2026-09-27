@@ -1,0 +1,2344 @@
+
+<!doctype html>
+<html lang="en">
+
+<head>
+    <title>Code coverage report for src/layout/grid-undirected/coarse.ts</title>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="../../../prettify.css" />
+    <link rel="stylesheet" href="../../../base.css" />
+    <link rel="shortcut icon" type="image/x-icon" href="../../../favicon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style type='text/css'>
+        .coverage-summary .sorter {
+            background-image: url(../../../sort-arrow-sprite.png);
+        }
+    </style>
+</head>
+    
+<body>
+<div class='wrapper'>
+    <div class='pad1'>
+        <h1><a href="../../../index.html">All files</a> / <a href="index.html">src/layout/grid-undirected</a> coarse.ts</h1>
+        <div class='clearfix'>
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">82.67% </span>
+                <span class="quiet">Statements</span>
+                <span class='fraction'>358/433</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">93.2% </span>
+                <span class="quiet">Branches</span>
+                <span class='fraction'>151/162</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">93.54% </span>
+                <span class="quiet">Functions</span>
+                <span class='fraction'>29/31</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">82.67% </span>
+                <span class="quiet">Lines</span>
+                <span class='fraction'>358/433</span>
+            </div>
+        
+            
+        </div>
+        <p class="quiet">
+            Press <em>n</em> or <em>j</em> to go to the next uncovered block, <em>b</em>, <em>p</em> or <em>k</em> for the previous block.
+        </p>
+        <template id="filterTemplate">
+            <div class="quiet">
+                Filter:
+                <input type="search" id="fileSearch">
+            </div>
+        </template>
+    </div>
+    <div class='status-line high'></div>
+    <pre><table class="coverage">
+<tr><td class="line-count quiet"><a name='L1'></a><a href='#L1'>1</a>
+<a name='L2'></a><a href='#L2'>2</a>
+<a name='L3'></a><a href='#L3'>3</a>
+<a name='L4'></a><a href='#L4'>4</a>
+<a name='L5'></a><a href='#L5'>5</a>
+<a name='L6'></a><a href='#L6'>6</a>
+<a name='L7'></a><a href='#L7'>7</a>
+<a name='L8'></a><a href='#L8'>8</a>
+<a name='L9'></a><a href='#L9'>9</a>
+<a name='L10'></a><a href='#L10'>10</a>
+<a name='L11'></a><a href='#L11'>11</a>
+<a name='L12'></a><a href='#L12'>12</a>
+<a name='L13'></a><a href='#L13'>13</a>
+<a name='L14'></a><a href='#L14'>14</a>
+<a name='L15'></a><a href='#L15'>15</a>
+<a name='L16'></a><a href='#L16'>16</a>
+<a name='L17'></a><a href='#L17'>17</a>
+<a name='L18'></a><a href='#L18'>18</a>
+<a name='L19'></a><a href='#L19'>19</a>
+<a name='L20'></a><a href='#L20'>20</a>
+<a name='L21'></a><a href='#L21'>21</a>
+<a name='L22'></a><a href='#L22'>22</a>
+<a name='L23'></a><a href='#L23'>23</a>
+<a name='L24'></a><a href='#L24'>24</a>
+<a name='L25'></a><a href='#L25'>25</a>
+<a name='L26'></a><a href='#L26'>26</a>
+<a name='L27'></a><a href='#L27'>27</a>
+<a name='L28'></a><a href='#L28'>28</a>
+<a name='L29'></a><a href='#L29'>29</a>
+<a name='L30'></a><a href='#L30'>30</a>
+<a name='L31'></a><a href='#L31'>31</a>
+<a name='L32'></a><a href='#L32'>32</a>
+<a name='L33'></a><a href='#L33'>33</a>
+<a name='L34'></a><a href='#L34'>34</a>
+<a name='L35'></a><a href='#L35'>35</a>
+<a name='L36'></a><a href='#L36'>36</a>
+<a name='L37'></a><a href='#L37'>37</a>
+<a name='L38'></a><a href='#L38'>38</a>
+<a name='L39'></a><a href='#L39'>39</a>
+<a name='L40'></a><a href='#L40'>40</a>
+<a name='L41'></a><a href='#L41'>41</a>
+<a name='L42'></a><a href='#L42'>42</a>
+<a name='L43'></a><a href='#L43'>43</a>
+<a name='L44'></a><a href='#L44'>44</a>
+<a name='L45'></a><a href='#L45'>45</a>
+<a name='L46'></a><a href='#L46'>46</a>
+<a name='L47'></a><a href='#L47'>47</a>
+<a name='L48'></a><a href='#L48'>48</a>
+<a name='L49'></a><a href='#L49'>49</a>
+<a name='L50'></a><a href='#L50'>50</a>
+<a name='L51'></a><a href='#L51'>51</a>
+<a name='L52'></a><a href='#L52'>52</a>
+<a name='L53'></a><a href='#L53'>53</a>
+<a name='L54'></a><a href='#L54'>54</a>
+<a name='L55'></a><a href='#L55'>55</a>
+<a name='L56'></a><a href='#L56'>56</a>
+<a name='L57'></a><a href='#L57'>57</a>
+<a name='L58'></a><a href='#L58'>58</a>
+<a name='L59'></a><a href='#L59'>59</a>
+<a name='L60'></a><a href='#L60'>60</a>
+<a name='L61'></a><a href='#L61'>61</a>
+<a name='L62'></a><a href='#L62'>62</a>
+<a name='L63'></a><a href='#L63'>63</a>
+<a name='L64'></a><a href='#L64'>64</a>
+<a name='L65'></a><a href='#L65'>65</a>
+<a name='L66'></a><a href='#L66'>66</a>
+<a name='L67'></a><a href='#L67'>67</a>
+<a name='L68'></a><a href='#L68'>68</a>
+<a name='L69'></a><a href='#L69'>69</a>
+<a name='L70'></a><a href='#L70'>70</a>
+<a name='L71'></a><a href='#L71'>71</a>
+<a name='L72'></a><a href='#L72'>72</a>
+<a name='L73'></a><a href='#L73'>73</a>
+<a name='L74'></a><a href='#L74'>74</a>
+<a name='L75'></a><a href='#L75'>75</a>
+<a name='L76'></a><a href='#L76'>76</a>
+<a name='L77'></a><a href='#L77'>77</a>
+<a name='L78'></a><a href='#L78'>78</a>
+<a name='L79'></a><a href='#L79'>79</a>
+<a name='L80'></a><a href='#L80'>80</a>
+<a name='L81'></a><a href='#L81'>81</a>
+<a name='L82'></a><a href='#L82'>82</a>
+<a name='L83'></a><a href='#L83'>83</a>
+<a name='L84'></a><a href='#L84'>84</a>
+<a name='L85'></a><a href='#L85'>85</a>
+<a name='L86'></a><a href='#L86'>86</a>
+<a name='L87'></a><a href='#L87'>87</a>
+<a name='L88'></a><a href='#L88'>88</a>
+<a name='L89'></a><a href='#L89'>89</a>
+<a name='L90'></a><a href='#L90'>90</a>
+<a name='L91'></a><a href='#L91'>91</a>
+<a name='L92'></a><a href='#L92'>92</a>
+<a name='L93'></a><a href='#L93'>93</a>
+<a name='L94'></a><a href='#L94'>94</a>
+<a name='L95'></a><a href='#L95'>95</a>
+<a name='L96'></a><a href='#L96'>96</a>
+<a name='L97'></a><a href='#L97'>97</a>
+<a name='L98'></a><a href='#L98'>98</a>
+<a name='L99'></a><a href='#L99'>99</a>
+<a name='L100'></a><a href='#L100'>100</a>
+<a name='L101'></a><a href='#L101'>101</a>
+<a name='L102'></a><a href='#L102'>102</a>
+<a name='L103'></a><a href='#L103'>103</a>
+<a name='L104'></a><a href='#L104'>104</a>
+<a name='L105'></a><a href='#L105'>105</a>
+<a name='L106'></a><a href='#L106'>106</a>
+<a name='L107'></a><a href='#L107'>107</a>
+<a name='L108'></a><a href='#L108'>108</a>
+<a name='L109'></a><a href='#L109'>109</a>
+<a name='L110'></a><a href='#L110'>110</a>
+<a name='L111'></a><a href='#L111'>111</a>
+<a name='L112'></a><a href='#L112'>112</a>
+<a name='L113'></a><a href='#L113'>113</a>
+<a name='L114'></a><a href='#L114'>114</a>
+<a name='L115'></a><a href='#L115'>115</a>
+<a name='L116'></a><a href='#L116'>116</a>
+<a name='L117'></a><a href='#L117'>117</a>
+<a name='L118'></a><a href='#L118'>118</a>
+<a name='L119'></a><a href='#L119'>119</a>
+<a name='L120'></a><a href='#L120'>120</a>
+<a name='L121'></a><a href='#L121'>121</a>
+<a name='L122'></a><a href='#L122'>122</a>
+<a name='L123'></a><a href='#L123'>123</a>
+<a name='L124'></a><a href='#L124'>124</a>
+<a name='L125'></a><a href='#L125'>125</a>
+<a name='L126'></a><a href='#L126'>126</a>
+<a name='L127'></a><a href='#L127'>127</a>
+<a name='L128'></a><a href='#L128'>128</a>
+<a name='L129'></a><a href='#L129'>129</a>
+<a name='L130'></a><a href='#L130'>130</a>
+<a name='L131'></a><a href='#L131'>131</a>
+<a name='L132'></a><a href='#L132'>132</a>
+<a name='L133'></a><a href='#L133'>133</a>
+<a name='L134'></a><a href='#L134'>134</a>
+<a name='L135'></a><a href='#L135'>135</a>
+<a name='L136'></a><a href='#L136'>136</a>
+<a name='L137'></a><a href='#L137'>137</a>
+<a name='L138'></a><a href='#L138'>138</a>
+<a name='L139'></a><a href='#L139'>139</a>
+<a name='L140'></a><a href='#L140'>140</a>
+<a name='L141'></a><a href='#L141'>141</a>
+<a name='L142'></a><a href='#L142'>142</a>
+<a name='L143'></a><a href='#L143'>143</a>
+<a name='L144'></a><a href='#L144'>144</a>
+<a name='L145'></a><a href='#L145'>145</a>
+<a name='L146'></a><a href='#L146'>146</a>
+<a name='L147'></a><a href='#L147'>147</a>
+<a name='L148'></a><a href='#L148'>148</a>
+<a name='L149'></a><a href='#L149'>149</a>
+<a name='L150'></a><a href='#L150'>150</a>
+<a name='L151'></a><a href='#L151'>151</a>
+<a name='L152'></a><a href='#L152'>152</a>
+<a name='L153'></a><a href='#L153'>153</a>
+<a name='L154'></a><a href='#L154'>154</a>
+<a name='L155'></a><a href='#L155'>155</a>
+<a name='L156'></a><a href='#L156'>156</a>
+<a name='L157'></a><a href='#L157'>157</a>
+<a name='L158'></a><a href='#L158'>158</a>
+<a name='L159'></a><a href='#L159'>159</a>
+<a name='L160'></a><a href='#L160'>160</a>
+<a name='L161'></a><a href='#L161'>161</a>
+<a name='L162'></a><a href='#L162'>162</a>
+<a name='L163'></a><a href='#L163'>163</a>
+<a name='L164'></a><a href='#L164'>164</a>
+<a name='L165'></a><a href='#L165'>165</a>
+<a name='L166'></a><a href='#L166'>166</a>
+<a name='L167'></a><a href='#L167'>167</a>
+<a name='L168'></a><a href='#L168'>168</a>
+<a name='L169'></a><a href='#L169'>169</a>
+<a name='L170'></a><a href='#L170'>170</a>
+<a name='L171'></a><a href='#L171'>171</a>
+<a name='L172'></a><a href='#L172'>172</a>
+<a name='L173'></a><a href='#L173'>173</a>
+<a name='L174'></a><a href='#L174'>174</a>
+<a name='L175'></a><a href='#L175'>175</a>
+<a name='L176'></a><a href='#L176'>176</a>
+<a name='L177'></a><a href='#L177'>177</a>
+<a name='L178'></a><a href='#L178'>178</a>
+<a name='L179'></a><a href='#L179'>179</a>
+<a name='L180'></a><a href='#L180'>180</a>
+<a name='L181'></a><a href='#L181'>181</a>
+<a name='L182'></a><a href='#L182'>182</a>
+<a name='L183'></a><a href='#L183'>183</a>
+<a name='L184'></a><a href='#L184'>184</a>
+<a name='L185'></a><a href='#L185'>185</a>
+<a name='L186'></a><a href='#L186'>186</a>
+<a name='L187'></a><a href='#L187'>187</a>
+<a name='L188'></a><a href='#L188'>188</a>
+<a name='L189'></a><a href='#L189'>189</a>
+<a name='L190'></a><a href='#L190'>190</a>
+<a name='L191'></a><a href='#L191'>191</a>
+<a name='L192'></a><a href='#L192'>192</a>
+<a name='L193'></a><a href='#L193'>193</a>
+<a name='L194'></a><a href='#L194'>194</a>
+<a name='L195'></a><a href='#L195'>195</a>
+<a name='L196'></a><a href='#L196'>196</a>
+<a name='L197'></a><a href='#L197'>197</a>
+<a name='L198'></a><a href='#L198'>198</a>
+<a name='L199'></a><a href='#L199'>199</a>
+<a name='L200'></a><a href='#L200'>200</a>
+<a name='L201'></a><a href='#L201'>201</a>
+<a name='L202'></a><a href='#L202'>202</a>
+<a name='L203'></a><a href='#L203'>203</a>
+<a name='L204'></a><a href='#L204'>204</a>
+<a name='L205'></a><a href='#L205'>205</a>
+<a name='L206'></a><a href='#L206'>206</a>
+<a name='L207'></a><a href='#L207'>207</a>
+<a name='L208'></a><a href='#L208'>208</a>
+<a name='L209'></a><a href='#L209'>209</a>
+<a name='L210'></a><a href='#L210'>210</a>
+<a name='L211'></a><a href='#L211'>211</a>
+<a name='L212'></a><a href='#L212'>212</a>
+<a name='L213'></a><a href='#L213'>213</a>
+<a name='L214'></a><a href='#L214'>214</a>
+<a name='L215'></a><a href='#L215'>215</a>
+<a name='L216'></a><a href='#L216'>216</a>
+<a name='L217'></a><a href='#L217'>217</a>
+<a name='L218'></a><a href='#L218'>218</a>
+<a name='L219'></a><a href='#L219'>219</a>
+<a name='L220'></a><a href='#L220'>220</a>
+<a name='L221'></a><a href='#L221'>221</a>
+<a name='L222'></a><a href='#L222'>222</a>
+<a name='L223'></a><a href='#L223'>223</a>
+<a name='L224'></a><a href='#L224'>224</a>
+<a name='L225'></a><a href='#L225'>225</a>
+<a name='L226'></a><a href='#L226'>226</a>
+<a name='L227'></a><a href='#L227'>227</a>
+<a name='L228'></a><a href='#L228'>228</a>
+<a name='L229'></a><a href='#L229'>229</a>
+<a name='L230'></a><a href='#L230'>230</a>
+<a name='L231'></a><a href='#L231'>231</a>
+<a name='L232'></a><a href='#L232'>232</a>
+<a name='L233'></a><a href='#L233'>233</a>
+<a name='L234'></a><a href='#L234'>234</a>
+<a name='L235'></a><a href='#L235'>235</a>
+<a name='L236'></a><a href='#L236'>236</a>
+<a name='L237'></a><a href='#L237'>237</a>
+<a name='L238'></a><a href='#L238'>238</a>
+<a name='L239'></a><a href='#L239'>239</a>
+<a name='L240'></a><a href='#L240'>240</a>
+<a name='L241'></a><a href='#L241'>241</a>
+<a name='L242'></a><a href='#L242'>242</a>
+<a name='L243'></a><a href='#L243'>243</a>
+<a name='L244'></a><a href='#L244'>244</a>
+<a name='L245'></a><a href='#L245'>245</a>
+<a name='L246'></a><a href='#L246'>246</a>
+<a name='L247'></a><a href='#L247'>247</a>
+<a name='L248'></a><a href='#L248'>248</a>
+<a name='L249'></a><a href='#L249'>249</a>
+<a name='L250'></a><a href='#L250'>250</a>
+<a name='L251'></a><a href='#L251'>251</a>
+<a name='L252'></a><a href='#L252'>252</a>
+<a name='L253'></a><a href='#L253'>253</a>
+<a name='L254'></a><a href='#L254'>254</a>
+<a name='L255'></a><a href='#L255'>255</a>
+<a name='L256'></a><a href='#L256'>256</a>
+<a name='L257'></a><a href='#L257'>257</a>
+<a name='L258'></a><a href='#L258'>258</a>
+<a name='L259'></a><a href='#L259'>259</a>
+<a name='L260'></a><a href='#L260'>260</a>
+<a name='L261'></a><a href='#L261'>261</a>
+<a name='L262'></a><a href='#L262'>262</a>
+<a name='L263'></a><a href='#L263'>263</a>
+<a name='L264'></a><a href='#L264'>264</a>
+<a name='L265'></a><a href='#L265'>265</a>
+<a name='L266'></a><a href='#L266'>266</a>
+<a name='L267'></a><a href='#L267'>267</a>
+<a name='L268'></a><a href='#L268'>268</a>
+<a name='L269'></a><a href='#L269'>269</a>
+<a name='L270'></a><a href='#L270'>270</a>
+<a name='L271'></a><a href='#L271'>271</a>
+<a name='L272'></a><a href='#L272'>272</a>
+<a name='L273'></a><a href='#L273'>273</a>
+<a name='L274'></a><a href='#L274'>274</a>
+<a name='L275'></a><a href='#L275'>275</a>
+<a name='L276'></a><a href='#L276'>276</a>
+<a name='L277'></a><a href='#L277'>277</a>
+<a name='L278'></a><a href='#L278'>278</a>
+<a name='L279'></a><a href='#L279'>279</a>
+<a name='L280'></a><a href='#L280'>280</a>
+<a name='L281'></a><a href='#L281'>281</a>
+<a name='L282'></a><a href='#L282'>282</a>
+<a name='L283'></a><a href='#L283'>283</a>
+<a name='L284'></a><a href='#L284'>284</a>
+<a name='L285'></a><a href='#L285'>285</a>
+<a name='L286'></a><a href='#L286'>286</a>
+<a name='L287'></a><a href='#L287'>287</a>
+<a name='L288'></a><a href='#L288'>288</a>
+<a name='L289'></a><a href='#L289'>289</a>
+<a name='L290'></a><a href='#L290'>290</a>
+<a name='L291'></a><a href='#L291'>291</a>
+<a name='L292'></a><a href='#L292'>292</a>
+<a name='L293'></a><a href='#L293'>293</a>
+<a name='L294'></a><a href='#L294'>294</a>
+<a name='L295'></a><a href='#L295'>295</a>
+<a name='L296'></a><a href='#L296'>296</a>
+<a name='L297'></a><a href='#L297'>297</a>
+<a name='L298'></a><a href='#L298'>298</a>
+<a name='L299'></a><a href='#L299'>299</a>
+<a name='L300'></a><a href='#L300'>300</a>
+<a name='L301'></a><a href='#L301'>301</a>
+<a name='L302'></a><a href='#L302'>302</a>
+<a name='L303'></a><a href='#L303'>303</a>
+<a name='L304'></a><a href='#L304'>304</a>
+<a name='L305'></a><a href='#L305'>305</a>
+<a name='L306'></a><a href='#L306'>306</a>
+<a name='L307'></a><a href='#L307'>307</a>
+<a name='L308'></a><a href='#L308'>308</a>
+<a name='L309'></a><a href='#L309'>309</a>
+<a name='L310'></a><a href='#L310'>310</a>
+<a name='L311'></a><a href='#L311'>311</a>
+<a name='L312'></a><a href='#L312'>312</a>
+<a name='L313'></a><a href='#L313'>313</a>
+<a name='L314'></a><a href='#L314'>314</a>
+<a name='L315'></a><a href='#L315'>315</a>
+<a name='L316'></a><a href='#L316'>316</a>
+<a name='L317'></a><a href='#L317'>317</a>
+<a name='L318'></a><a href='#L318'>318</a>
+<a name='L319'></a><a href='#L319'>319</a>
+<a name='L320'></a><a href='#L320'>320</a>
+<a name='L321'></a><a href='#L321'>321</a>
+<a name='L322'></a><a href='#L322'>322</a>
+<a name='L323'></a><a href='#L323'>323</a>
+<a name='L324'></a><a href='#L324'>324</a>
+<a name='L325'></a><a href='#L325'>325</a>
+<a name='L326'></a><a href='#L326'>326</a>
+<a name='L327'></a><a href='#L327'>327</a>
+<a name='L328'></a><a href='#L328'>328</a>
+<a name='L329'></a><a href='#L329'>329</a>
+<a name='L330'></a><a href='#L330'>330</a>
+<a name='L331'></a><a href='#L331'>331</a>
+<a name='L332'></a><a href='#L332'>332</a>
+<a name='L333'></a><a href='#L333'>333</a>
+<a name='L334'></a><a href='#L334'>334</a>
+<a name='L335'></a><a href='#L335'>335</a>
+<a name='L336'></a><a href='#L336'>336</a>
+<a name='L337'></a><a href='#L337'>337</a>
+<a name='L338'></a><a href='#L338'>338</a>
+<a name='L339'></a><a href='#L339'>339</a>
+<a name='L340'></a><a href='#L340'>340</a>
+<a name='L341'></a><a href='#L341'>341</a>
+<a name='L342'></a><a href='#L342'>342</a>
+<a name='L343'></a><a href='#L343'>343</a>
+<a name='L344'></a><a href='#L344'>344</a>
+<a name='L345'></a><a href='#L345'>345</a>
+<a name='L346'></a><a href='#L346'>346</a>
+<a name='L347'></a><a href='#L347'>347</a>
+<a name='L348'></a><a href='#L348'>348</a>
+<a name='L349'></a><a href='#L349'>349</a>
+<a name='L350'></a><a href='#L350'>350</a>
+<a name='L351'></a><a href='#L351'>351</a>
+<a name='L352'></a><a href='#L352'>352</a>
+<a name='L353'></a><a href='#L353'>353</a>
+<a name='L354'></a><a href='#L354'>354</a>
+<a name='L355'></a><a href='#L355'>355</a>
+<a name='L356'></a><a href='#L356'>356</a>
+<a name='L357'></a><a href='#L357'>357</a>
+<a name='L358'></a><a href='#L358'>358</a>
+<a name='L359'></a><a href='#L359'>359</a>
+<a name='L360'></a><a href='#L360'>360</a>
+<a name='L361'></a><a href='#L361'>361</a>
+<a name='L362'></a><a href='#L362'>362</a>
+<a name='L363'></a><a href='#L363'>363</a>
+<a name='L364'></a><a href='#L364'>364</a>
+<a name='L365'></a><a href='#L365'>365</a>
+<a name='L366'></a><a href='#L366'>366</a>
+<a name='L367'></a><a href='#L367'>367</a>
+<a name='L368'></a><a href='#L368'>368</a>
+<a name='L369'></a><a href='#L369'>369</a>
+<a name='L370'></a><a href='#L370'>370</a>
+<a name='L371'></a><a href='#L371'>371</a>
+<a name='L372'></a><a href='#L372'>372</a>
+<a name='L373'></a><a href='#L373'>373</a>
+<a name='L374'></a><a href='#L374'>374</a>
+<a name='L375'></a><a href='#L375'>375</a>
+<a name='L376'></a><a href='#L376'>376</a>
+<a name='L377'></a><a href='#L377'>377</a>
+<a name='L378'></a><a href='#L378'>378</a>
+<a name='L379'></a><a href='#L379'>379</a>
+<a name='L380'></a><a href='#L380'>380</a>
+<a name='L381'></a><a href='#L381'>381</a>
+<a name='L382'></a><a href='#L382'>382</a>
+<a name='L383'></a><a href='#L383'>383</a>
+<a name='L384'></a><a href='#L384'>384</a>
+<a name='L385'></a><a href='#L385'>385</a>
+<a name='L386'></a><a href='#L386'>386</a>
+<a name='L387'></a><a href='#L387'>387</a>
+<a name='L388'></a><a href='#L388'>388</a>
+<a name='L389'></a><a href='#L389'>389</a>
+<a name='L390'></a><a href='#L390'>390</a>
+<a name='L391'></a><a href='#L391'>391</a>
+<a name='L392'></a><a href='#L392'>392</a>
+<a name='L393'></a><a href='#L393'>393</a>
+<a name='L394'></a><a href='#L394'>394</a>
+<a name='L395'></a><a href='#L395'>395</a>
+<a name='L396'></a><a href='#L396'>396</a>
+<a name='L397'></a><a href='#L397'>397</a>
+<a name='L398'></a><a href='#L398'>398</a>
+<a name='L399'></a><a href='#L399'>399</a>
+<a name='L400'></a><a href='#L400'>400</a>
+<a name='L401'></a><a href='#L401'>401</a>
+<a name='L402'></a><a href='#L402'>402</a>
+<a name='L403'></a><a href='#L403'>403</a>
+<a name='L404'></a><a href='#L404'>404</a>
+<a name='L405'></a><a href='#L405'>405</a>
+<a name='L406'></a><a href='#L406'>406</a>
+<a name='L407'></a><a href='#L407'>407</a>
+<a name='L408'></a><a href='#L408'>408</a>
+<a name='L409'></a><a href='#L409'>409</a>
+<a name='L410'></a><a href='#L410'>410</a>
+<a name='L411'></a><a href='#L411'>411</a>
+<a name='L412'></a><a href='#L412'>412</a>
+<a name='L413'></a><a href='#L413'>413</a>
+<a name='L414'></a><a href='#L414'>414</a>
+<a name='L415'></a><a href='#L415'>415</a>
+<a name='L416'></a><a href='#L416'>416</a>
+<a name='L417'></a><a href='#L417'>417</a>
+<a name='L418'></a><a href='#L418'>418</a>
+<a name='L419'></a><a href='#L419'>419</a>
+<a name='L420'></a><a href='#L420'>420</a>
+<a name='L421'></a><a href='#L421'>421</a>
+<a name='L422'></a><a href='#L422'>422</a>
+<a name='L423'></a><a href='#L423'>423</a>
+<a name='L424'></a><a href='#L424'>424</a>
+<a name='L425'></a><a href='#L425'>425</a>
+<a name='L426'></a><a href='#L426'>426</a>
+<a name='L427'></a><a href='#L427'>427</a>
+<a name='L428'></a><a href='#L428'>428</a>
+<a name='L429'></a><a href='#L429'>429</a>
+<a name='L430'></a><a href='#L430'>430</a>
+<a name='L431'></a><a href='#L431'>431</a>
+<a name='L432'></a><a href='#L432'>432</a>
+<a name='L433'></a><a href='#L433'>433</a>
+<a name='L434'></a><a href='#L434'>434</a>
+<a name='L435'></a><a href='#L435'>435</a>
+<a name='L436'></a><a href='#L436'>436</a>
+<a name='L437'></a><a href='#L437'>437</a>
+<a name='L438'></a><a href='#L438'>438</a>
+<a name='L439'></a><a href='#L439'>439</a>
+<a name='L440'></a><a href='#L440'>440</a>
+<a name='L441'></a><a href='#L441'>441</a>
+<a name='L442'></a><a href='#L442'>442</a>
+<a name='L443'></a><a href='#L443'>443</a>
+<a name='L444'></a><a href='#L444'>444</a>
+<a name='L445'></a><a href='#L445'>445</a>
+<a name='L446'></a><a href='#L446'>446</a>
+<a name='L447'></a><a href='#L447'>447</a>
+<a name='L448'></a><a href='#L448'>448</a>
+<a name='L449'></a><a href='#L449'>449</a>
+<a name='L450'></a><a href='#L450'>450</a>
+<a name='L451'></a><a href='#L451'>451</a>
+<a name='L452'></a><a href='#L452'>452</a>
+<a name='L453'></a><a href='#L453'>453</a>
+<a name='L454'></a><a href='#L454'>454</a>
+<a name='L455'></a><a href='#L455'>455</a>
+<a name='L456'></a><a href='#L456'>456</a>
+<a name='L457'></a><a href='#L457'>457</a>
+<a name='L458'></a><a href='#L458'>458</a>
+<a name='L459'></a><a href='#L459'>459</a>
+<a name='L460'></a><a href='#L460'>460</a>
+<a name='L461'></a><a href='#L461'>461</a>
+<a name='L462'></a><a href='#L462'>462</a>
+<a name='L463'></a><a href='#L463'>463</a>
+<a name='L464'></a><a href='#L464'>464</a>
+<a name='L465'></a><a href='#L465'>465</a>
+<a name='L466'></a><a href='#L466'>466</a>
+<a name='L467'></a><a href='#L467'>467</a>
+<a name='L468'></a><a href='#L468'>468</a>
+<a name='L469'></a><a href='#L469'>469</a>
+<a name='L470'></a><a href='#L470'>470</a>
+<a name='L471'></a><a href='#L471'>471</a>
+<a name='L472'></a><a href='#L472'>472</a>
+<a name='L473'></a><a href='#L473'>473</a>
+<a name='L474'></a><a href='#L474'>474</a>
+<a name='L475'></a><a href='#L475'>475</a>
+<a name='L476'></a><a href='#L476'>476</a>
+<a name='L477'></a><a href='#L477'>477</a>
+<a name='L478'></a><a href='#L478'>478</a>
+<a name='L479'></a><a href='#L479'>479</a>
+<a name='L480'></a><a href='#L480'>480</a>
+<a name='L481'></a><a href='#L481'>481</a>
+<a name='L482'></a><a href='#L482'>482</a>
+<a name='L483'></a><a href='#L483'>483</a>
+<a name='L484'></a><a href='#L484'>484</a>
+<a name='L485'></a><a href='#L485'>485</a>
+<a name='L486'></a><a href='#L486'>486</a>
+<a name='L487'></a><a href='#L487'>487</a>
+<a name='L488'></a><a href='#L488'>488</a>
+<a name='L489'></a><a href='#L489'>489</a>
+<a name='L490'></a><a href='#L490'>490</a>
+<a name='L491'></a><a href='#L491'>491</a>
+<a name='L492'></a><a href='#L492'>492</a>
+<a name='L493'></a><a href='#L493'>493</a>
+<a name='L494'></a><a href='#L494'>494</a>
+<a name='L495'></a><a href='#L495'>495</a>
+<a name='L496'></a><a href='#L496'>496</a>
+<a name='L497'></a><a href='#L497'>497</a>
+<a name='L498'></a><a href='#L498'>498</a>
+<a name='L499'></a><a href='#L499'>499</a>
+<a name='L500'></a><a href='#L500'>500</a>
+<a name='L501'></a><a href='#L501'>501</a>
+<a name='L502'></a><a href='#L502'>502</a>
+<a name='L503'></a><a href='#L503'>503</a>
+<a name='L504'></a><a href='#L504'>504</a>
+<a name='L505'></a><a href='#L505'>505</a>
+<a name='L506'></a><a href='#L506'>506</a>
+<a name='L507'></a><a href='#L507'>507</a>
+<a name='L508'></a><a href='#L508'>508</a>
+<a name='L509'></a><a href='#L509'>509</a>
+<a name='L510'></a><a href='#L510'>510</a>
+<a name='L511'></a><a href='#L511'>511</a>
+<a name='L512'></a><a href='#L512'>512</a>
+<a name='L513'></a><a href='#L513'>513</a>
+<a name='L514'></a><a href='#L514'>514</a>
+<a name='L515'></a><a href='#L515'>515</a>
+<a name='L516'></a><a href='#L516'>516</a>
+<a name='L517'></a><a href='#L517'>517</a>
+<a name='L518'></a><a href='#L518'>518</a>
+<a name='L519'></a><a href='#L519'>519</a>
+<a name='L520'></a><a href='#L520'>520</a>
+<a name='L521'></a><a href='#L521'>521</a>
+<a name='L522'></a><a href='#L522'>522</a>
+<a name='L523'></a><a href='#L523'>523</a>
+<a name='L524'></a><a href='#L524'>524</a>
+<a name='L525'></a><a href='#L525'>525</a>
+<a name='L526'></a><a href='#L526'>526</a>
+<a name='L527'></a><a href='#L527'>527</a>
+<a name='L528'></a><a href='#L528'>528</a>
+<a name='L529'></a><a href='#L529'>529</a>
+<a name='L530'></a><a href='#L530'>530</a>
+<a name='L531'></a><a href='#L531'>531</a>
+<a name='L532'></a><a href='#L532'>532</a>
+<a name='L533'></a><a href='#L533'>533</a>
+<a name='L534'></a><a href='#L534'>534</a>
+<a name='L535'></a><a href='#L535'>535</a>
+<a name='L536'></a><a href='#L536'>536</a>
+<a name='L537'></a><a href='#L537'>537</a>
+<a name='L538'></a><a href='#L538'>538</a>
+<a name='L539'></a><a href='#L539'>539</a>
+<a name='L540'></a><a href='#L540'>540</a>
+<a name='L541'></a><a href='#L541'>541</a>
+<a name='L542'></a><a href='#L542'>542</a>
+<a name='L543'></a><a href='#L543'>543</a>
+<a name='L544'></a><a href='#L544'>544</a>
+<a name='L545'></a><a href='#L545'>545</a>
+<a name='L546'></a><a href='#L546'>546</a>
+<a name='L547'></a><a href='#L547'>547</a>
+<a name='L548'></a><a href='#L548'>548</a>
+<a name='L549'></a><a href='#L549'>549</a>
+<a name='L550'></a><a href='#L550'>550</a>
+<a name='L551'></a><a href='#L551'>551</a>
+<a name='L552'></a><a href='#L552'>552</a>
+<a name='L553'></a><a href='#L553'>553</a>
+<a name='L554'></a><a href='#L554'>554</a>
+<a name='L555'></a><a href='#L555'>555</a>
+<a name='L556'></a><a href='#L556'>556</a>
+<a name='L557'></a><a href='#L557'>557</a>
+<a name='L558'></a><a href='#L558'>558</a>
+<a name='L559'></a><a href='#L559'>559</a>
+<a name='L560'></a><a href='#L560'>560</a>
+<a name='L561'></a><a href='#L561'>561</a>
+<a name='L562'></a><a href='#L562'>562</a>
+<a name='L563'></a><a href='#L563'>563</a>
+<a name='L564'></a><a href='#L564'>564</a>
+<a name='L565'></a><a href='#L565'>565</a>
+<a name='L566'></a><a href='#L566'>566</a>
+<a name='L567'></a><a href='#L567'>567</a>
+<a name='L568'></a><a href='#L568'>568</a>
+<a name='L569'></a><a href='#L569'>569</a>
+<a name='L570'></a><a href='#L570'>570</a>
+<a name='L571'></a><a href='#L571'>571</a>
+<a name='L572'></a><a href='#L572'>572</a>
+<a name='L573'></a><a href='#L573'>573</a>
+<a name='L574'></a><a href='#L574'>574</a>
+<a name='L575'></a><a href='#L575'>575</a>
+<a name='L576'></a><a href='#L576'>576</a>
+<a name='L577'></a><a href='#L577'>577</a>
+<a name='L578'></a><a href='#L578'>578</a>
+<a name='L579'></a><a href='#L579'>579</a>
+<a name='L580'></a><a href='#L580'>580</a>
+<a name='L581'></a><a href='#L581'>581</a>
+<a name='L582'></a><a href='#L582'>582</a>
+<a name='L583'></a><a href='#L583'>583</a>
+<a name='L584'></a><a href='#L584'>584</a>
+<a name='L585'></a><a href='#L585'>585</a>
+<a name='L586'></a><a href='#L586'>586</a>
+<a name='L587'></a><a href='#L587'>587</a>
+<a name='L588'></a><a href='#L588'>588</a>
+<a name='L589'></a><a href='#L589'>589</a>
+<a name='L590'></a><a href='#L590'>590</a>
+<a name='L591'></a><a href='#L591'>591</a>
+<a name='L592'></a><a href='#L592'>592</a>
+<a name='L593'></a><a href='#L593'>593</a>
+<a name='L594'></a><a href='#L594'>594</a>
+<a name='L595'></a><a href='#L595'>595</a>
+<a name='L596'></a><a href='#L596'>596</a>
+<a name='L597'></a><a href='#L597'>597</a>
+<a name='L598'></a><a href='#L598'>598</a>
+<a name='L599'></a><a href='#L599'>599</a>
+<a name='L600'></a><a href='#L600'>600</a>
+<a name='L601'></a><a href='#L601'>601</a>
+<a name='L602'></a><a href='#L602'>602</a>
+<a name='L603'></a><a href='#L603'>603</a>
+<a name='L604'></a><a href='#L604'>604</a>
+<a name='L605'></a><a href='#L605'>605</a>
+<a name='L606'></a><a href='#L606'>606</a>
+<a name='L607'></a><a href='#L607'>607</a>
+<a name='L608'></a><a href='#L608'>608</a>
+<a name='L609'></a><a href='#L609'>609</a>
+<a name='L610'></a><a href='#L610'>610</a>
+<a name='L611'></a><a href='#L611'>611</a>
+<a name='L612'></a><a href='#L612'>612</a>
+<a name='L613'></a><a href='#L613'>613</a>
+<a name='L614'></a><a href='#L614'>614</a>
+<a name='L615'></a><a href='#L615'>615</a>
+<a name='L616'></a><a href='#L616'>616</a>
+<a name='L617'></a><a href='#L617'>617</a>
+<a name='L618'></a><a href='#L618'>618</a>
+<a name='L619'></a><a href='#L619'>619</a>
+<a name='L620'></a><a href='#L620'>620</a>
+<a name='L621'></a><a href='#L621'>621</a>
+<a name='L622'></a><a href='#L622'>622</a>
+<a name='L623'></a><a href='#L623'>623</a>
+<a name='L624'></a><a href='#L624'>624</a>
+<a name='L625'></a><a href='#L625'>625</a>
+<a name='L626'></a><a href='#L626'>626</a>
+<a name='L627'></a><a href='#L627'>627</a>
+<a name='L628'></a><a href='#L628'>628</a>
+<a name='L629'></a><a href='#L629'>629</a>
+<a name='L630'></a><a href='#L630'>630</a>
+<a name='L631'></a><a href='#L631'>631</a>
+<a name='L632'></a><a href='#L632'>632</a>
+<a name='L633'></a><a href='#L633'>633</a>
+<a name='L634'></a><a href='#L634'>634</a>
+<a name='L635'></a><a href='#L635'>635</a>
+<a name='L636'></a><a href='#L636'>636</a>
+<a name='L637'></a><a href='#L637'>637</a>
+<a name='L638'></a><a href='#L638'>638</a>
+<a name='L639'></a><a href='#L639'>639</a>
+<a name='L640'></a><a href='#L640'>640</a>
+<a name='L641'></a><a href='#L641'>641</a>
+<a name='L642'></a><a href='#L642'>642</a>
+<a name='L643'></a><a href='#L643'>643</a>
+<a name='L644'></a><a href='#L644'>644</a>
+<a name='L645'></a><a href='#L645'>645</a>
+<a name='L646'></a><a href='#L646'>646</a>
+<a name='L647'></a><a href='#L647'>647</a>
+<a name='L648'></a><a href='#L648'>648</a>
+<a name='L649'></a><a href='#L649'>649</a>
+<a name='L650'></a><a href='#L650'>650</a>
+<a name='L651'></a><a href='#L651'>651</a>
+<a name='L652'></a><a href='#L652'>652</a>
+<a name='L653'></a><a href='#L653'>653</a>
+<a name='L654'></a><a href='#L654'>654</a>
+<a name='L655'></a><a href='#L655'>655</a>
+<a name='L656'></a><a href='#L656'>656</a>
+<a name='L657'></a><a href='#L657'>657</a>
+<a name='L658'></a><a href='#L658'>658</a>
+<a name='L659'></a><a href='#L659'>659</a>
+<a name='L660'></a><a href='#L660'>660</a>
+<a name='L661'></a><a href='#L661'>661</a>
+<a name='L662'></a><a href='#L662'>662</a>
+<a name='L663'></a><a href='#L663'>663</a>
+<a name='L664'></a><a href='#L664'>664</a>
+<a name='L665'></a><a href='#L665'>665</a>
+<a name='L666'></a><a href='#L666'>666</a>
+<a name='L667'></a><a href='#L667'>667</a>
+<a name='L668'></a><a href='#L668'>668</a>
+<a name='L669'></a><a href='#L669'>669</a>
+<a name='L670'></a><a href='#L670'>670</a>
+<a name='L671'></a><a href='#L671'>671</a>
+<a name='L672'></a><a href='#L672'>672</a>
+<a name='L673'></a><a href='#L673'>673</a>
+<a name='L674'></a><a href='#L674'>674</a>
+<a name='L675'></a><a href='#L675'>675</a>
+<a name='L676'></a><a href='#L676'>676</a>
+<a name='L677'></a><a href='#L677'>677</a>
+<a name='L678'></a><a href='#L678'>678</a>
+<a name='L679'></a><a href='#L679'>679</a>
+<a name='L680'></a><a href='#L680'>680</a>
+<a name='L681'></a><a href='#L681'>681</a>
+<a name='L682'></a><a href='#L682'>682</a>
+<a name='L683'></a><a href='#L683'>683</a>
+<a name='L684'></a><a href='#L684'>684</a>
+<a name='L685'></a><a href='#L685'>685</a>
+<a name='L686'></a><a href='#L686'>686</a>
+<a name='L687'></a><a href='#L687'>687</a>
+<a name='L688'></a><a href='#L688'>688</a>
+<a name='L689'></a><a href='#L689'>689</a>
+<a name='L690'></a><a href='#L690'>690</a>
+<a name='L691'></a><a href='#L691'>691</a>
+<a name='L692'></a><a href='#L692'>692</a>
+<a name='L693'></a><a href='#L693'>693</a>
+<a name='L694'></a><a href='#L694'>694</a>
+<a name='L695'></a><a href='#L695'>695</a>
+<a name='L696'></a><a href='#L696'>696</a>
+<a name='L697'></a><a href='#L697'>697</a>
+<a name='L698'></a><a href='#L698'>698</a>
+<a name='L699'></a><a href='#L699'>699</a>
+<a name='L700'></a><a href='#L700'>700</a>
+<a name='L701'></a><a href='#L701'>701</a>
+<a name='L702'></a><a href='#L702'>702</a>
+<a name='L703'></a><a href='#L703'>703</a>
+<a name='L704'></a><a href='#L704'>704</a>
+<a name='L705'></a><a href='#L705'>705</a>
+<a name='L706'></a><a href='#L706'>706</a>
+<a name='L707'></a><a href='#L707'>707</a>
+<a name='L708'></a><a href='#L708'>708</a>
+<a name='L709'></a><a href='#L709'>709</a>
+<a name='L710'></a><a href='#L710'>710</a>
+<a name='L711'></a><a href='#L711'>711</a>
+<a name='L712'></a><a href='#L712'>712</a>
+<a name='L713'></a><a href='#L713'>713</a>
+<a name='L714'></a><a href='#L714'>714</a>
+<a name='L715'></a><a href='#L715'>715</a>
+<a name='L716'></a><a href='#L716'>716</a>
+<a name='L717'></a><a href='#L717'>717</a>
+<a name='L718'></a><a href='#L718'>718</a>
+<a name='L719'></a><a href='#L719'>719</a>
+<a name='L720'></a><a href='#L720'>720</a>
+<a name='L721'></a><a href='#L721'>721</a>
+<a name='L722'></a><a href='#L722'>722</a>
+<a name='L723'></a><a href='#L723'>723</a>
+<a name='L724'></a><a href='#L724'>724</a>
+<a name='L725'></a><a href='#L725'>725</a>
+<a name='L726'></a><a href='#L726'>726</a>
+<a name='L727'></a><a href='#L727'>727</a>
+<a name='L728'></a><a href='#L728'>728</a>
+<a name='L729'></a><a href='#L729'>729</a>
+<a name='L730'></a><a href='#L730'>730</a>
+<a name='L731'></a><a href='#L731'>731</a>
+<a name='L732'></a><a href='#L732'>732</a>
+<a name='L733'></a><a href='#L733'>733</a>
+<a name='L734'></a><a href='#L734'>734</a>
+<a name='L735'></a><a href='#L735'>735</a>
+<a name='L736'></a><a href='#L736'>736</a>
+<a name='L737'></a><a href='#L737'>737</a>
+<a name='L738'></a><a href='#L738'>738</a>
+<a name='L739'></a><a href='#L739'>739</a>
+<a name='L740'></a><a href='#L740'>740</a>
+<a name='L741'></a><a href='#L741'>741</a>
+<a name='L742'></a><a href='#L742'>742</a>
+<a name='L743'></a><a href='#L743'>743</a>
+<a name='L744'></a><a href='#L744'>744</a>
+<a name='L745'></a><a href='#L745'>745</a>
+<a name='L746'></a><a href='#L746'>746</a>
+<a name='L747'></a><a href='#L747'>747</a>
+<a name='L748'></a><a href='#L748'>748</a>
+<a name='L749'></a><a href='#L749'>749</a>
+<a name='L750'></a><a href='#L750'>750</a>
+<a name='L751'></a><a href='#L751'>751</a>
+<a name='L752'></a><a href='#L752'>752</a>
+<a name='L753'></a><a href='#L753'>753</a>
+<a name='L754'></a><a href='#L754'>754</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">3129x</span>
+<span class="cline-any cline-yes">3129x</span>
+<span class="cline-any cline-yes">3129x</span>
+<span class="cline-any cline-yes">3129x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">3129x</span>
+<span class="cline-any cline-yes">3129x</span>
+<span class="cline-any cline-yes">3129x</span>
+<span class="cline-any cline-yes">3129x</span>
+<span class="cline-any cline-yes">3129x</span>
+<span class="cline-any cline-yes">640x</span>
+<span class="cline-any cline-yes">640x</span>
+<span class="cline-any cline-yes">3129x</span>
+<span class="cline-any cline-yes">3129x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">6x</span>
+<span class="cline-any cline-yes">6x</span>
+<span class="cline-any cline-yes">6x</span>
+<span class="cline-any cline-yes">6x</span>
+<span class="cline-any cline-yes">6x</span>
+<span class="cline-any cline-yes">5x</span>
+<span class="cline-any cline-yes">6x</span>
+<span class="cline-any cline-yes">6x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">2866x</span>
+<span class="cline-any cline-yes">572x</span>
+<span class="cline-any cline-yes">572x</span>
+<span class="cline-any cline-yes">2752x</span>
+<span class="cline-any cline-yes">2752x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">6267x</span>
+<span class="cline-any cline-yes">6267x</span>
+<span class="cline-any cline-yes">6267x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">83x</span>
+<span class="cline-any cline-yes">83x</span>
+<span class="cline-any cline-yes">83x</span>
+<span class="cline-any cline-yes">83x</span>
+<span class="cline-any cline-yes">83x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">83x</span>
+<span class="cline-any cline-yes">334x</span>
+<span class="cline-any cline-yes">334x</span>
+<span class="cline-any cline-yes">334x</span>
+<span class="cline-any cline-yes">334x</span>
+<span class="cline-any cline-yes">334x</span>
+<span class="cline-any cline-yes">334x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">83x</span>
+<span class="cline-any cline-yes">5933x</span>
+<span class="cline-any cline-yes">5933x</span>
+<span class="cline-any cline-yes">83x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">67x</span>
+<span class="cline-any cline-yes">67x</span>
+<span class="cline-any cline-yes">67x</span>
+<span class="cline-any cline-yes">67x</span>
+<span class="cline-any cline-yes">67x</span>
+<span class="cline-any cline-yes">67x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">67x</span>
+<span class="cline-any cline-yes">67x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">67x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">67x</span>
+<span class="cline-any cline-yes">2202x</span>
+<span class="cline-any cline-yes">2202x</span>
+<span class="cline-any cline-yes">2493x</span>
+<span class="cline-any cline-yes">2493x</span>
+<span class="cline-any cline-yes">2202x</span>
+<span class="cline-any cline-yes">2202x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">67x</span>
+<span class="cline-any cline-yes">2202x</span>
+<span class="cline-any cline-yes">2202x</span>
+<span class="cline-any cline-yes">2202x</span>
+<span class="cline-any cline-yes">2202x</span>
+<span class="cline-any cline-yes">2202x</span>
+<span class="cline-any cline-yes">2202x</span>
+<span class="cline-any cline-yes">2202x</span>
+<span class="cline-any cline-yes">2493x</span>
+<span class="cline-any cline-yes">2493x</span>
+<span class="cline-any cline-yes">2493x</span>
+<span class="cline-any cline-yes">2202x</span>
+<span class="cline-any cline-yes">2202x</span>
+<span class="cline-any cline-yes">1342x</span>
+<span class="cline-any cline-yes">36x</span>
+<span class="cline-any cline-yes">36x</span>
+<span class="cline-any cline-yes">1342x</span>
+<span class="cline-any cline-yes">2202x</span>
+<span class="cline-any cline-yes">2202x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">67x</span>
+<span class="cline-any cline-yes">2106x</span>
+<span class="cline-any cline-yes">2106x</span>
+<span class="cline-any cline-yes">2106x</span>
+<span class="cline-any cline-yes">67x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">67x</span>
+<span class="cline-any cline-yes">67x</span>
+<span class="cline-any cline-yes">222x</span>
+<span class="cline-any cline-yes">222x</span>
+<span class="cline-any cline-yes">222x</span>
+<span class="cline-any cline-yes">222x</span>
+<span class="cline-any cline-yes">222x</span>
+<span class="cline-any cline-yes">67x</span>
+<span class="cline-any cline-yes">2202x</span>
+<span class="cline-any cline-yes">2202x</span>
+<span class="cline-any cline-yes">1899x</span>
+<span class="cline-any cline-yes">1899x</span>
+<span class="cline-any cline-yes">2202x</span>
+<span class="cline-any cline-yes">2202x</span>
+<span class="cline-any cline-yes">67x</span>
+<span class="cline-any cline-yes">222x</span>
+<span class="cline-any cline-yes">222x</span>
+<span class="cline-any cline-yes">222x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">222x</span>
+<span class="cline-any cline-yes">67x</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">67x</span>
+<span class="cline-any cline-yes">138x</span>
+<span class="cline-any cline-yes">138x</span>
+<span class="cline-any cline-yes">138x</span>
+<span class="cline-any cline-yes">138x</span>
+<span class="cline-any cline-yes">67x</span>
+<span class="cline-any cline-yes">67x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">3116x</span>
+<span class="cline-any cline-yes">3116x</span>
+<span class="cline-any cline-yes">3116x</span>
+<span class="cline-any cline-yes">3116x</span>
+<span class="cline-any cline-yes">3116x</span>
+<span class="cline-any cline-yes">3116x</span>
+<span class="cline-any cline-yes">3116x</span>
+<span class="cline-any cline-yes">3116x</span>
+<span class="cline-any cline-yes">3116x</span>
+<span class="cline-any cline-yes">3116x</span>
+<span class="cline-any cline-yes">3116x</span>
+<span class="cline-any cline-yes">3116x</span>
+<span class="cline-any cline-yes">10196x</span>
+<span class="cline-any cline-yes">7301x</span>
+<span class="cline-any cline-yes">7301x</span>
+<span class="cline-any cline-yes">5295x</span>
+<span class="cline-any cline-yes">5295x</span>
+<span class="cline-any cline-yes">10196x</span>
+<span class="cline-any cline-yes">10196x</span>
+<span class="cline-any cline-yes">2892x</span>
+<span class="cline-any cline-yes">2892x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">2794x</span>
+<span class="cline-any cline-yes">3111x</span>
+<span class="cline-any cline-yes">3111x</span>
+<span class="cline-any cline-yes">2572x</span>
+<span class="cline-any cline-yes">2794x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">2572x</span>
+<span class="cline-any cline-yes">2572x</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">2572x</span>
+<span class="cline-any cline-yes">2864x</span>
+<span class="cline-any cline-yes">2864x</span>
+<span class="cline-any cline-yes">2459x</span>
+<span class="cline-any cline-yes">2572x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">3617x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">2459x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">15x</span>
+<span class="cline-any cline-yes">15x</span>
+<span class="cline-any cline-yes">15x</span>
+<span class="cline-any cline-yes">15x</span>
+<span class="cline-any cline-yes">15x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">309x</span>
+<span class="cline-any cline-yes">1155x</span>
+<span class="cline-any cline-yes">4909x</span>
+<span class="cline-any cline-yes">3384x</span>
+<span class="cline-any cline-yes">3384x</span>
+<span class="cline-any cline-yes">3384x</span>
+<span class="cline-any cline-yes">2444x</span>
+<span class="cline-any cline-yes">2444x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">2444x</span>
+<span class="cline-any cline-yes">2444x</span>
+<span class="cline-any cline-yes">2047x</span>
+<span class="cline-any cline-yes">425x</span>
+<span class="cline-any cline-yes">425x</span>
+<span class="cline-any cline-yes">4909x</span>
+<span class="cline-any cline-yes">507x</span>
+<span class="cline-any cline-yes">507x</span>
+<span class="cline-any cline-yes">507x</span>
+<span class="cline-any cline-yes">507x</span>
+<span class="cline-any cline-yes">4909x</span>
+<span class="cline-any cline-yes">1155x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">309x</span>
+<span class="cline-any cline-yes">309x</span>
+<span class="cline-any cline-yes">309x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">94x</span>
+<span class="cline-any cline-yes">17x</span>
+<span class="cline-any cline-yes">17x</span>
+<span class="cline-any cline-yes">17x</span>
+<span class="cline-any cline-yes">17x</span>
+<span class="cline-any cline-yes">17x</span>
+<span class="cline-any cline-yes">17x</span>
+<span class="cline-any cline-yes">17x</span>
+<span class="cline-any cline-yes">17x</span>
+<span class="cline-any cline-yes">62x</span>
+<span class="cline-any cline-yes">232x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">188x</span>
+<span class="cline-any cline-yes">232x</span>
+<span class="cline-any cline-yes">232x</span>
+<span class="cline-any cline-yes">232x</span>
+<span class="cline-any cline-yes">232x</span>
+<span class="cline-any cline-yes">232x</span>
+<span class="cline-any cline-yes">232x</span>
+<span class="cline-any cline-yes">232x</span>
+<span class="cline-any cline-yes">232x</span>
+<span class="cline-any cline-yes">188x</span>
+<span class="cline-any cline-yes">188x</span>
+<span class="cline-any cline-yes">188x</span>
+<span class="cline-any cline-yes">188x</span>
+<span class="cline-any cline-yes">138x</span>
+<span class="cline-any cline-yes">35x</span>
+<span class="cline-any cline-yes">35x</span>
+<span class="cline-any cline-yes">35x</span>
+<span class="cline-any cline-yes">35x</span>
+<span class="cline-any cline-yes">35x</span>
+<span class="cline-any cline-yes">35x</span>
+<span class="cline-any cline-yes">232x</span>
+<span class="cline-any cline-yes">55x</span>
+<span class="cline-any cline-yes">55x</span>
+<span class="cline-any cline-yes">55x</span>
+<span class="cline-any cline-yes">55x</span>
+<span class="cline-any cline-yes">55x</span>
+<span class="cline-any cline-yes">232x</span>
+<span class="cline-any cline-yes">62x</span>
+<span class="cline-any cline-yes">17x</span>
+<span class="cline-any cline-yes">17x</span>
+<span class="cline-any cline-yes">17x</span>
+<span class="cline-any cline-yes">90x</span>
+<span class="cline-any cline-yes">94x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">82x</span>
+<span class="cline-any cline-yes">82x</span>
+<span class="cline-any cline-yes">82x</span>
+<span class="cline-any cline-yes">82x</span>
+<span class="cline-any cline-yes">82x</span>
+<span class="cline-any cline-yes">82x</span>
+<span class="cline-any cline-yes">82x</span>
+<span class="cline-any cline-yes">82x</span>
+<span class="cline-any cline-yes">82x</span>
+<span class="cline-any cline-yes">82x</span>
+<span class="cline-any cline-yes">82x</span>
+<span class="cline-any cline-yes">82x</span>
+<span class="cline-any cline-yes">82x</span>
+<span class="cline-any cline-yes">82x</span>
+<span class="cline-any cline-yes">82x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">82x</span>
+<span class="cline-any cline-yes">82x</span>
+<span class="cline-any cline-yes">12x</span>
+<span class="cline-any cline-yes">12x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">82x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">82x</span>
+<span class="cline-any cline-yes">333x</span>
+<span class="cline-any cline-yes">396x</span>
+<span class="cline-any cline-yes">396x</span>
+<span class="cline-any cline-yes">333x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">82x</span>
+<span class="cline-any cline-yes">188x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">82x</span>
+<span class="cline-any cline-yes">333x</span>
+<span class="cline-any cline-yes">333x</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">82x</span>
+<span class="cline-any cline-yes">82x</span>
+<span class="cline-any cline-yes">82x</span>
+<span class="cline-any cline-yes">82x</span>
+<span class="cline-any cline-yes">82x</span>
+<span class="cline-any cline-yes">82x</span>
+<span class="cline-any cline-yes">333x</span>
+<span class="cline-any cline-yes">514x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">514x</span>
+<span class="cline-any cline-yes">333x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">82x</span>
+<span class="cline-any cline-yes">82x</span>
+<span class="cline-any cline-yes">333x</span>
+<span class="cline-any cline-yes">333x</span>
+<span class="cline-any cline-yes">82x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">333x</span>
+<span class="cline-any cline-yes">100x</span>
+<span class="cline-any cline-yes">100x</span>
+<span class="cline-any cline-yes">404x</span>
+<span class="cline-any cline-yes">404x</span>
+<span class="cline-any cline-yes">404x</span>
+<span class="cline-any cline-yes">100x</span>
+<span class="cline-any cline-yes">6x</span>
+<span class="cline-any cline-yes">94x</span>
+<span class="cline-any cline-yes">100x</span>
+<span class="cline-any cline-yes">100x</span>
+<span class="cline-any cline-yes">100x</span>
+<span class="cline-any cline-yes">100x</span>
+<span class="cline-any cline-yes">100x</span>
+<span class="cline-any cline-yes">100x</span>
+<span class="cline-any cline-yes">100x</span>
+<span class="cline-any cline-yes">100x</span>
+<span class="cline-any cline-yes">100x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-yes">233x</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">333x</span>
+<span class="cline-any cline-yes">333x</span>
+<span class="cline-any cline-yes">333x</span>
+<span class="cline-any cline-yes">333x</span>
+<span class="cline-any cline-yes">333x</span>
+<span class="cline-any cline-yes">333x</span>
+<span class="cline-any cline-yes">333x</span>
+<span class="cline-any cline-yes">333x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">82x</span>
+<span class="cline-any cline-yes">82x</span>
+<span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">/**
+ * 质点网格粗布局（doc/布局核心原则.md §4.2 拓扑粗布局）。
+ *
+ * 主流程（波纹连通生长 → 环形扩搜 → 死锁插行列）与方向无关，全部在此
+ * 实现；与"放置美学"相关的四个决策点抽为 CoarseHeuristics 钩子（搜索
+ * 锚点 / 候选评分 / 死锁判定 / 死锁解法），由具体模式提供：
+ *  - undirectedHeuristics（本文件）：无向 —— 邻居均值锚点、
+ *    张力−环周长评分（环内方位分类平局项）、四方向最小移动插行列；
+ *  - directedHeuristics（directed-placement.ts）：有向 —— 层级行锚点、
+ *    软层级惩罚评分、优先插列。
+ *
+ * 阶段 2（质点弹性网格放置）：所有节点一律视为 1×1 无面积质点，碰撞检查
+ * 退化为格子占用查询（O(1)）。节点按「波纹连通生长」（BFS 层序队列）
+ * 逐个放置：度数最高者占据网格中心 (0,0)；后续节点以 heuristics.anchor
+ * 为中心环形扩搜空格，按 heuristics.score 择优；候选格另受两道连线禁令
+ * 约束 ——「同起点零共线」（isCollinearRay：u 的两条连线在 u 端夹角不得
+ * 为 0，即视觉重叠成 A→B→C 一条线）与「节点压线」（liesBetween /
+ * segmentBlocked：任何节点不得落在两节点连线线段上、线段不得穿过第三
+ * 节点，与划线风格无关）。搜索预算内无合格空格时
+ * 触发死锁机制：heuristics.deadlock 把已放置节点整体推开一格，强行挤出
+ * 新空间 —— 保障放置 100% 不死锁。
+ *
+ * 子作用域放置可携带固定投影锚点（CoarsePlacementOptions.anchors）：
+ * 外部质点在子作用域内的映射，只对所连节点产生牵引（heuristics.anchorTerm
+ * 偏置，不计入死锁判定）；锚点不入占用表 —— 不占格、不参与插行列推挤，
+ * 自身坐标全程不变。
+ *
+ * 阶段 3（轴向膨胀与压实）：压实阶段收集占用行/列并删除全部空行空列
+ * （推箱子式消灭大片空白），再按行/列上的最大包围半径计算相邻占用行/列
+ * 的物理间距 —— 任意相邻占用行（列）的物理距离 ≥ 两侧最大半径和 + 目标
+ * 间隙，因此任何两个节点的中心距都不小于半径和 + 间隙（无重叠由构造
+ * 保证，不依赖弛豫兜底）。最后把网格坐标映射为连续坐标写回 x/y。
+ *
+ * 确定性：放置顺序、环扩展次序、死锁方向选择全部使用固定规则，
+ * 同一组输入（含 seed 派生的 placed 反算）产出逐位一致的结果。
+ */
+&nbsp;
+import type { LayoutElement } from '../../graph/store.js';
+&nbsp;
+/** 邻居环形扩搜的半径上限（格）。超出仍无合格空格即触发死锁机制。 */
+const SEARCH_RING_CAP = 5;
+&nbsp;
+/** 非负整数辗转相除。 */
+function gcd(a: number, b: number): number {
+  while (b !== 0) [a, b] = [b, a % b];
+  return a;
+}
+&nbsp;
+/**
+ * 线段 a→b 的中间格点（gcd 步进）：仅 gcd(|dx|,|dy|) &gt; 1 的线段存在中
+ * 间格点，贴邻边（距离 1）与互质方向线段（如 (2,1)）天然无中间点。
+ */
+export function midCells(a: Cell, b: Cell): Cell[] {
+  const dx = b.gx - a.gx;
+  const dy = b.gy - a.gy;
+  const g = gcd(Math.abs(dx), Math.abs(dy));
+  const cells: Cell[] = [];
+  for (let k = 1; k &lt; g; k++) {
+    cells.push({ gx: a.gx + (dx / g) * k, gy: a.gy + (dy / g) * k });
+  }
+  return cells;
+}
+&nbsp;
+/**
+ * 点 p 是否共线且严格位于线段 a–b 之间（节点压线判定）：压线 = 第三
+ * 节点落在两节点的直线连线途经处；线段端点的延长线不算（共线但不居
+ * 中），那是零共线禁令（isCollinearRay）的管辖范围。
+ */
+export function liesBetween(a: Cell, b: Cell, p: Cell): boolean {
+  const abx = b.gx - a.gx;
+  const aby = b.gy - a.gy;
+  const apx = p.gx - a.gx;
+  const apy = p.gy - a.gy;
+  if (abx * apy - aby * apx !== 0) return false;
+  const dot = apx * abx + apy * aby;
+  return dot &gt; 0 &amp;&amp; dot &lt; abx * abx + aby * aby;
+}
+&nbsp;
+/** 线段 a→b 是否穿过某个已放置节点（中间格点查占用表）。 */
+export function segmentBlocked(a: Cell, b: Cell, grid: PointGrid): boolean {
+  for (const m of midCells(a, b)) {
+    if (grid.has(m.gx, m.gy)) return true;
+  }
+  return false;
+}
+/** 格坐标键（列, 行）。 */
+function cellKey(gx: number, gy: number): string {
+  return `${gx},${gy}`;
+}
+&nbsp;
+/**
+ * 粗布局的可选行为开关。
+ */
+export interface CoarsePlacementOptions {
+  /**
+   * 忽略用户显式定位（placed）：分组布局的组内层级在自身的局部坐标系中
+   * 运行，成员上残留的外层世界坐标不具备"用户定位"语义 —— 视全部元素
+   * 为未定位（否则 placed 成员会被留在局部布局之外，污染块包围盒）。
+   */
+  ignorePlaced?: boolean;
+  /**
+   * 矩形格距（px）：placed 连续坐标反算占格的分母（x÷cellW、y÷cellH）。
+   * 缺省 = naturalLength 方格。矩形基准格口径由尺寸映射策略分级产出。
+   */
+  cellW?: number;
+  cellH?: number;
+  /**
+   * 固定投影锚点（子图坐标系隔离联动）：外部质点在子作用域网格中的
+   * 映射。锚点只对所连视图项产生牵引（评分加项），不进占用表 ——
+   * 不占格、可被成员踏过，且永不参与插行列推挤（投影坐标固定不变，
+   * 只有子图内节点位置可动）。
+   */
+  anchors?: readonly ProjectionAnchor[];
+}
+&nbsp;
+/** 固定投影锚点：外部质点在子作用域坐标系中的映射。 */
+export interface ProjectionAnchor {
+  /** 被牵引的视图项下标（本次放置输入的下标域）。 */
+  item: number;
+  /** 投影固定格。 */
+  at: Cell;
+}
+&nbsp;
+export interface Cell {
+  gx: number;
+  gy: number;
+}
+&nbsp;
+/** 已放置节点的格坐标（下标 → 格）。 */
+export type GridPos = Array&lt;Cell | null&gt;;
+&nbsp;
+/** 插行列的方向（沿该方向把占用格整体推开一格）。 */
+export interface PushDir {
+  dx: 0 | 1 | -1;
+  dy: 0 | 1 | -1;
+}
+&nbsp;
+/** 四方向（+x/−x/+y/−y）：无向图死锁的候选方向集。 */
+export const PUSH_DIRS_ALL: readonly PushDir[] = [
+  { dx: 1, dy: 0 },
+  { dx: -1, dy: 0 },
+  { dx: 0, dy: 1 },
+  { dx: 0, dy: -1 },
+];
+&nbsp;
+/** 质点网格：占用格（键 → 元素下标）+ 包围盒。 */
+export class PointGrid {
+  readonly occ = new Map&lt;string, number&gt;();
+  minGx = 0;
+  maxGx = 0;
+  minGy = 0;
+  maxGy = 0;
+&nbsp;
+  place(pos: Cell, index: number): void {
+    this.occ.set(cellKey(pos.gx, pos.gy), index);
+    this.minGx = Math.min(this.minGx, pos.gx);
+    this.maxGx = Math.max(this.maxGx, pos.gx);
+    this.minGy = Math.min(this.minGy, pos.gy);
+    this.maxGy = Math.max(this.maxGy, pos.gy);
+  }
+&nbsp;
+  has(gx: number, gy: number): boolean {
+    return this.occ.has(cellKey(gx, gy));
+  }
+}
+&nbsp;
+/**
+ * 死锁机制：在锚点 (ux, uy) 的 dirs 中某一侧插入一行/列，把该侧所有
+ * 已放置节点整体推开一格，挤出新空格并返回其坐标。方向取需要移动的
+ * 占用格最少的一侧（平局按 dirs 给定序），保证确定性。
+ *
+ * posOf 必传：被推开的每个节点其在 posOf 中的格坐标必须同步平移——
+ * 否则后续放置按过期邻居坐标评分、grid-first 流水线按过期锚点膨胀
+ * （两个节点可占进同一格，实测导致矩阵图折叠成 5×6）。
+ */
+export <span class="fstat-no" title="function not covered" >function insertLine(</span>
+<span class="cstat-no" title="statement not covered" >  grid: PointGrid,</span>
+<span class="cstat-no" title="statement not covered" >  ux: number,</span>
+<span class="cstat-no" title="statement not covered" >  uy: number,</span>
+<span class="cstat-no" title="statement not covered" >  posOf: GridPos,</span>
+<span class="cstat-no" title="statement not covered" >  dirs: readonly PushDir[] = PUSH_DIRS_ALL,</span>
+<span class="cstat-no" title="statement not covered" >): Cell {</span>
+<span class="cstat-no" title="statement not covered" >  let bestDir = dirs[0]!;</span>
+<span class="cstat-no" title="statement not covered" >  let bestCost = Infinity;</span>
+<span class="cstat-no" title="statement not covered" >  for (const dir of dirs) {</span>
+<span class="cstat-no" title="statement not covered" >    let cost = 0;</span>
+<span class="cstat-no" title="statement not covered" >    for (const key of grid.occ.keys()) {</span>
+<span class="cstat-no" title="statement not covered" >      const [gx, gy] = key.split(',').map(Number);</span>
+<span class="cstat-no" title="statement not covered" >      if (dir.dx === 1 &amp;&amp; gx &gt;= ux) cost++;</span>
+<span class="cstat-no" title="statement not covered" >      else if (dir.dx === -1 &amp;&amp; gx &lt;= ux) cost++;</span>
+<span class="cstat-no" title="statement not covered" >      else if (dir.dy === 1 &amp;&amp; gy &gt;= uy) cost++;</span>
+<span class="cstat-no" title="statement not covered" >      else if (dir.dy === -1 &amp;&amp; gy &lt;= uy) cost++;</span>
+<span class="cstat-no" title="statement not covered" >    }</span>
+<span class="cstat-no" title="statement not covered" >    if (cost &lt; bestCost) {</span>
+<span class="cstat-no" title="statement not covered" >      bestCost = cost;</span>
+<span class="cstat-no" title="statement not covered" >      bestDir = dir;</span>
+<span class="cstat-no" title="statement not covered" >    }</span>
+<span class="cstat-no" title="statement not covered" >  }</span>
+<span class="cstat-no" title="statement not covered" >  const moved = new Map&lt;string, number&gt;();</span>
+<span class="cstat-no" title="statement not covered" >  for (const [key, index] of grid.occ) {</span>
+<span class="cstat-no" title="statement not covered" >    const [gx, gy] = key.split(',').map(Number);</span>
+<span class="cstat-no" title="statement not covered" >    if (bestDir.dx === 1 &amp;&amp; gx &gt;= ux) moved.set(cellKey(gx + 1, gy), index);</span>
+<span class="cstat-no" title="statement not covered" >    else if (bestDir.dx === -1 &amp;&amp; gx &lt;= ux) moved.set(cellKey(gx - 1, gy), index);</span>
+<span class="cstat-no" title="statement not covered" >    else if (bestDir.dy === 1 &amp;&amp; gy &gt;= uy) moved.set(cellKey(gx, gy + 1), index);</span>
+<span class="cstat-no" title="statement not covered" >    else if (bestDir.dy === -1 &amp;&amp; gy &lt;= uy) moved.set(cellKey(gx, gy - 1), index);</span>
+<span class="cstat-no" title="statement not covered" >    else moved.set(key, index);</span>
+<span class="cstat-no" title="statement not covered" >  }</span>
+<span class="cstat-no" title="statement not covered" >  grid.occ.clear();</span>
+<span class="cstat-no" title="statement not covered" >  grid.minGx = Infinity;</span>
+<span class="cstat-no" title="statement not covered" >  grid.maxGx = -Infinity;</span>
+<span class="cstat-no" title="statement not covered" >  grid.minGy = Infinity;</span>
+<span class="cstat-no" title="statement not covered" >  grid.maxGy = -Infinity;</span>
+<span class="cstat-no" title="statement not covered" >  for (const [key, index] of moved) {</span>
+<span class="cstat-no" title="statement not covered" >    grid.occ.set(key, index);</span>
+<span class="cstat-no" title="statement not covered" >    const [gx, gy] = key.split(',').map(Number);</span>
+<span class="cstat-no" title="statement not covered" >    const p = posOf[index];</span>
+<span class="cstat-no" title="statement not covered" >    if (p) {</span>
+<span class="cstat-no" title="statement not covered" >      p.gx = gx;</span>
+<span class="cstat-no" title="statement not covered" >      p.gy = gy;</span>
+<span class="cstat-no" title="statement not covered" >    }</span>
+<span class="cstat-no" title="statement not covered" >    grid.minGx = Math.min(grid.minGx, gx);</span>
+<span class="cstat-no" title="statement not covered" >    grid.maxGx = Math.max(grid.maxGx, gx);</span>
+<span class="cstat-no" title="statement not covered" >    grid.minGy = Math.min(grid.minGy, gy);</span>
+<span class="cstat-no" title="statement not covered" >    grid.maxGy = Math.max(grid.maxGy, gy);</span>
+<span class="cstat-no" title="statement not covered" >  }</span>
+  // 推开条件含锚点本身（&gt;=），锚点的占用者总被移走 —— 挤出的新格就是
+  // 锚点格自己（锚点本来为空时同样成立）。绝不能返回推挤方向上的相邻格：
+  // 那是锚点占用者的新位置，写回时会把已放置节点从占用表里覆盖掉。
+<span class="cstat-no" title="statement not covered" >  return { gx: ux, gy: uy };</span>
+<span class="cstat-no" title="statement not covered" >}</span>
+&nbsp;
+/** 放置差异钩子：主流程在四个决策点上向具体算法征求答案。 */
+export interface CoarseHeuristics {
+  /** 搜索锚点（环形扩搜的中心格）。 */
+  anchor(v: number, neighbors: readonly Cell[]): Cell;
+  /**
+   * 候选格评分（越小越优）。neighbors 与 neighborIndices 平行：
+   * 已放置邻居的格坐标及其元素下标（可查 adjacency 判断图上相邻）。
+   */
+  score(
+    v: number,
+    gx: number,
+    gy: number,
+    neighbors: readonly Cell[],
+    neighborIndices: readonly number[],
+  ): number;
+  /**
+   * 死锁判定：是否已差到该触发插列。v 为正在放置的元素；theoreticalMin
+   * 为全部邻居贴邻时的得分下界（主流程计算）；bestCell 为当前最佳空格
+   * （搜索预算内一个空格都没有时为 null —— 这总是死锁）。综合分差大但
+   * 空格尚可的候选不一定算死锁（插列是"挤出新空间"的手段，要不要推挤
+   * 由具体算法的放置美学决定）。
+   */
+  isDeadlock(
+    v: number,
+    bestScore: number,
+    theoreticalMin: number,
+    neighborCount: number,
+    bestCell: Cell | null,
+  ): boolean;
+  /**
+   * 死锁解法：以最近邻居格为锚整体推开已放置节点，返回挤出的新格。
+   * posOf 必须随推挤同步平移（见 insertLine）。
+   */
+  deadlock(grid: PointGrid, anchor: Cell, posOf: GridPos): Cell;
+  /**
+   * 新分量种子的落格（可选）。缺省 placeOrphan：紧凑落格（贴靠已放置
+   * 区域最紧的空格）。有向算法覆写它把种子放到自己的层级行上 —— 否则
+   * 微调期的流动弹簧要把种子从任意落点硬拉回层级，拉不到位就在上游
+   * 行卡住（逆流）。
+   */
+  placeSeed?(grid: PointGrid, v: number): Cell;
+  /**
+   * 投影锚点牵引项（可选，缺省 0）：候选格相对固定投影锚点的偏好成本，
+   * 越小越被吸引。只参与候选比较，**不参与死锁判定** —— 投影在容器
+   * 边界之外，成员够不着投影是常态而非拥堵，计入死锁会误触插行列。
+   */
+  anchorTerm?(gx: number, gy: number, anchors: readonly Cell[]): number;
+}
+&nbsp;
+/**
+ * 无向图放置美学（默认实现，doc/布局核心原则.md §4.2）：
+ *  - 锚点 = 已放置邻居的格坐标均值；
+ *  - 评分 = 张力项（到全部已放置邻居的曼哈顿距离和，连线像橡皮筋）
+ *    − 环周长奖励（与候选格 8 邻接且图上相邻的邻居对，把节点拉进
+ *    "夹角"里消灭长边穿透）+ 方位分类项（可选，
+ *    见 UndirectedHeuristicsOptions）；
+ *  - 死锁 = 最佳得分超过 2×邻居数+2；解法 = 四方向最小移动插行列。
+ */
+export interface UndirectedHeuristicsOptions {
+  /**
+   * 环内方位分类项（grid-undirected 启用，默认关）：边的走向优先落在
+   * 邻居的十字（水平/垂直）方位，45° 对角次之，其他方位再次 —— 在张力
+   * 同分的候选之间，正交 &gt; 45° &gt; 杂角。距离维全权由张力项承担（分类
+   * 能力量级 &lt; 张力的每格 1），本项只做环内平局裁决。力导向流水线默认
+   * 关闭：该项改变粗拓扑，弛豫+吸附管线有自己的形状契约基线。
+   */
+  directionClass?: boolean;
+}
+&nbsp;
+export function undirectedHeuristics(
+  adjacency: Array&lt;Set&lt;number&gt;&gt;,
+  options: UndirectedHeuristicsOptions = {},
+): CoarseHeuristics {
+  const RING_BONUS = 0.5;
+  const DEADLOCK_TENSION_FACTOR = 2;
+  const DEADLOCK_TENSION_EXTRA = 2;
+  // 方位分类能量：十字 0 &lt; 对角 0.25 &lt; 杂角 0.5（量级压在张力每格 1 之下）。
+  const DIAGONAL_COST = 0.25;
+  const OBLIQUE_COST = 0.5;
+  /** 投影牵引权重：每格 0.5 —— 方位级偏置（同方向冲突时让位于张力维）。 */
+  const ANCHOR_PULL = 0.5;
+&nbsp;
+  /** 计算候选格的张力项。 */
+  const tension = (gx: number, gy: number, neighbors: readonly Cell[]): number =&gt; {
+    let sum = 0;
+    for (const u of neighbors) {
+      sum += Math.abs(gx - u.gx) + Math.abs(gy - u.gy);
+    }
+    return sum;
+  };
+&nbsp;
+  /**
+   * 环周长奖励：与候选格 8 邻接的已放置邻居中，图上相邻的对构成环 ——
+   * 每一对奖励一个 RING_BONUS（三角形环的周长 3 格已接近下限）。
+   */
+  const ringBonus = (
+    gx: number,
+    gy: number,
+    neighborCells: readonly Cell[],
+    neighborIdx: readonly number[],
+  ): number =&gt; {
+    const touching: number[] = [];
+    for (let k = 0; k &lt; neighborIdx.length; k++) {
+      const p = neighborCells[k]!;
+      if (Math.max(Math.abs(p.gx - gx), Math.abs(p.gy - gy)) === 1) touching.push(neighborIdx[k]!);
+    }
+    let bonus = 0;
+    for (let a = 0; a &lt; touching.length; a++) {
+      for (let b = a + 1; b &lt; touching.length; b++) {
+        if (adjacency[touching[a]!].has(touching[b]!)) bonus += RING_BONUS;
+      }
+    }
+    return bonus;
+  };
+&nbsp;
+  /**
+   * 单条边的方位分类成本（dx/dy = 候选格相对邻居格的位移）。
+   * 十字折扣只给贴邻（曼哈顿距离 1）：距离 &gt;1 的十字方向属张力维，已由
+   * 张力项按格计价，不再享受平局折扣——否则「远距离十字长边」以 0 成本
+   * 压过「近距离对角短边」（张力同分时），把环类图拉成共线（实测回归：
+   * 四边环塌成直线）。折扣只裁决「贴邻该选哪个方位」这一件事。
+   */
+  const directionCost = (dx: number, dy: number): number =&gt; {
+    if (Math.abs(dx) + Math.abs(dy) === 1) return 0;
+    return Math.abs(dx) === Math.abs(dy) ? DIAGONAL_COST : OBLIQUE_COST;
+  };
+  const directionClass = options.directionClass ?? false;
+&nbsp;
+  return {
+    anchor(_v, neighbors) {
+      return {
+        gx: Math.round(neighbors.reduce((s, p) =&gt; s + p.gx, 0) / neighbors.length),
+        gy: Math.round(neighbors.reduce((s, p) =&gt; s + p.gy, 0) / neighbors.length),
+      };
+    },
+    score(v, gx, gy, neighbors, neighborIndices) {
+      let cost = tension(gx, gy, neighbors) - ringBonus(gx, gy, neighbors, neighborIndices);
+      if (directionClass) {
+        for (const u of neighbors) cost += directionCost(gx - u.gx, gy - u.gy);
+      }
+      return cost;
+    },
+    isDeadlock(_v, bestScore, _theoreticalMin, neighborCount, bestCell) {
+      return (
+        bestCell === null ||
+        bestScore &gt; DEADLOCK_TENSION_FACTOR * neighborCount + DEADLOCK_TENSION_EXTRA
+      );
+    },
+<span class="fstat-no" title="function not covered" >    deadlock(grid, anchor, posOf) {</span>
+<span class="cstat-no" title="statement not covered" >      return insertLine(grid, anchor.gx, anchor.gy, posOf);</span>
+<span class="cstat-no" title="statement not covered" >    },</span>
+    anchorTerm(gx, gy, anchors) {
+      let sum = 0;
+      for (const a of anchors) sum += Math.abs(gx - a.gx) + Math.abs(gy - a.gy);
+      return ANCHOR_PULL * sum;
+    },
+  };
+}
+&nbsp;
+/**
+ * 同起点连线零共线禁令（doc/布局核心原则.md §2.1 规则 R6）：
+ * 候选格落在 u 的某条已有连线射线上（同起点夹角为 0）则不合格 ——
+ * 否则两条边视觉上重叠成 A→B→C 一条线。u 为 v 的已放置邻居，w 为 u
+ * 的另一个已放置邻居：candidate−u 与 w−u 同向平行（叉积为 0 且点积
+ * &gt; 0）即共线。adjacency 为无向邻接，同起点/同终点对称适用 —— 几何
+ * 重叠只取决于 u 的两个邻居落在同一射线，与边的有向语义无关；反向
+ * （180°）共线是两条边对冲，不算重叠。
+ */
+export function isCollinearRay(
+  adjacency: Array&lt;Set&lt;number&gt;&gt;,
+  posOf: GridPos,
+  v: number,
+  u: number,
+  posU: Cell,
+  gx: number,
+  gy: number,
+): boolean {
+  const dx = gx - posU.gx;
+  const dy = gy - posU.gy;
+  if (dx === 0 &amp;&amp; dy === 0) <span class="branch-0 cbranch-no" title="branch not covered" >return false;</span>
+  for (const w of adjacency[u]) {
+    if (w === v) continue;
+    const p = posOf[w];
+    if (!p) continue;
+    const wx = p.gx - posU.gx;
+    const wy = p.gy - posU.gy;
+    if (dx * wy - dy * wx === 0 &amp;&amp; dx * wx + dy * wy &gt; 0) return true;
+  }
+  return false;
+}
+&nbsp;
+/**
+ * 放置一个已放置邻居的节点：环形扩搜 + 评分择优，必要时走死锁机制。
+ *
+ * anchors 为 v 的固定投影锚点（可空）：牵引项加进候选比较，但不进
+ * 死锁判定（见 CoarseHeuristics.anchorTerm）；有锚点时禁用「已达理论
+ * 最优提前收工」—— 同分候选仍要按牵引方向裁决。
+ *
+ * 零共线禁令作用于全部候选格（含环 0 锚点格）：被禁格直接出局，搜索
+ * 预算内无合格空格时走既有死锁机制（插行列推挤）。死锁落位后不做二
+ * 次共线复查 —— 死锁解法优先保证放置完成性（拥堵处允许放弃部分美学
+ * 约束保无重叠，与软层级的拥堵语义一致），二次复查会造成推挤-复查
+ * 死循环。
+ *
+ * 压线禁令（节点压边 / 边压节点）与零共线同层作用：候选格落在某条
+ * 已放长边（线段含中间格点的边）线段上，或新边 v–u 的线段穿过已放
+ * 置节点，均不合格。与零共线互补：零共线管「u 的邻居在 u→v 射线上」
+ * （两条边重叠成 A→B→C），压线管「线段途经任意已放置节点」（与邻接
+ * 无关）—— 长边列表由 coarseGridPlacement 在边两端就位时登记。
+ */
+function placeWithHeuristics(
+  grid: PointGrid,
+  v: number,
+  placedNeighborIdx: number[],
+  posOf: GridPos,
+  heuristics: CoarseHeuristics,
+  adjacency: Array&lt;Set&lt;number&gt;&gt;,
+  longEdges: ReadonlyArray&lt;readonly [number, number]&gt;,
+  anchors: readonly Cell[] = [],
+): Cell {
+  /** v 的候选格是否命中同起点零共线禁令。 */
+  const collides = (gx: number, gy: number): boolean =&gt; {
+    for (const u of placedNeighborIdx) {
+      if (isCollinearRay(adjacency, posOf, v, u, posOf[u]!, gx, gy)) return true;
+    }
+    return false;
+  };
+  /** v 的候选格是否命中压线禁令（候选压在已有长边上 / 新边穿过节点）。 */
+  const crossesLine = (gx: number, gy: number): boolean =&gt; {
+    const cand = { gx, gy };
+    for (const [a, b] of longEdges) <span class="branch-0 cbranch-no" title="branch not covered" >{</span>
+<span class="cstat-no" title="statement not covered" >      if (liesBetween(posOf[a]!, posOf[b]!, cand)) return true;</span>
+<span class="cstat-no" title="statement not covered" >    }</span>
+    for (const u of placedNeighborIdx) {
+      if (segmentBlocked(posOf[u]!, cand, grid)) return true;
+    }
+    return false;
+  };
+  /** 候选格是否不合格（占用 / 零共线 / 压线）。 */
+  const ineligible = (gx: number, gy: number): boolean =&gt;
+    grid.has(gx, gy) || collides(gx, gy) || crossesLine(gx, gy);
+  const neighbors = placedNeighborIdx.map((u) =&gt; posOf[u]!);
+  const anchor = heuristics.anchor(v, neighbors);
+  const cx = anchor.gx;
+  const cy = anchor.gy;
+  const theoreticalMin = neighbors.length;
+  const hasAnchors = anchors.length &gt; 0 &amp;&amp; !!heuristics.anchorTerm;
+  const pull = (gx: number, gy: number): number =&gt;
+    hasAnchors ? heuristics.anchorTerm!(gx, gy, anchors) : 0;
+  let bestCell: Cell | null = null;
+  let bestScore = Infinity;
+  let bestGraphScore = Infinity;
+&nbsp;
+  // 环 0：锚点格本身（邻居均值的取整格）为空且不违规时直接参评——两个
+  // 已放置邻居分居其对角/两侧时，均值格恰是张力最小的理想位（环搜从 1
+  // 起步会永远错过它，实测把网格图的末行挤出去一行）。
+  if (!ineligible(cx, cy)) {
+    bestCell = { gx: cx, gy: cy };
+    bestScore = heuristics.score(v, cx, cy, neighbors, placedNeighborIdx);
+    bestGraphScore = bestScore;
+    bestScore += pull(cx, cy);
+  }
+&nbsp;
+  for (let ring = 1; ring &lt;= SEARCH_RING_CAP; ring++) {
+    for (let dx = -ring; dx &lt;= ring; dx++) {
+      for (let dy = -ring; dy &lt;= ring; dy++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== ring) continue; // 只看环缘
+        const gx = cx + dx;
+        const gy = cy + dy;
+        if (ineligible(gx, gy)) continue;
+        const graphScore = heuristics.score(v, gx, gy, neighbors, placedNeighborIdx);
+        const score = graphScore + pull(gx, gy);
+        // 平局显式裁决为扫描序 (gy, gx) 升序（先填满一行再开新行）：对称
+        // 图（网格/环）的镜像候选得分完全相等，遍历序平局会让不同"生长
+        // 前锋"朝相反方向分叉，把矩阵图折成 6 行（实测）。显式扫描序让
+        // 生长变成系统性填行，与遍历次序解耦（确定性不依赖环遍历细节）。
+        const better =
+          score &lt; bestScore ||
+          (score === bestScore &amp;&amp;
+            bestCell !== null &amp;&amp;
+            (gy &lt; bestCell.gy || (gy === bestCell.gy &amp;&amp; gx &lt; bestCell.gx)));
+        if (bestCell === null || better) {
+          bestCell = { gx, gy };
+          bestScore = score;
+          bestGraphScore = graphScore;
+        }
+      }
+    }
+    // 已达理论最优（全部邻居贴邻）提前收工（有投影锚点时同分候选仍需
+    // 按牵引方向裁决，不提前收工）；前几环后不再扩大搜索。
+    if (!hasAnchors &amp;&amp; bestScore &lt;= theoreticalMin) break;
+    if (ring &gt;= 3 &amp;&amp; bestCell) break;
+  }
+&nbsp;
+  if (
+    !bestCell ||
+    heuristics.isDeadlock(v, bestGraphScore, theoreticalMin, neighbors.length, bestCell)
+  ) <span class="branch-0 cbranch-no" title="branch not covered" >{</span>
+    // 候选点周围被完全占满：按最近邻居格为锚插行列挤出新空间。
+<span class="cstat-no" title="statement not covered" >    let near = neighbors[0]!;</span>
+<span class="cstat-no" title="statement not covered" >    let nearDist = Infinity;</span>
+<span class="cstat-no" title="statement not covered" >    for (const p of neighbors) {</span>
+<span class="cstat-no" title="statement not covered" >      const d = Math.abs(p.gx - cx) + Math.abs(p.gy - cy);</span>
+<span class="cstat-no" title="statement not covered" >      if (d &lt; nearDist) {</span>
+<span class="cstat-no" title="statement not covered" >        nearDist = d;</span>
+<span class="cstat-no" title="statement not covered" >        near = p;</span>
+<span class="cstat-no" title="statement not covered" >      }</span>
+<span class="cstat-no" title="statement not covered" >    }</span>
+<span class="cstat-no" title="statement not covered" >    bestCell = heuristics.deadlock(grid, near, posOf);</span>
+<span class="cstat-no" title="statement not covered" >  }</span>
+  return bestCell!;
+}
+&nbsp;
+/** 放置孤立节点/新分量首节点：贴着已放置区域右边缘外侧，从顶行向下找空格。 */
+/**
+ * 无已放置邻居的元素落格（新分量种子、完全孤立节点）。
+ *
+ * 紧凑落格：在已放置区域外扩一圈的范围内，选「贴靠最紧」的空格 ——
+ * 贴靠得分 = 2×边邻接 + 1×角邻接（边共享比角接触更紧凑）；平局取离
+ * 区域质心切比雪夫距离最近者，再平局按 (gx, gy) 升序保证确定性。
+ *
+ * avoid 为可选禁令过滤（压线禁令的种子路径接入）：被禁格不参评。全
+ * 部空格都被禁时退回无过滤结果 —— 放置完成性优先（与死锁解法同一取
+ * 舍），宁可压线也不让放置失败。
+ *
+ * 旧口径「贴已放置区域右缘外侧」会把全部孤立节点排成一行：线形是
+ * 弛豫动力学的横向鞍点（横向扰动无恢复力），力学位形无法自行展开，
+ * 布局被锁死在一条直线上。3 个不相关节点应成品字、4 个应成器字
+ * （tests/shape-baseline.test.ts 基线）。
+ */
+export function placeOrphan(grid: PointGrid, avoid?: (cell: Cell) =&gt; boolean): Cell {
+  if (grid.occ.size === 0) return { gx: 0, gy: 0 };
+  const pick = (skip: (cell: Cell) =&gt; boolean): Cell | null =&gt; {
+    const cx = (grid.minGx + grid.maxGx) / 2;
+    const cy = (grid.minGy + grid.maxGy) / 2;
+    let best: Cell | null = null;
+    let bestTouch = -1;
+    let bestRing = Infinity;
+    let bestManhattan = Infinity;
+    for (let gy = grid.minGy - 1; gy &lt;= grid.maxGy + 1; gy++) {
+      for (let gx = grid.minGx - 1; gx &lt;= grid.maxGx + 1; gx++) {
+        if (grid.has(gx, gy) || skip({ gx, gy })) continue;
+        // 8 邻接贴靠计分：边共享（4 邻）权重 2，角接触权重 1
+        let touch = 0;
+        if (grid.has(gx - 1, gy)) touch += 2;
+        if (grid.has(gx + 1, gy)) touch += 2;
+        if (grid.has(gx, gy - 1)) touch += 2;
+        if (grid.has(gx, gy + 1)) touch += 2;
+        if (grid.has(gx - 1, gy - 1)) touch += 1;
+        if (grid.has(gx + 1, gy - 1)) touch += 1;
+        if (grid.has(gx - 1, gy + 1)) touch += 1;
+        if (grid.has(gx + 1, gy + 1)) touch += 1;
+        const ring = Math.max(Math.abs(gx - cx), Math.abs(gy - cy));
+        const manhattan = Math.abs(gx - cx) + Math.abs(gy - cy);
+        const better =
+          touch &gt; bestTouch ||
+          (touch === bestTouch &amp;&amp;
+            (ring &lt; bestRing ||
+              (ring === bestRing &amp;&amp;
+                (manhattan &lt; bestManhattan ||
+                  (manhattan === bestManhattan &amp;&amp;
+                    best !== null &amp;&amp;
+                    (gx &lt; best.gx || (gx === best.gx &amp;&amp; gy &lt; best.gy)))))));
+        if (better) {
+          best = { gx, gy };
+          bestTouch = touch;
+          bestRing = ring;
+          bestManhattan = manhattan;
+        }
+      }
+    }
+    return best;
+  };
+  const filtered = pick((c) =&gt; !!avoid?.(c));
+  return <span class="branch-0 cbranch-no" title="branch not covered" >filtered ?? pick(() =&gt; false)!;</span>
+}
+&nbsp;
+/**
+ * 纯质点网格放置的结果（阶段 2 产物，不含压实与坐标写回）。
+ * grid-first 流水线（grid-undirected）消费本结果做后续的 AABB 膨胀、
+ * 通道压实与走线；力导向流水线则继续走 coarsePlacement 的压实映射。
+ */
+export interface CoarsePlacementGrid {
+  /** 已放置完成的占用网格（每格一元素）。 */
+  grid: PointGrid;
+  /** 每元素的格坐标（放置 100% 不死锁，无 null 项）。 */
+  posOf: GridPos;
+  /** 格距（物理 px）。 */
+  cell: number;
+  /** 放置顺序（元素下标；placed 反算在前，其余按连通生长/种子序）。 */
+  order: number[];
+}
+&nbsp;
+/**
+ * 阶段 2：纯质点网格放置（不压实、不写回坐标）。
+ *
+ * 用户显式定位（placed）的元素预先反算占格；其余元素按「波纹
+ * 连通生长」放置。详见文件头与 doc/布局核心原则.md §4.2。
+ */
+export function coarseGridPlacement(
+  elements: readonly LayoutElement[],
+  adjacency: Array&lt;Set&lt;number&gt;&gt;,
+  naturalLength: number,
+  heuristics: CoarseHeuristics = undirectedHeuristics(adjacency),
+  options: CoarsePlacementOptions = {},
+): CoarsePlacementGrid {
+  const n = elements.length;
+  if (n === 0) <span class="branch-0 cbranch-no" title="branch not covered" >return { grid: new PointGrid(), posOf: [], cell: Math.max(naturalLength, 1e-3), order: [] };</span>
+  const cell = Math.max(naturalLength, 1e-3);
+  const cellW = Math.max(options.cellW ?? naturalLength, 1e-3);
+  const cellH = Math.max(options.cellH ?? naturalLength, 1e-3);
+  const grid = new PointGrid();
+  const posOf: GridPos = new Array(n).fill(null);
+  const order: number[] = [];
+  const ignorePlaced = options.ignorePlaced ?? false;
+  // 投影锚点按视图项归组（只牵引，不入占用表，永不移动）。
+  const anchorsOf: Cell[][] = Array.from({ length: n }, () =&gt; []);
+  for (const a of options.anchors ?? []) {
+    if (a.item &gt;= 0 &amp;&amp; a.item &lt; n) anchorsOf[a.item]!.push(a.at);
+  }
+&nbsp;
+  // 已放长边（线段含中间格点的边）：压线禁令的查询基准。存元素下标对、
+  // 查询时读 posOf 当前坐标 —— 插行列推挤平移坐标后天然保持有效。
+  const longEdges: Array&lt;[number, number]&gt; = [];
+  /** v 与其已放置邻居之间的新边若线段含中间格点，登记为长边。 */
+  const registerLongEdges = (v: number, placedNbrs: readonly number[]): void =&gt; {
+    for (const u of placedNbrs) {
+      if (u !== v &amp;&amp; posOf[u] &amp;&amp; midCells(posOf[u]!, posOf[v]!).length &gt; 0) <span class="branch-0 cbranch-no" title="branch not covered" >longEdges.push([u, v]);</span>
+    }
+  };
+  /** 种子落格的压线回避：不落在任何已放长边的线段上（有向 placeSeed
+   *  钩子自行落格，不经此过滤 —— 有向种子的层级行落位是另一套边界）。 */
+  const avoidCrossed = (c: Cell): boolean =&gt;
+    longEdges.some(([a, b]) =&gt; liesBetween(posOf[a]!, posOf[b]!, c));
+&nbsp;
+  // 用户显式定位的元素：连续坐标反算占格（冲突时向右找相邻空格）。
+  for (let i = 0; i &lt; n; i++) {
+    const el = elements[i];
+    if (!el.<span class="branch-0 cbranch-no" title="branch not covered" >placed || ignorePlaced) <span class="branch-0 cbranch-no" title="branch not covered" >c</span>ontinue;</span>
+<span class="cstat-no" title="statement not covered" >    let gx = Math.round(el.x / cellW);</span>
+<span class="cstat-no" title="statement not covered" >    const gy = Math.round(el.y / cellH);</span>
+<span class="cstat-no" title="statement not covered" >    while (grid.has(gx, gy)) gx++;</span>
+<span class="cstat-no" title="statement not covered" >    grid.place({ gx, gy }, i);</span>
+<span class="cstat-no" title="statement not covered" >    posOf[i] = { gx, gy };</span>
+<span class="cstat-no" title="statement not covered" >    order.push(i);</span>
+<span class="cstat-no" title="statement not covered" >    registerLongEdges(i, [...adjacency[i]]);</span>
+<span class="cstat-no" title="statement not covered" >  }</span>
+&nbsp;
+  // 波纹连通生长（BFS 层序）：从全局度数最高的节点开始，候选集按先进
+  // 先出出队（到种子的跳数序）。波纹让放置沿已填区域的边界一圈圈向外
+  // 扩张 —— 网格图逐行填满成严格方阵、星形叶逐个落十字位、链沿直线延
+  // 伸；度数优先序则会在对称图上形成多个朝相反方向生长的前锋，把矩阵
+  // 折叠（实测 5×5 → 6×6）。每个非种子节点放置时都有已放置邻居（其
+  // BFS 前驱）可贴近，骨架连续性同 Prim。候选队列耗尽后，剩余节点取
+  // 度数最高者作为新分量的种子（孤儿放置）。
+  const deg = (i: number): number =&gt; adjacency[i].size;
+  const done = new Array&lt;boolean&gt;(n).fill(false);
+  for (let i = 0; i &lt; n; i++) done[i] = !!posOf[i];
+  const queue: number[] = [];
+  const queued = new Set&lt;number&gt;();
+  const enqueueNeighbors = (v: number): void =&gt; {
+    for (const u of adjacency[v]) {
+      if (!done[u] &amp;&amp; !queued.has(u)) {
+        queued.add(u);
+        queue.push(u);
+      }
+    }
+  };
+&nbsp;
+  let remaining = n;
+  for (let i = 0; i &lt; n; i++) {
+    if (done[i]) <span class="branch-0 cbranch-no" title="branch not covered" >remaining--;</span>
+  }
+  while (remaining &gt; 0) {
+    // 种子：队列为空时，从剩余节点取度数最高者（平局按下标升序）。
+    if (queue.length === 0) {
+      let seed = -1;
+      for (let v = 0; v &lt; n; v++) {
+        if (done[v]) continue;
+        if (seed &lt; 0 || deg(v) &gt; deg(seed)) seed = v;
+      }
+      const cellPos = heuristics.placeSeed
+        ? heuristics.placeSeed(grid, seed)
+        : placeOrphan(grid, avoidCrossed);
+      grid.place(cellPos, seed);
+      posOf[seed] = cellPos;
+      done[seed] = true;
+      remaining--;
+      order.push(seed);
+      registerLongEdges(seed, [...adjacency[seed]]);
+      enqueueNeighbors(seed);
+      continue;
+    }
+    // 队首出队（FIFO 波纹序，入队序确定）。
+    const v = queue.shift()!;
+    queued.delete(v);
+    if (done[v]) <span class="branch-0 cbranch-no" title="branch not covered" >continue;</span>
+    const placed = [...adjacency[v]].filter((u) =&gt; posOf[u]);
+    const cellPos =
+      placed.length &gt; 0
+        ? placeWithHeuristics(
+            grid,
+            v,
+            placed,
+            posOf,
+            heuristics,
+            adjacency,
+            longEdges,
+            anchorsOf[v]!,
+<span class="branch-0 cbranch-no" title="branch not covered" >          )</span>
+<span class="cstat-no" title="statement not covered" >        : placeOrphan(grid, avoidCrossed);</span>
+    grid.place(cellPos, v);
+    posOf[v] = cellPos;
+    done[v] = true;
+    remaining--;
+    order.push(v);
+    registerLongEdges(v, placed);
+    enqueueNeighbors(v);
+  }
+&nbsp;
+  return { grid, posOf, cell, order };
+}
+&nbsp;</pre></td></tr></table></pre>
+
+                <div class='push'></div><!-- for sticky footer -->
+            </div><!-- /wrapper -->
+            <div class='footer quiet pad2 space-top1 center small'>
+                Code coverage generated by
+                <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
+                at 2026-09-27T16:42:34.634Z
+            </div>
+        <script src="../../../prettify.js"></script>
+        <script>
+            window.onload = function () {
+                prettyPrint();
+            };
+        </script>
+        <script src="../../../sorter.js"></script>
+        <script src="../../../block-navigation.js"></script>
+    </body>
+</html>
+    

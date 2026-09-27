@@ -12,7 +12,7 @@ import {
 } from '../src/index.js';
 import type { GraphSpec } from '../src/types.js';
 import { estimateLabelBox } from '../src/label.js';
-import { ExpansionGrid } from '../src/layout/grid-undirected/expansion.js';
+import { ExpansionGrid, deflectEdgeCrossings } from '../src/layout/grid-undirected/expansion.js';
 import {
   coarseGridPlacement,
   isCollinearRay,
@@ -700,5 +700,166 @@ describe('节点压线禁令（阶段 2 规则 5：节点不得落在两节点�
     expect(posOf).toHaveLength(7);
     expect(new Set(posOf.map((p) => `${p!.gx},${p!.gy}`)).size).toBe(7);
     expect(`${posOf[3]!.gx},${posOf[3]!.gy}`).not.toBe('1,0'); // E 不压 A—C 线段
+  });
+});
+
+describe('物化后整理（阶段 4~7：消压线 + 行列整理三步）', () => {
+  /** 手工摆放元素（锚点 + 格尺寸，不走 expand 推挤）。 */
+  function put(g: ExpansionGrid, i: number, x: number, y: number, w = 1, h = 1): void {
+    g.place(i, x, y);
+    g.sizeOf[i]!.w = w;
+    g.sizeOf[i]!.h = h;
+  }
+
+  /** 全部元素 AABB 两两无重叠（半开区间口径）。 */
+  function expectNoOverlap(g: ExpansionGrid): void {
+    const boxes = g.boxes();
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i]!;
+        const b = boxes[j]!;
+        const overlap = a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+        expect(overlap).toBe(false);
+      }
+    }
+  }
+
+  it('阶段 5 扫描合并：间隔 >1 的相邻占用行/列收紧为贴邻', () => {
+    const g = new ExpansionGrid(2);
+    put(g, 0, 0, 0, 2, 2);
+    put(g, 1, 10, 10, 2, 2);
+    g.tighten();
+    expect(g.boxes()[1]).toEqual({ x: 2, y: 2, width: 2, height: 2 });
+    expectNoOverlap(g);
+  });
+
+  it('阶段 6 走廊插入：收紧后的贴邻占用行列之间补出 channelMargin 空隙', () => {
+    const g = new ExpansionGrid(3);
+    put(g, 0, 0, 0);
+    put(g, 1, 2, 3);
+    put(g, 2, 9, 6);
+    g.tighten();
+    g.ensureCorridor(1);
+    // x 占用 {0,2,9}：收紧为 0,1,2 → 走廊插入后间隔 2 → 0,2,4；y 同理。
+    expect(g.anchorOf.map((a) => a!.gx)).toEqual([0, 2, 4]);
+    expect(g.anchorOf.map((a) => a!.gy)).toEqual([0, 2, 4]);
+    expectNoOverlap(g);
+  });
+
+  it('阶段 5+6（扫描合并 → 走廊插入）与阶段 7 压实最终状态一致（随机，固定种子）', () => {
+    let seed = 20260928;
+    const rand = (n: number): number => {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return seed % n;
+    };
+    for (let iter = 0; iter < 200; iter++) {
+      const n = 2 + rand(6);
+      const margin = rand(3);
+      const a = new ExpansionGrid(n);
+      const b = new ExpansionGrid(n);
+      const taken = new Set<string>();
+      for (let i = 0; i < n; i++) {
+        let x = 0;
+        let y = 0;
+        do {
+          x = rand(12) - 6;
+          y = rand(12) - 6;
+        } while (taken.has(`${x},${y}`));
+        taken.add(`${x},${y}`);
+        const w = 1 + rand(4);
+        const h = 1 + rand(4);
+        put(a, i, x, y, w, h);
+        put(b, i, x, y, w, h);
+      }
+      a.tighten();
+      a.ensureCorridor(margin);
+      b.compact(margin);
+      expect(a.boxes()).toEqual(b.boxes());
+    }
+  });
+
+  it('阶段 4 消压线：连线穿过第三方 AABB 时推离，且全程无重叠', () => {
+    // W 恰跨在 A→B 连线（y=0）上且为宽 AABB：推离后连线不再穿过 W。
+    const g = new ExpansionGrid(3);
+    put(g, 0, 0, 0); // A 中心 (0,0)
+    put(g, 1, 6, 0); // B 中心 (6,0)
+    put(g, 2, 2, 0, 3, 2); // W 占 x2..4 y0..1
+    deflectEdgeCrossings(g, [{ u: 0, v: 1 }]);
+    const w = g.boxes()[2]!;
+    expect(w.y).toBe(1); // 中心 (3,1) 在线下方 → 推向 y+
+    expectNoOverlap(g);
+  });
+
+  it('阶段 4 消压线：nudge 扫掠级联——被推元素撞到的邻居一并入组', () => {
+    const g = new ExpansionGrid(4);
+    put(g, 0, 0, 0); // A
+    put(g, 1, 6, 0); // B
+    put(g, 2, 2, 0); // W 在连线上
+    put(g, 3, 2, 1); // X 在 W 正下方（推离扫掠路径上）
+    deflectEdgeCrossings(g, [{ u: 0, v: 1 }]);
+    expect(g.boxes()[2]).toEqual({ x: 2, y: 1, width: 1, height: 1 });
+    expect(g.boxes()[3]).toEqual({ x: 2, y: 2, width: 1, height: 1 });
+    expectNoOverlap(g);
+  });
+
+  it('阶段 4 消压线：skip 集合内的元素（容器）不参与判定', () => {
+    const g = new ExpansionGrid(3);
+    put(g, 0, 0, 0);
+    put(g, 1, 4, 0);
+    put(g, 2, 2, 0); // 在连线上，但在 skip 中
+    deflectEdgeCrossings(g, [{ u: 0, v: 1 }], new Set([2]));
+    expect(g.boxes()[2]).toEqual({ x: 2, y: 0, width: 1, height: 1 });
+  });
+
+  it('阶段 5 对齐合并：独居元素吸附主线；撞他者时放弃、无主线时不动', () => {
+    // 列 0 为主线（e0/e1），e2 独居列 3 → 吸附到列 0（行 6 无冲突）
+    const g = new ExpansionGrid(3);
+    put(g, 0, 0, 0);
+    put(g, 1, 0, 4);
+    put(g, 2, 3, 6);
+    g.mergeLines();
+    expect(g.boxes()[2]).toEqual({ x: 0, y: 6, width: 1, height: 1 });
+    // 吸附目标被占：e2 与 e0 同行，挪到列 0 会撞 → 保持原位
+    const h = new ExpansionGrid(3);
+    put(h, 0, 0, 0);
+    put(h, 1, 0, 4);
+    put(h, 2, 3, 0);
+    h.mergeLines();
+    expect(h.boxes()[2]).toEqual({ x: 3, y: 0, width: 1, height: 1 });
+  });
+
+  it('阶段 5 对齐合并：21 节点树的可并线组吸附成列/成行', () => {
+    // 用户口径回归：b3/l3-3/l0-0 同列、b2/l1-0/l0-2 同列、l3-3/l1-0/l1-3 同行
+    const nodes: GraphSpec['nodes'] = [{ id: 'root', label: 'root' }];
+    const edges: GraphSpec['edges'] = [];
+    const level1: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      nodes.push({ id: `b${i}`, label: `b${i}` });
+      edges.push({ source: 'root', target: `b${i}` });
+      level1.push(`b${i}`);
+    }
+    level1.forEach((p, pi) => {
+      for (let j = 0; j < 4; j++) {
+        nodes.push({ id: `l${pi}-${j}`, label: `l${pi}-${j}` });
+        edges.push({ source: p, target: `l${pi}-${j}` });
+      }
+    });
+    const layout = new ForceLayout({ nodes, edges }, {
+      algorithm: 'grid-undirected',
+      naturalLength: CELL / 20,
+      labelCollision: false,
+    });
+    layout.run();
+    const nv = [...layout.nodeViews] as Array<{ id: string; x: number; y: number; w: number }>;
+    const byId = (id: string): { x: number; y: number; w: number } => nv.find((v) => v.id === id)!;
+    const minX = Math.min(...nv.map((v) => v.x - v.w / 2));
+    const gridX = (v: { x: number; y: number; w: number }): number =>
+      Math.round((v.x - v.w / 2 - minX) / layout.cellW);
+    expect(gridX(byId('b3'))).toBe(gridX(byId('l3-3')));
+    expect(gridX(byId('b3'))).toBe(gridX(byId('l0-0')));
+    expect(gridX(byId('b2'))).toBe(gridX(byId('l1-0')));
+    expect(gridX(byId('b2'))).toBe(gridX(byId('l0-2')));
+    expect(byId('l3-3').y).toBe(byId('l1-0').y);
+    expect(byId('l1-0').y).toBe(byId('l1-3').y);
   });
 });
