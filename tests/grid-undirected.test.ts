@@ -828,8 +828,9 @@ describe('物化后整理（阶段 4~7：消压线 + 行列整理三步）', () 
     expect(h.boxes()[2]).toEqual({ x: 3, y: 0, width: 1, height: 1 });
   });
 
-  it('阶段 5 对齐合并：21 节点树的可并线组吸附成列/成行', () => {
-    // 用户口径回归：b3/l3-3/l0-0 同列、b2/l1-0/l0-2 同列、l3-3/l1-0/l1-3 同行
+  it('阶段 5+7.5 对齐合并：21 节点树的可并线组吸附成列/成行（中心共线）', () => {    // 用户口径回归（居中对齐语义）：b3/l3-3/l0-0 同列、b2/l1-0/l0-2 同列、
+    // l3-3/l1-0/l1-3 同行 —— 同列/同行为中心线共线（x/y 逐位相等），
+    // 异宽元素不再左缘对齐而是中心对齐（连线严格水平/垂直）。
     const nodes: GraphSpec['nodes'] = [{ id: 'root', label: 'root' }];
     const edges: GraphSpec['edges'] = [];
     const level1: string[] = [];
@@ -850,16 +851,151 @@ describe('物化后整理（阶段 4~7：消压线 + 行列整理三步）', () 
       labelCollision: false,
     });
     layout.run();
-    const nv = [...layout.nodeViews] as Array<{ id: string; x: number; y: number; w: number }>;
-    const byId = (id: string): { x: number; y: number; w: number } => nv.find((v) => v.id === id)!;
-    const minX = Math.min(...nv.map((v) => v.x - v.w / 2));
-    const gridX = (v: { x: number; y: number; w: number }): number =>
-      Math.round((v.x - v.w / 2 - minX) / layout.cellW);
-    expect(gridX(byId('b3'))).toBe(gridX(byId('l3-3')));
-    expect(gridX(byId('b3'))).toBe(gridX(byId('l0-0')));
-    expect(gridX(byId('b2'))).toBe(gridX(byId('l1-0')));
-    expect(gridX(byId('b2'))).toBe(gridX(byId('l0-2')));
+    const nv = [...layout.nodeViews] as Array<{ id: string; x: number; y: number }>;
+    const byId = (id: string): { x: number; y: number } => nv.find((v) => v.id === id)!;
+    expect(byId('b3').x).toBe(byId('l3-3').x);
+    expect(byId('b3').x).toBe(byId('l0-0').x);
+    expect(byId('b2').x).toBe(byId('l1-0').x);
+    expect(byId('b2').x).toBe(byId('l0-2').x);
     expect(byId('l3-3').y).toBe(byId('l1-0').y);
     expect(byId('l1-0').y).toBe(byId('l1-3').y);
   });
+
+  it('阶段 7.5 行列居中对齐：同带异高元素中心共线（组带中心整数居中）', () => {
+    // A y∈[0,1] 中心 1、B y∈[0,3] 中心 2：行带重叠归组，带 [0,3] 中心 2
+    // —— A 下移 1 格后与 B 中心 y 共线（异高元素水平连线不再歪斜）
+    const g = new ExpansionGrid(2);
+    put(g, 0, 0, 0, 2, 2);
+    put(g, 1, 4, 0, 2, 4);
+    g.alignCenters();
+    const [a, b] = g.boxes();
+    expect(a!.y).toBe(1);
+    expect(a!.x).toBe(0); // 列带不重叠 → x 不动
+    expect(b).toEqual({ x: 4, y: 0, width: 2, height: 4 });
+    expectNoOverlap(g);
+  });
+
+  it('阶段 7.5：理想落点被占时向原位逐格回退，保证无重叠', () => {
+    // 带中心 3：A 理想落点 y∈[2,3] 被 C（y=3）占 → 回退到 y∈[1,2]
+    const g = new ExpansionGrid(3);
+    put(g, 0, 0, 0, 2, 2);
+    put(g, 1, 4, 0, 2, 6); // B 提供带宽（y∈[0,5]），自身已在带中心
+    put(g, 2, 0, 3); // C 挡在 A 的理想落点上
+    g.alignCenters();
+    expect(g.boxes()[0]!.y).toBe(1);
+    expectNoOverlap(g);
+  });
+
+  it('阶段 7.5：贴邻行不并组（上下紧贴的两行保持各自中心）', () => {
+    const g = new ExpansionGrid(2);
+    put(g, 0, 0, 0, 2, 2); // y∈[0,1]
+    put(g, 1, 4, 2, 2, 2); // y∈[2,3]（贴邻不重叠）
+    g.alignCenters();
+    expect(g.boxes()[0]!.y).toBe(0);
+    expect(g.boxes()[1]!.y).toBe(2);
+  });
+
+  it('阶段 7.5：随机场景居中后全部 AABB 两两无重叠（固定种子）', () => {
+    let seed = 20260928;
+    const rand = (n: number): number => {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return seed % n;
+    };
+    for (let iter = 0; iter < 300; iter++) {
+      const n = 2 + rand(8);
+      const g = new ExpansionGrid(n);
+      const taken = new Set<string>();
+      for (let i = 0; i < n; i++) {
+        // 质点互不重合地随机放置，带内推挤膨胀（与阶段 3 同构，无重叠
+        // 由构造保证）—— 居中只能在不重叠布局上做增量校验
+        let gx = 0;
+        let gy = 0;
+        do {
+          gx = rand(15) - 7;
+          gy = rand(15) - 7;
+        } while (taken.has(`${gx},${gy}`));
+        taken.add(`${gx},${gy}`);
+        g.place(i, gx, gy);
+      }
+      for (let i = 0; i < n; i++) {
+        g.expand(i, 1 + rand(4), 1 + rand(4));
+      }
+      g.compact(rand(2));
+      g.alignCenters();
+      expectNoOverlap(g);
+    }
+  });
+
+  it('阶段 7.5 R6 防线：吸附会引入同起点连线同向共线时放弃平移', () => {
+    // hub(4,2) 2×2 中心 (5,3)；s0(4,0) 吸到组带中心 5 后 hub→s0=(0,-3)
+    // 与 hub→s8=(0,-2) 同向共线（R6）→ 拒绝，s0 保持 x=4
+    const g = new ExpansionGrid(3);
+    put(g, 0, 4, 2, 2, 2);
+    put(g, 1, 4, 0);
+    put(g, 2, 5, 1);
+    g.alignCenters([
+      { u: 0, v: 1 },
+      { u: 0, v: 2 },
+    ]);
+    const [hub, s0] = g.boxes();
+    expect(s0!.x).toBe(4);
+    expect(hub!.x).toBe(4);
+    expectNoOverlap(g);
+  });
+
+  it('阶段 7.5 R6 防线：无边时吸附照常生效（对齐能力保留）', () => {
+    const g = new ExpansionGrid(3);
+    put(g, 0, 4, 2, 2, 2);
+    put(g, 1, 4, 0);
+    put(g, 2, 5, 1);
+    g.alignCenters();
+    expect(g.boxes()[1]!.x).toBe(5);
+    expectNoOverlap(g);
+  });
+
+  it('阶段 7.5 R6 防线：180° 反向共线允许（上下两侧对冲不算重叠）', () => {
+    // s8 在 hub 下方：s0 吸附后 hub→s0=(0,-3) 与 hub→s8=(0,+2) 反向 → 允许
+    const g = new ExpansionGrid(3);
+    put(g, 0, 4, 2, 2, 2);
+    put(g, 1, 4, 0);
+    put(g, 2, 5, 5);
+    g.alignCenters([
+      { u: 0, v: 1 },
+      { u: 0, v: 2 },
+    ]);
+    expect(g.boxes()[1]!.x).toBe(5);
+    expectNoOverlap(g);
+  });
+
+  it('阶段 5 R6 防线：独居元素吸附主线会引入同向共线时放弃吸附', () => {
+    // a(2,3) 独居列 2 → 主线列 0（hub、b）；吸附后 hub→a=(0,3) 与
+    // hub→b=(0,1) 同向共线 → 拒绝吸附，a 保持 x=2
+    const g = new ExpansionGrid(3);
+    put(g, 0, 0, 0);
+    put(g, 1, 0, 1);
+    put(g, 2, 2, 3);
+    g.mergeLines([
+      { u: 0, v: 1 },
+      { u: 0, v: 2 },
+    ]);
+    expect(g.boxes()[2]!.x).toBe(2);
+    expectNoOverlap(g);
+  });
+
+  it('阶段 5 R6 防线：反向侧主线照常吸附', () => {
+    const g = new ExpansionGrid(3);
+    put(g, 0, 0, 0);
+    put(g, 1, 0, -1);
+    put(g, 2, 2, 3);
+    g.mergeLines([
+      { u: 0, v: 1 },
+      { u: 0, v: 2 },
+    ]);
+    expect(g.boxes()[2]!.x).toBe(0);
+    expectNoOverlap(g);
+  });
+
+  // 端到端渲染层直线断言见 tests/edge-routing.test.ts（root→b3 水平直线、
+  // b3→l3-3 垂直直线）：三节点链场景经走廊/压实后小盒落在大盒对角外贴
+  // 位置（行列带均不重叠），按设计不对齐、连线为 L 形折线，不构成共线断言
 });

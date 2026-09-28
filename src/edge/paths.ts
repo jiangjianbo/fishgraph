@@ -84,10 +84,18 @@ export class OrthogonalPolylinePathStrategy implements PathStrategy {
       appendAxisFirst(pts, core[0]!, source.nx, source.ny);
       for (let i = 1; i < core.length; i++) appendOrthogonal(pts, core[i]!);
     }
+    // 退化：骨架末点已落在 target 端口上（小盒锚点格心与侧边中点重合）
+    // —— breakout 进出同点必成往返钉（simplify 对消后残留 0 长末段、
+    // 箭头切向错 90°），骨架即终点，箭头切向沿骨架末段。
+    const last = pts[pts.length - 1]!;
+    if (last.x === target.x && last.y === target.y) {
+      simplify(pts);
+      return toPath(pts);
+    }
     // 入盒：骨架先以垂直于法向的末段接入 entry（entry → target 沿法向
     // 贴边）—— 到达方向与最终段恒成直角，杜绝"伸出又折回"的回绕针。
     const entry = { x: target.x + target.nx * this.breakout, y: target.y + target.ny * this.breakout };
-    appendApproach(pts, entry, target.nx, target.ny);
+    appendApproach(pts, entry, target, target.nx, target.ny);
     pushPoint(pts, { x: target.x, y: target.y });
     simplify(pts);
     return toPath(pts);
@@ -124,11 +132,15 @@ function appendAxisFirst(pts: Vec2[], b: Vec2, nx: number, ny: number): void {
  * 锚点外一格，恒 ≥ 半格距 > 箭头长度），保证箭头之后有足够「尾巴」
  * 才开始转向。
  *
- * 例外：切向臂与骨架来路同轴反向（原路往返，simplify 会把骨架末拐点
+ * 例外一：切向臂与骨架来路同轴反向（原路往返，simplify 会把骨架末拐点
  * 一并对消）时退回法向轴先对齐 —— 保留走线骨架，代价是末段回落为
  * breakout 短段。
+ *
+ * 例外二：对齐臂终点恰为 target（小盒锚点格心与侧边中点重合：骨架已
+ * 以正确方向抵达端口）—— 臂终点即终点，不再走 entry 往返（否则
+ * simplify 对消后残留 0 长末段、箭头切向错 90°）。
  */
-function appendApproach(pts: Vec2[], entry: Vec2, nx: number, ny: number): void {
+function appendApproach(pts: Vec2[], entry: Vec2, target: Vec2, nx: number, ny: number): void {
   const last = pts[pts.length - 1]!;
   const prev = pts.length >= 2 ? pts[pts.length - 2]! : null;
   const axisX = Math.abs(nx) >= Math.abs(ny);
@@ -141,13 +153,11 @@ function appendApproach(pts: Vec2[], entry: Vec2, nx: number, ny: number): void 
     if (armX !== 0 && inX !== 0) collision = inX * armX < 0 && inY === 0;
     else if (armY !== 0 && inY !== 0) collision = inY * armY < 0 && inX === 0;
   }
-  if (collision) {
-    // 法向轴先对齐（末段垂直于法向，保骨架拐点）
-    pushPoint(pts, axisX ? { x: entry.x, y: last.y } : { x: last.x, y: entry.y });
-  } else {
-    // 切向轴先对齐（末段沿法向直入，尾巴充足）
-    pushPoint(pts, axisX ? { x: last.x, y: entry.y } : { x: entry.x, y: last.y });
-  }
+  const armEnd = collision
+    ? (axisX ? { x: entry.x, y: last.y } : { x: last.x, y: entry.y })
+    : (axisX ? { x: last.x, y: entry.y } : { x: entry.x, y: last.y });
+  pushPoint(pts, armEnd);
+  if (armEnd.x === target.x && armEnd.y === target.y) return;
   pushPoint(pts, entry);
 }
 

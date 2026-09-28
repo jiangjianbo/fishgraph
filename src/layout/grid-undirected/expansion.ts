@@ -26,7 +26,11 @@
  *    margin 格空隙（不足插出、超出保留）；
  *  - `compact`（阶段 7 通道压实）：空隙统一为恰好 margin 格（回收
  *    超出 + 补足不足）。tighten + ensureCorridor 与 compact 最终状态
- *    一致（同一重映射的三段分解）。
+ *    一致（同一重映射的三段分解）；
+ *  - `alignCenters`（阶段 7.5 行列居中对齐）：逐行逐列扫描，行/列带
+ *    重叠的元素归为一组，组内元素向组带中心整数居中 —— 消除异宽/
+ *    异高元素对齐后「锚线齐而中心错」的残差，使同行列元素的中心线
+ *    严格共线（水平/垂直连线不再歪斜）。
  */
 
 import type { Box } from './space-types.js';
@@ -113,17 +117,19 @@ export class ExpansionGrid {
    * 阶段 5 行列对齐合并：把「独居」（所在列/行线上没有其他元素锚点）的
    * 元素吸附到邻近主线（锚点数 ≥ 2 的列/行线），使可并线的散落元素
    * 对齐成列/成行。候选主线按距离升序尝试，平局取更靠近包围盒中心的
-   * 一条；约束：平移后与任何元素 AABB 无重叠、且不扩大全局包围盒，
-   * 全部候选不可行则保持原位。迭代至不动点（有界）。异宽元素对齐的是
-   * 格线（左缘对齐）；同宽元素即中心对齐。
+   * 一条；约束：平移后与任何元素 AABB 无重叠、不扩大全局包围盒、且
+   * 不新增同起点连线共线（R6，`edges` 缺省时跳过该检查）——全部候选
+   * 不可行则保持原位。迭代至不动点（有界）。异宽元素对齐的是格线
+   * （左缘对齐）；同宽元素即中心对齐。
    */
-  mergeLines(): void {
-    this.mergeAxis('x');
-    this.mergeAxis('y');
+  mergeLines(edges?: readonly EdgePair[]): void {
+    const adj = buildAdjacency(edges);
+    this.mergeAxis('x', adj);
+    this.mergeAxis('y', adj);
   }
 
   /** 单轴对齐合并：主线频次统计 → 独居元素按距离序试吸附 → 不动点迭代。 */
-  private mergeAxis(axis: 'x' | 'y'): void {
+  private mergeAxis(axis: 'x' | 'y', adj: ReadonlyMap<number, readonly number[]>): void {
     const n = this.anchorOf.length;
     if (n === 0) return;
     const coordOf = (i: number): number => (axis === 'x' ? this.anchorOf[i]!.gx : this.anchorOf[i]!.gy);
@@ -170,6 +176,7 @@ export class ExpansionGrid {
               q.minY <= shifted.maxY;
           }
           if (clash) continue;
+          if (this.introducesCollinearEdge(i, axis, delta, adj)) continue;
           const a = this.anchorOf[i]!;
           if (axis === 'x') a.gx += delta;
           else a.gy += delta;
@@ -192,6 +199,171 @@ export class ExpansionGrid {
   compact(margin: number): void {
     this.remapAxis('x', () => 1 + margin);
     this.remapAxis('y', () => 1 + margin);
+  }
+
+  /**
+   * 阶段 7.5 行列居中对齐：把「同带」元素的中心格吸到一条格线上 ——
+   * 行对齐修垂直残差（同排元素中心 y 共线 → 水平连线严格水平），列
+   * 对齐修水平残差。同带 = 该轴投影区间重叠的元素（传递合并成组；贴
+   * 邻不算，上下紧贴的两行仍是两行）；异宽/异高元素经 mergeLines 左
+   * 缘对齐后中心错位、奇偶尺寸的半格相位差，都在格坐标内收敛（残余
+   * 半格由物理化格心吸附归零）。
+   *
+   * 每个元素向组带中心格整数平移；落点与任何元素 AABB 重叠、或引入
+   * 同起点连线共线（R6 硬约束，`edges` 缺省时跳过）时向原位逐格回退
+   * 试探，全部不可行则保持原位 —— 尽力对齐，无重叠与 R6 由校验保证。
+   * 带内居中不扩大组带，全局包围盒不变。平移不改变另一轴投影，两轴
+   * 独立各扫一次。
+   */
+  alignCenters(edges?: readonly EdgePair[]): void {
+    const adj = buildAdjacency(edges);
+    this.alignAxis('y', adj);
+    this.alignAxis('x', adj);
+  }
+
+  /** 单轴居中对齐：区间重叠分组 → 组带中心格 → 逐元素回退试探平移。 */
+  private alignAxis(axis: 'x' | 'y', adj: ReadonlyMap<number, readonly number[]>): void {
+    const n = this.anchorOf.length;
+    const idx: number[] = [];
+    for (let i = 0; i < n; i++) if (this.anchorOf[i]) idx.push(i);
+    if (idx.length <= 1) return;
+    const loOf = (r: Rect): number => (axis === 'x' ? r.minX : r.minY);
+    const hiOf = (r: Rect): number => (axis === 'x' ? r.maxX : r.maxY);
+    const sizeOf = (i: number): number => (axis === 'x' ? this.sizeOf[i]!.w : this.sizeOf[i]!.h);
+    // 区间重叠传递合并成组（排序扫描），组内元素随带记录。
+    const sorted = idx.slice().sort((a, b) => {
+      const ra = this.rectOf(a!);
+      const rb = this.rectOf(b!);
+      return loOf(ra) - loOf(rb) || hiOf(ra) - hiOf(rb) || a - b;
+    });
+    let groupStart = 0;
+    let bandLo = loOf(this.rectOf(sorted[0]!));
+    let bandHi = hiOf(this.rectOf(sorted[0]!));
+    const flush = (lo: number, hi: number): void => {
+      const members = sorted.slice(lo, hi);
+      if (members.length <= 1) return;
+      // 目标 = 组带中心格（整数）。对齐的是中心格（anchor + ⌊size/2⌋，
+      // 与走线 A* 中心格同口径）而非连续中心：中心格共线经物理化格心
+      // 吸附后逐位相等，且无 .5 取整边界抖动（奇偶尺寸混合时连续中心
+      // 在整数格上无精确解）。
+      const target = Math.round((bandLo + bandHi) / 2);
+      for (const i of members) {
+        const anchor = axis === 'x' ? this.anchorOf[i]!.gx : this.anchorOf[i]!.gy;
+        let delta = target - (anchor + Math.floor(sizeOf(i) / 2));
+        if (delta === 0) continue;
+        // 理想落点重叠或引入 R6 共线时向原位逐格回退（保号），全不可
+        // 行则不动。
+        const dir = delta > 0 ? 1 : -1;
+        for (; delta !== 0; delta -= dir) {
+          if (this.tryShift(i, axis, delta, adj)) break;
+        }
+      }
+    };
+    for (let k = 1; k <= sorted.length; k++) {
+      if (k === sorted.length) {
+        flush(groupStart, k);
+        break;
+      }
+      const r = this.rectOf(sorted[k]!);
+      if (loOf(r) <= bandHi) {
+        bandHi = Math.max(bandHi, hiOf(r));
+        continue;
+      }
+      flush(groupStart, k);
+      groupStart = k;
+      bandLo = loOf(r);
+      bandHi = hiOf(r);
+    }
+  }
+
+  /**
+   * 元素 i 沿 axis 平移 delta 的无冲突试探：与任何其他元素 AABB（闭合
+   * 区间相交口径）重叠、或引入同起点连线共线（R6，`adj` 非空时）则
+   * 失败 —— 成功即提交。平移目标在组带内（带内居中 + 回退向原位），
+   * 全局包围盒由构造不变。
+   */
+  private tryShift(
+    i: number,
+    axis: 'x' | 'y',
+    delta: number,
+    adj: ReadonlyMap<number, readonly number[]> = new Map(),
+  ): boolean {
+    const r = this.rectOf(i);
+    const shifted =
+      axis === 'x' ? { ...r, minX: r.minX + delta, maxX: r.maxX + delta } : { ...r, minY: r.minY + delta, maxY: r.maxY + delta };
+    for (let j = 0; j < this.anchorOf.length; j++) {
+      if (j === i || !this.anchorOf[j]) continue;
+      const q = this.rectOf(j);
+      const clash =
+        shifted.minX <= q.maxX &&
+        q.minX <= shifted.maxX &&
+        shifted.minY <= q.maxY &&
+        q.minY <= shifted.maxY;
+      if (clash) return false;
+    }
+    if (this.introducesCollinearEdge(i, axis, delta, adj)) return false;
+    const a = this.anchorOf[i]!;
+    if (axis === 'x') a.gx += delta;
+    else a.gy += delta;
+    return true;
+  }
+
+  /**
+   * 同起点连线零共线（R6，doc/布局核心原则.md §2.1）的平移防线：与
+   * coarse 的 isCollinearRay 同口径 —— 同一起点两条连线方向向量叉积
+   * 为 0 且点积 > 0（同向平行）即违反，180° 反向允许。方向向量取中
+   * 心格差分（anchor + ⌊size/2⌋，与走线 A* 中心格同口径）。只阻止
+   * 「新增」违反：平移前已共线的边对不冻结整理（放置完成性优先的遗
+   * 留违例由总设计 §4.2 兜底口径管辖）。平移 i 后要查两端：i 端
+   * （i→邻居的新方向 vs 其余邻居）、对端（对端→i 的新方向 vs 对端
+   * 的其他边）。
+   */
+  private introducesCollinearEdge(
+    i: number,
+    axis: 'x' | 'y',
+    delta: number,
+    adj: ReadonlyMap<number, readonly number[]>,
+  ): boolean {
+    const neighbors = adj.get(i);
+    if (!neighbors || neighbors.length === 0) return false;
+    const centerOf = (k: number, shift: number): { x: number; y: number } => {
+      const a = this.anchorOf[k]!;
+      const s = this.sizeOf[k]!;
+      return {
+        x: a.gx + Math.floor(s.w / 2) + (axis === 'x' ? shift : 0),
+        y: a.gy + Math.floor(s.h / 2) + (axis === 'y' ? shift : 0),
+      };
+    };
+    // 违反对键 = 起点 > 两对端（同起点两条连线共线同向）。
+    const violations = (shift: number): Set<string> => {
+      const out = new Set<string>();
+      // u→v 与 u→w 同向共线判定；shifted = 平移中的元素（u 或 v）。
+      const collinear = (u: number, v: number, w: number, shifted: number): boolean => {
+        const c = (k: number) => centerOf(k, k === shifted ? shift : 0);
+        const du = c(v)!.x - c(u)!.x;
+        const dv = c(v)!.y - c(u)!.y;
+        const eu = c(w)!.x - c(u)!.x;
+        const ew = c(w)!.y - c(u)!.y;
+        return du * ew - dv * eu === 0 && du * eu + dv * ew > 0;
+      };
+      for (const j of neighbors) {
+        // i 端：i→j 与 i→k（i 平移改 i 端方向）
+        for (const k of neighbors) {
+          if (k === j) continue;
+          if (collinear(i, j, k, i)) out.add(`${i}>${j},${k}`);
+        }
+        // j 端：j→i（新方向）与 j→k（既有方向）
+        for (const k of adj.get(j) ?? []) {
+          if (k === i) continue;
+          if (collinear(j, i, k, i)) out.add(`${j}>${i},${k}`);
+        }
+      }
+      return out;
+    };
+    const before = violations(0);
+    const after = violations(delta);
+    for (const key of after) if (!before.has(key)) return true;
+    return false;
   }
 
   /** 全部元素的格 AABB（下标 = elements 下标）。 */
@@ -340,6 +512,22 @@ export class ExpansionGrid {
 export interface EdgePair {
   u: number;
   v: number;
+}
+
+/** 邻接表（无向，去重）：R6 平移防线的查询结构；无边时为空表。 */
+function buildAdjacency(edges?: readonly EdgePair[]): Map<number, number[]> {
+  const adj = new Map<number, number[]>();
+  if (!edges) return adj;
+  for (const { u, v } of edges) {
+    if (u === v) continue;
+    let au = adj.get(u);
+    if (!au) adj.set(u, (au = []));
+    let av = adj.get(v);
+    if (!av) adj.set(v, (av = []));
+    if (!au.includes(v)) au.push(v);
+    if (!av.includes(u)) av.push(u);
+  }
+  return adj;
 }
 
 /** 元素 AABB 中心格（与 A* 中心格同口径：anchor + ⌊size/2⌋）。 */

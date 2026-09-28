@@ -5,8 +5,8 @@
  * 按 doc/布局核心原则.md §4「流水线骨架」组织，全程在离散网格
  * 中运行（世界坐标由尺寸映射策略物理化，渲染端自由缩放）：
  *   [质点拓扑粗布局] → [节点中心对称膨胀物化为 AABB] → [膨胀后调整
- *   （消压线）] → [行列整理（扫描合并 → 走廊插入 → 通道压实）] →
- *   [网格 A* 避障走线] → [映射策略：格解 → 可渲染图]
+ *   （消压线）] → [行列整理（扫描合并 → 走廊插入 → 通道压实 → 行列
+ *   居中对齐）] → [网格 A* 避障走线] → [映射策略：格解 → 可渲染图]
  *  - 阶段 2 用 coarse.ts 的质点网格放置（波纹连通生长 + 死锁插行列）。
  *    direction = 'none'（默认）用无向放置美学（张力 − 环周长 + 环内方位
  *    分类 + 扫描序平局）；'TB'/'LR' 用有向层级放置（解环 + 最长路径
@@ -15,7 +15,8 @@
  *    （gw/gh = px 盒 ÷ 矩形基准格）中心对称扩张（阶段 3）→ 消压线
  *    （阶段 4：deflectEdgeCrossings）→ 行列扫描合并（阶段 5：tighten）
  *    → 走廊插入（阶段 6：ensureCorridor）→ 通道压实（阶段 7：compact，
- *    相邻行列空隙统一到 channelMargin 走线走廊）；
+ *    相邻行列空隙统一到 channelMargin 走线走廊）→ 行列居中对齐（阶段
+ *    7.5：alignCenters，同带元素中心共线）；
  *  - 阶段 8 用 GridSpaceContext.routeEdge（A* 正交寻路 + 拐点惩罚）在
  *    逻辑格上走线；物理化与可渲染图装配委托尺寸映射策略
  *    （LayoutOptions.metric，缺省 DefaultMetricStrategy：1 格 = 矩形
@@ -166,16 +167,17 @@ export class GridUndirectedStrategy implements LayoutStrategy {
     this.store.elements.forEach((el, i) => {
       if (isSubgraphNode(el)) containers.add(i);
     });
-    deflectEdgeCrossings(
-      expansion,
-      this.store.edges.map((e) => ({ u: e.sourceIndex, v: e.targetIndex })),
-      containers,
-    );
+    const edgePairs = this.store.edges.map((e) => ({ u: e.sourceIndex, v: e.targetIndex }));
+    deflectEdgeCrossings(expansion, edgePairs, containers);
     expansion.tighten();
-    expansion.mergeLines();
+    // 阶段 5/7.5 的吸附平移带 R6 防线（同起点连线零共线为硬约束：
+    // 卫星被吸到 hub 同列同向后，直线连线完全重合）。
+    expansion.mergeLines(edgePairs);
     expansion.ensureCorridor(this.marginCells);
-    // 阶段 7：通道约束压实（Channel Safety Margin）。
+    // 阶段 7：通道约束压实（Channel Safety Margin）；阶段 7.5：行列
+    // 居中对齐（同带元素中心共线，同行列连线严格水平/垂直）。
     expansion.compact(this.marginCells);
+    expansion.alignCenters(edgePairs);
 
     // 物理化 + 走线（映射策略出口：可渲染图）。
     this.finalizeLayout(expansion.boxes());
@@ -337,15 +339,14 @@ export class GridUndirectedStrategy implements LayoutStrategy {
     scope.items.forEach((it, i) => {
       if (it.kind === 'subgraph') containerItems.add(i);
     });
-    deflectEdgeCrossings(
-      expansion,
-      viewEdges.map((e) => ({ u: e.sourceIndex, v: e.targetIndex })),
-      containerItems,
-    );
+    const viewEdgePairs = viewEdges.map((e) => ({ u: e.sourceIndex, v: e.targetIndex }));
+    deflectEdgeCrossings(expansion, viewEdgePairs, containerItems);
     expansion.tighten();
-    expansion.mergeLines();
+    // R6 防线同非折叠路径（视图项下标与 expansion 下标一致）。
+    expansion.mergeLines(viewEdgePairs);
     expansion.ensureCorridor(margin);
     expansion.compact(margin);
+    expansion.alignCenters(viewEdgePairs);
 
     // 包围盒归一（左上角 → 0,0），得到作用域内相对布局。
     const boxes = expansion.boxes();
@@ -537,20 +538,30 @@ export class GridUndirectedStrategy implements LayoutStrategy {
         // 直线让骨架与端口同轴，零拐弯直连。
         const vertical = sa.point.x === ta.point.x;
         const horizontal = !vertical && sa.point.y === ta.point.y;
+        // 正对位升级要求两端**中心格**同列/同行（同轴）：仅锚点同列时
+        // 异宽盒的中心错开整格，exact 中线直线会斜穿第三方盒（回归：
+        // 星形 hub 2 格宽 → s8 1 格宽锚点同列、中心错 1 格，斜线穿 s0）。
         const straight =
-          (vertical && path.every((p) => p.x === startOut.x)) ||
-          (horizontal && path.every((p) => p.y === startOut.y));
+          (vertical &&
+            centers[e.sourceIndex]!.x === centers[e.targetIndex]!.x &&
+            path.every((p) => p.x === startOut.x)) ||
+          (horizontal &&
+            centers[e.sourceIndex]!.y === centers[e.targetIndex]!.y &&
+            path.every((p) => p.y === startOut.y));
         if (straight) {
           const sb = boxes[e.sourceIndex]!;
           const tb = boxes[e.targetIndex]!;
-          // 端口在盒边界线上（格坐标）：法向正侧 = 盒底/右边界线，负侧 = 盒顶/左边界线。
+          // 端口在盒边界线上（格坐标）：法向正侧 = 盒底/右边界线，负侧 =
+          // 盒顶/左边界线。边界中点取中心格格心口径（与物理化吸附后的
+          // 渲染端口 = AABB 边界中点严格同点）——同行列元素的格心共线，
+          // 直线两端 y/x 逐位相等，渲染为严格水平/垂直线。
           const se = {
-            x: vertical ? sb.x + sb.width / 2 : sa.normal.x > 0 ? sb.x + sb.width : sb.x,
-            y: vertical ? (sa.normal.y > 0 ? sb.y + sb.height : sb.y) : sb.y + sb.height / 2,
+            x: vertical ? sb.x + Math.floor(sb.width / 2) + 0.5 : sa.normal.x > 0 ? sb.x + sb.width : sb.x,
+            y: vertical ? (sa.normal.y > 0 ? sb.y + sb.height : sb.y) : sb.y + Math.floor(sb.height / 2) + 0.5,
           };
           const te = {
-            x: vertical ? tb.x + tb.width / 2 : ta.normal.x > 0 ? tb.x + tb.width : tb.x,
-            y: vertical ? (ta.normal.y > 0 ? tb.y + tb.height : tb.y) : tb.y + tb.height / 2,
+            x: vertical ? tb.x + Math.floor(tb.width / 2) + 0.5 : ta.normal.x > 0 ? tb.x + tb.width : tb.x,
+            y: vertical ? (ta.normal.y > 0 ? tb.y + tb.height : tb.y) : tb.y + Math.floor(tb.height / 2) + 0.5,
           };
           return {
             source: e.sourceIndex,
@@ -579,8 +590,9 @@ export class GridUndirectedStrategy implements LayoutStrategy {
         target: e.targetIndex,
         cells: [centers[e.sourceIndex]!, centers[e.targetIndex]!],
         exact: [
-          { x: a.x + a.width / 2, y: a.y + a.height / 2 },
-          { x: b.x + b.width / 2, y: b.y + b.height / 2 },
+          // 降级直线端点同为中心格格心（与物理化吸附后的元素中心同点）。
+          { x: a.x + Math.floor(a.width / 2) + 0.5, y: a.y + Math.floor(a.height / 2) + 0.5 },
+          { x: b.x + Math.floor(b.width / 2) + 0.5, y: b.y + Math.floor(b.height / 2) + 0.5 },
         ],
       };
     });

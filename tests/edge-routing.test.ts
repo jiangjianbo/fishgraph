@@ -168,12 +168,14 @@ describe('连线装配回归（树 21 节点）', () => {
     }
   });
 
-  it('root→b1：直线为左上方向，折线只含向上/向左的段（无反向段）', () => {
+  it('root→b1：居中对齐后同列，连线为向上垂直直线（无反向段）', () => {
     const i = indexOf('root', 'b1');
     expect(i).toBeGreaterThanOrEqual(0);
     const s = views[evs[i]!.sourceIndex]!;
     const t = views[evs[i]!.targetIndex]!;
-    expect(t.x!).toBeLessThan(s.x!); // 对端在左（dx < 0）
+    // 行列居中对齐（阶段 7.5 + 物理化格心吸附）后 root 与 b1 中心同列：
+    // 连线升级为垂直直线（回归口径更新：旧几何为左上斜折线）
+    expect(t.x!).toBe(s.x!);
     expect(t.y!).toBeLessThan(s.y!); // 对端在上（dy < 0）
     // 全部顶点都在 source→target 的单调象限内：不向右、不向下
     // （屏幕坐标向上 = y 减小；回归：曾有先向右 13px 的反向段）
@@ -181,6 +183,30 @@ describe('连线装配回归（树 21 节点）', () => {
       expect(p.x).toBeLessThanOrEqual(s.x! + 1e-9);
       expect(p.y).toBeLessThanOrEqual(s.y! + 1e-9);
     }
+  });
+
+  it('root→b3：居中对齐后同行，连线为单段水平直线', () => {
+    const i = indexOf('root', 'b3');
+    expect(i).toBeGreaterThanOrEqual(0);
+    const s = views[evs[i]!.sourceIndex]!;
+    const t = views[evs[i]!.targetIndex]!;
+    // 行列居中对齐（阶段 7.5 + 物理化格心吸附）后 root 与 b3 中心同行：
+    // 连线为严格水平直线 —— 这正是"同行列节点连线不歪斜"的需求语义
+    expect(t.y!).toBe(s.y!);
+    const pts = ptsOfEdge(i);
+    expect(pts, '水平直线应为单段').toHaveLength(2);
+    expect(pts[0]!.y).toBe(pts[1]!.y);
+  });
+
+  it('b3→l3-3：居中对齐后同列，连线为单段垂直直线', () => {
+    const i = indexOf('b3', 'l3-3');
+    expect(i).toBeGreaterThanOrEqual(0);
+    const s = views[evs[i]!.sourceIndex]!;
+    const t = views[evs[i]!.targetIndex]!;
+    expect(t.x!).toBe(s.x!);
+    const pts = ptsOfEdge(i);
+    expect(pts, '垂直直线应为单段').toHaveLength(2);
+    expect(pts[0]!.x).toBe(pts[1]!.x);
   });
 
   it('b2→l2-3：箭头处拐弯之外留有尾巴（回归：末段曾是 6px 短段）', () => {

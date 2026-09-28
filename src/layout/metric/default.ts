@@ -7,14 +7,16 @@
  *  - grade：宽/高独立锚定聚类（gradeBoxes，容差 1.25），最小级上界即
  *    基准格；格数 = 盒 ÷ 基准格向上取整 —— 最小级元素恰好 1×1 格；
  *  - render：1 格 = 基准格（x 轴 cellW、y 轴 cellH，各向异性）；元素
- *    AABB 中心写回 + 全体质心归零；边走线格点按格心 (p+0.5)·格距换算
- *    （退化直线用精确端点）；容器 shape = 格 AABB × 格距 + 两侧 padding。
+ *    中心吸附中心格格心后写回（同行列元素中心严格共线）+ 全体质心
+ *    归零；边走线格点按格心 (p+0.5)·格距换算（退化直线用精确端点）；
+ *    容器 shape = 格 AABB × 格距 + 两侧 padding。
  */
 
 import { estimateLabelBox } from '../../label.js';
 import { halfExtentsOf } from '../../geometry.js';
 import { gradeBoxes, type BoxSize, type GradeBasis } from '../grade.js';
 import { registerMetricStrategy } from './registry.js';
+import type { Box } from '../grid-undirected/space-types.js';
 import type { GridCellMetric, LayoutSolution, MetricElementInfo, MetricStrategy, RenderGraph } from './types.js';
 
 export class DefaultMetricStrategy implements MetricStrategy {
@@ -39,18 +41,24 @@ export class DefaultMetricStrategy implements MetricStrategy {
   render(solution: LayoutSolution, cells: GridCellMetric): RenderGraph {
     const { cellW, cellH } = cells;
     const { boxes } = solution;
-    // 质心归零：AABB 中心的均值平移到原点（渲染端自由缩放，不感知网格）。
+    // 节点物理中心吸附中心格格心（中心格 = 左上格 + ⌊尺寸/2⌋，与走线
+    // A* 的中心格同口径）：同中心格行/列的元素物理中心严格共线 —— 异
+    // 高/异宽元素的奇偶半格相位差在整数格内无解，物理化浮点出口一次
+    // 归齐，同行列连线不再歪斜。
+    const centerX = (b: Box): number => (b.x + Math.floor(b.width / 2) + 0.5) * cellW;
+    const centerY = (b: Box): number => (b.y + Math.floor(b.height / 2) + 0.5) * cellH;
+    // 质心归零：吸附后中心的均值平移到原点（渲染端自由缩放，不感知网格）。
     let sx = 0;
     let sy = 0;
     for (const b of boxes) {
-      sx += (b.x + b.width / 2) * cellW;
-      sy += (b.y + b.height / 2) * cellH;
+      sx += centerX(b);
+      sy += centerY(b);
     }
     const ox = boxes.length > 0 ? -sx / boxes.length : 0;
     const oy = boxes.length > 0 ? -sy / boxes.length : 0;
     const nodes = boxes.map((b) => ({
-      x: b.x * cellW + ox,
-      y: b.y * cellH + oy,
+      x: centerX(b) - (b.width * cellW) / 2 + ox,
+      y: centerY(b) - (b.height * cellH) / 2 + oy,
       w: b.width * cellW,
       h: b.height * cellH,
     }));
