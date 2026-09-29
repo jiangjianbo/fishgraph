@@ -77,9 +77,12 @@ grid-undirected 是引擎的**唯一主算法**：节点位置在离散阶段一
 
 格化在流水线阶段 0（尺寸分级，`grade.ts` 的 `gradeBoxes`，由
 `GraphStore.refreshGrades` 调用）完成：每元素的物理 AABB 尺寸 =
-形状声明 ⊕ 文字盒取较大者（`GraphStore.nodeBoxSize`：circle 2r /
-ellipse 2rx×2ry / rect w×h，label 用 `estimateLabelBox` 的回绕盒），
-按矩形基准格向上取整为逻辑格宽高（宽/高基准独立、可以不同）：
+**文字阶梯盒**（`GraphStore.nodeBoxSize` → metric `measureBox`：有
+标签节点尺寸全由 `estimateLabelBox` 的回绕盒决定——行数 × 每行最大
+字符数，宽高比 `maxLabelAspect`（默认 4:1）约束回绕，声明形状不参
+与；无标签节点用声明形状 circle 2r / ellipse 2rx×2ry / rect w×h；
+subgraph 容器由 store 侧分流保留声明口径），按矩形基准格向上取整为
+逻辑格宽高（宽/高基准独立、可以不同）：
 
 ```text
 gw = max(1, ceil(nodeBoxWidth  / cellW))    gh = max(1, ceil(nodeBoxHeight / cellH))

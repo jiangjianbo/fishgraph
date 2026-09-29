@@ -23,8 +23,8 @@ import type { Box, Point } from '../grid-undirected/space-types.js';
 export interface MetricElementInfo {
   label: string | null;
   shape: ShapeSpec;
-  /** 文字度量参数（store 的 labelFontSize / labelPadding）。 */
-  font: { size: number; padding: number };
+  /** 文字度量参数（store 的 labelFontSize / labelPadding / maxLabelAspect）。 */
+  font: { size: number; padding: number; aspect: number };
 }
 
 /** 一条边的逻辑格走线（映射策略入口的一部分）。 */

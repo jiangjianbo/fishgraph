@@ -109,6 +109,12 @@ export interface LayoutOptions {
   labelFontSize?: number;
   /** 文字包围盒外扩留白（px）。 */
   labelPadding?: number;
+  /**
+   * 文字盒最大宽高比（盒宽/盒高，含留白，默认 4 = 4:1）：单行文字盒
+   * 超过该比例时回绕字符增加行数，取满足约束的最少行数 —— 节点物理
+   * 尺寸由文字阶梯（每行最大字符数 × 字宽 × 行数 × 行高）决定。
+   */
+  maxLabelAspect?: number;
   /** 随机初始化 / 抖动的种子，固定则结果可复现。 */
   seed?: number;
   /**

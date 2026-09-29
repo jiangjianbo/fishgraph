@@ -1,9 +1,11 @@
 /**
  * 尺寸映射策略的缺省实现（现状口径平移，矩形格）。
  *
- *  - measureBox：形状声明 ∨ 文字盒取大（文字盒按 estimateLabelBox 面积
- *    最小折行，0.75 字宽比例估算）—— 周长平局 / 行距系数 / 字体族测量
- *    为预留扩展点，接入时替换本实现或注入自定义策略；
+ *  - measureBox：有标签 = 文字阶梯盒（estimateLabelBox 宽高比约束回绕，
+ *    maxLabelAspect 默认 4:1），声明形状不参与有标签节点尺寸；无标签 =
+ *    声明形状（容器尺寸由调用侧 store.nodeBoxSize 分流保留声明口径）。
+ *    字体族测量 / 行距系数为预留扩展点，接入时替换本实现或注入自定义
+ *    策略；
  *  - grade：宽/高独立锚定聚类（gradeBoxes，容差 1.25），最小级上界即
  *    基准格；格数 = 盒 ÷ 基准格向上取整 —— 最小级元素恰好 1×1 格；
  *  - render：1 格 = 基准格（x 轴 cellW、y 轴 cellH，各向异性）；元素
@@ -24,15 +26,16 @@ export class DefaultMetricStrategy implements MetricStrategy {
   readonly name = 'default';
 
   measureBox(el: MetricElementInfo): BoxSize {
-    const he = halfExtentsOf(el.shape);
-    let w = 2 * he.hw;
-    let h = 2 * he.hh;
+    // 有标签：尺寸全由文字阶梯决定（行数 × 每行最大字符数，宽高比
+    // maxAspect 约束回绕，见 label.ts）—— 声明形状不参与有标签节点的
+    // 尺寸（只作渲染轮廓与贴合依据），任意声明尺寸不再被格化取整放大；
+    // 无标签：无文字可估，按声明形状。
     if (el.label !== null) {
-      const box = estimateLabelBox(el.label, el.font.size, el.font.padding);
-      w = Math.max(w, 2 * box.hw);
-      h = Math.max(h, 2 * box.hh);
+      const box = estimateLabelBox(el.label, el.font.size, el.font.padding, el.font.aspect);
+      return { w: 2 * box.hw, h: 2 * box.hh };
     }
-    return { w, h };
+    const he = halfExtentsOf(el.shape);
+    return { w: 2 * he.hw, h: 2 * he.hh };
   }
 
   grade(boxes: readonly BoxSize[]): GradeBasis {

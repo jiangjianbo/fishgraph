@@ -521,7 +521,13 @@ function drawView(): void {
     if (nd.w !== undefined && nd.h !== undefined) {
       const w = nd.w * cam.k;
       const h = nd.h * cam.k;
-      g.roundRect(sx - w / 2, sy - h / 2, w, h, Math.min(8, h / 4));
+      // 物化节点的轮廓跟声明 kind：circle/ellipse 画物化盒内切椭圆
+      // （布局尺寸由文字阶梯决定，与声明 r/rx/ry 无关），rect 画圆角矩形。
+      if (sh.kind === 'circle' || sh.kind === 'ellipse') {
+        g.ellipse(sx, sy, w / 2, h / 2, 0, 0, Math.PI * 2);
+      } else {
+        g.roundRect(sx - w / 2, sy - h / 2, w, h, Math.min(8, h / 4));
+      }
     } else {
       const he = halfExtentsOf(sh);
       shapePath(g, sh, sx, sy, cam.k, Math.min(8, (he.hh * 2 * cam.k) / 4));

@@ -281,6 +281,8 @@ export class GraphStore {
   private idToIndex = new Map<ElementId, number>();
   private labelFontSize = 12;
   private labelPadding = 4;
+  /** 文字盒最大宽高比（宽/高，超限回绕；LayoutOptions.maxLabelAspect）。 */
+  private maxLabelAspect = 4;
   /** 分级基准格宽（px，内存中间量 —— 存储/序列化不含 px，refreshGrades 写入）。 */
   gradeCellW = 1;
   /** 分级基准格高（px，内存中间量，可与 gradeCellW 不同 —— 矩形格）。 */
@@ -488,9 +490,10 @@ export class GraphStore {
   // ── 文字段落度量（纯数据，无力学）────────────────────────
 
   /** 设置文字度量参数并刷新全部标签包围盒。 */
-  setLabelMetrics(fontSize: number, padding: number): void {
+  setLabelMetrics(fontSize: number, padding: number, maxAspect = 4): void {
     this.labelFontSize = fontSize;
     this.labelPadding = padding;
+    this.maxLabelAspect = maxAspect;
     this.refreshLabelBoxes();
   }
 
@@ -502,7 +505,7 @@ export class GraphStore {
         e.labelHw = 0;
         e.labelHh = 0;
       } else {
-        const box = estimateLabelBox(e.label, fs, pad);
+        const box = estimateLabelBox(e.label, fs, pad, this.maxLabelAspect);
         e.labelHw = box.hw;
         e.labelHh = box.hh;
       }
@@ -528,7 +531,7 @@ export class GraphStore {
         nd.labelOutset = 0;
         continue;
       }
-      const box = estimateLabelBox(nd.label, fs, pad);
+      const box = estimateLabelBox(nd.label, fs, pad, this.maxLabelAspect);
       const outset = Math.hypot(box.hw, box.hh) + outsetFloor - nd.baseR;
       nd.labelOutset = Math.max(outset, 0);
     }
@@ -540,17 +543,21 @@ export class GraphStore {
    * 注意不含 subgraph 容器的成员包裹（容器按声明形状参与网格布局）。
    */
   nodeBoxSize(el: LayoutElement): { w: number; h: number } {
-    const measured = this.metric.measureBox?.({
-      label: el.label,
-      shape: el.shape,
-      font: { size: this.labelFontSize, padding: this.labelPadding },
-    });
+    // 容器尺寸由声明形状全权管理（成员实占包裹语义），不进文字度量钩子
+    // —— 有标签节点的度量钩子按文字阶梯定尺寸，容器若进入会被缩成文字盒。
+    const measured = el.isSubgraph
+      ? undefined
+      : this.metric.measureBox?.({
+          label: el.label,
+          shape: el.shape,
+          font: { size: this.labelFontSize, padding: this.labelPadding, aspect: this.maxLabelAspect },
+        });
     if (measured) return measured;
     const he = halfExtentsOf(el.shape);
     let w = 2 * he.hw;
     let h = 2 * he.hh;
     if (el.label !== null) {
-      const box = estimateLabelBox(el.label, this.labelFontSize, this.labelPadding);
+      const box = estimateLabelBox(el.label, this.labelFontSize, this.labelPadding, this.maxLabelAspect);
       w = Math.max(w, 2 * box.hw);
       h = Math.max(h, 2 * box.hh);
     }

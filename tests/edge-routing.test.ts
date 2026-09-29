@@ -263,16 +263,40 @@ describe('连线装配回归（分组子图）', () => {
 });
 
 describe('文字盒折行口径（demo 节点标签绘制的布局侧锚点）', () => {
-  it('4 字 CJK 按面积最小折为两行（demo 按同一 rows 回绕绘制）', () => {
-    // 布局端 measureBox 口径：fontSize 12、padding 4
+  it('宽高比约束回绕：≤8 字单行，超限折到满足约束的最少行数', () => {
+    // 布局端 measureBox 口径：fontSize 12、padding 4、maxAspect 4
+    // 单行盒 = 字数×9+8 宽 × 20 高：8 字 80/20 = 4.0 恰好满足 → 单行。
     const four = estimateLabelBox('读取输入', 12, 4);
-    expect(four.rows).toEqual(['读取', '输入']);
+    expect(four.rows).toEqual(['读取输入']); // 4 字比 2.2 ≤ 4 → 单行
     const two = estimateLabelBox('开始', 12, 4);
-    expect(two.rows).toEqual(['开始']); // 2 字天然单行
-    // 「读取输入」折行后盒更高（两行），最宽行同为 2 字 —— 节点物化按
+    expect(two.rows).toEqual(['开始']);
+    const eight = estimateLabelBox('字'.repeat(8), 12, 4);
+    expect(eight.rows).toEqual(['字字字字字字字字']); // 比 4.0 边界内
+    // 9 字单行 89/20 = 4.45 > 4 → 折 2 行（5+4），53/32 = 1.66 满足。
+    const nine = estimateLabelBox('字'.repeat(9), 12, 4);
+    expect(nine.rows).toEqual(['字字字字字', '字字字字']);
+    expect(nine.hw * 2 / (nine.hh * 2)).toBeLessThanOrEqual(4);
+    // 单行盒更宽更高（4 字单行 44×20 vs 2 字 26×20）——节点物化按
     // 此盒；绘制若不折行即出现「框窄高而文字单行」的联动缺失（已修复
-    // 的 demo 缺陷）
-    expect(four.hw).toBeCloseTo(two.hw, 9);
-    expect(four.hh).toBeGreaterThan(two.hh);
+    // 的 demo 缺陷）。
+    expect(four.hw).toBeGreaterThan(two.hw);
+    expect(four.hh).toBeCloseTo(two.hh, 9);
+  });
+
+  it('maxAspect 参数生效：收紧到 2 时 4 字也回绕为两行', () => {
+    const tight = estimateLabelBox('读取输入', 12, 4, 2);
+    // 单行 44/20 = 2.2 > 2 → 2 行 26/32 = 0.81 满足
+    expect(tight.rows).toEqual(['读取', '输入']);
+    const loose = estimateLabelBox('读取输入', 12, 4, 4);
+    expect(loose.rows).toEqual(['读取输入']);
+  });
+
+  it('兜底：全部行数超比（断点后每段仍超长）取宽高比最小的行数', () => {
+    // 20 字 + "_" + 20 字：词内部不可折断，任何行数下每段都单独成行
+    // （最短 2 行、最宽 21 字符）→ 全部行数都超比，取比值最小的 2 行。
+    const long = estimateLabelBox(`${'x'.repeat(20)}_${'x'.repeat(20)}`, 12, 4);
+    expect(long.rows).toHaveLength(2);
+    expect((long.hw * 2) / (long.hh * 2)).toBeGreaterThan(4); // 约束确实无解
+    expect(long.rows[0]).toHaveLength(21); // 段内不折断：行宽 = 段长
   });
 });

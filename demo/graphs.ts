@@ -116,6 +116,9 @@ export function randomGraph(): GraphSpec {
 }
 
 export function shapesGraph(): GraphSpec {
+  // 声明形状的尺寸参数（w/h/r）仅在未物化渲染与声明形状贴合下生效；
+  // grid-undirected 布局尺寸由文字阶梯盒决定（maxLabelAspect 回绕），
+  // kind 只决定物化轮廓画法（rect 圆角矩形 / circle·ellipse 内切椭圆）。
   return {
     nodes: [
       { id: 'req', shape: { kind: 'rect', w: 150, h: 46 }, label: '需求评审' },

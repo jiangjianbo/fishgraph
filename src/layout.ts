@@ -43,6 +43,8 @@ const DEFAULTS = {
   labelCollision: true,
   labelFontSize: 12,
   labelPadding: 4,
+  // 文字盒最大宽高比（宽/高，超限回绕取满足约束的最少行数）
+  maxLabelAspect: 4,
   // 随机种子（确定性重放）
   seed: 42,
   // 走线通道宽度（格）：相邻节点 AABB 之间的最小空行/列数
@@ -61,7 +63,7 @@ export class ForceLayout {
     this.options = { ...DEFAULTS, ...options } as ResolvedLayoutOptions;
     this.store = new GraphStore(graph);
     this.store.setMetricStrategy(createMetricStrategy(this.options.metric));
-    this.store.setLabelMetrics(this.options.labelFontSize, this.options.labelPadding);
+    this.store.setLabelMetrics(this.options.labelFontSize, this.options.labelPadding, this.options.maxLabelAspect);
     this.strategy = createStrategy(this.options.algorithm, this.store, this.options);
   }
 
@@ -132,7 +134,7 @@ export class ForceLayout {
       return;
     }
     this.options = next;
-    this.store.setLabelMetrics(next.labelFontSize, next.labelPadding);
+    this.store.setLabelMetrics(next.labelFontSize, next.labelPadding, next.maxLabelAspect);
     this.strategy.refresh(next);
   }
 
