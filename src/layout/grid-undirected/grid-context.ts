@@ -133,9 +133,9 @@ export class GridSpaceContext {
     }
   }
 
-  /** A* 正交寻路（障碍 = obstacles 栅格化；详情见 grid-route.ts）。 */
-  routeEdge(source: Point, target: Point, obstacles: Box[] = []): Point[] | null {
-    return gridRouteAStar(source, target, obstacles, this.routeOptions);
+  /** A* 正交寻路（障碍 = obstacles 栅格化；extra 为逐边附加寻路参数，如 sibling 车道折扣；详情见 grid-route.ts）。 */
+  routeEdge(source: Point, target: Point, obstacles: Box[] = [], extra: Partial<GridRouteOptions> = {}): Point[] | null {
+    return gridRouteAStar(source, target, obstacles, { ...this.routeOptions, ...extra });
   }
 
   // ── 内部 ───────────────────────────────────────────────

@@ -16,7 +16,9 @@
  *      重叠；相触即冲突：两段共用格心），簇是占位原子；
  *   4. 组内按簇（代表 = 簇内最长边）总长降序（长线相邻共存时间最长，
  *      优先挑位）从中央向外蛇形分配等差车道；偏移序列尽量以格心线为
- *      中心，整体钳入该线的可用偏移区间。
+ *      中心，整体钳入该线的可用偏移区间。存在交叉嵌套约束（端点完全
+ *      不同的两边在共用端点行/列上正交段反向延伸）时改为约束感知分配：
+ *      拓扑序（rank 优先）铺升序槽位，保证拐点嵌套、正交段不交叠。
  *
  * 可用偏移区间由障碍盒决定：盒的物理边界依格宽奇偶呈半格相位（偶数
  * 格宽盒的边界落在格心线上，奇数格宽盒的边界落在格线上），偏移必须
@@ -67,6 +69,12 @@ interface LaneUnit {
   line: number;
   /** 该边在此格线上的全部占用区间（格下标，闭区间）。 */
   intervals: Array<{ lo: number; hi: number }>;
+  /**
+   * 单位各段两端在端点行/列上的正交延伸方向（交叉嵌套约束用）：at =
+   * 端点行（垂直单位）/ 列（水平单位）格下标，dir = 所属边在该端点处
+   * 的正交段相对拐点的延伸方向（±1，沿偏移轴）。
+   */
+  ends: Array<{ at: number; dir: number }>;
   /** 分配结果：沿段法向的车道偏移（格单位，物理化时 × 格距）。 */
   offset: number;
 }
@@ -164,10 +172,21 @@ export function assignLanes(
       const hi = vertical ? Math.max(a.y, b.y) : Math.max(a.x, b.x);
       let unit = units.find((u) => u.edge === ei && u.vertical === vertical && u.line === line);
       if (!unit) {
-        unit = { edge: ei, vertical, line, intervals: [], offset: 0 };
+        unit = { edge: ei, vertical, line, intervals: [], ends: [], offset: 0 };
         units.push(unit);
       }
       unit.intervals.push({ lo, hi });
+      // 端点行/列上的正交延伸方向：段起点处的正交段向 corners[i-1] 侧
+      // 延伸、段终点处向 corners[i+2] 侧延伸（相邻段必转轴，已登记段
+      // 的同轴邻接情形均在端口延伸段跳检中排除）。
+      unit.ends.push(
+        vertical
+          ? { at: a.y, dir: Math.sign(corners[i - 1]!.x - a.x) }
+          : { at: a.x, dir: Math.sign(corners[i - 1]!.y - a.y) },
+        vertical
+          ? { at: b.y, dir: Math.sign(corners[i + 2]!.x - b.x) }
+          : { at: b.x, dir: Math.sign(corners[i + 2]!.y - b.y) },
+      );
       refs[i] = unit;
     }
     segUnits.push(refs);
@@ -315,12 +334,76 @@ export function assignLanes(
     const ranked = [...members].sort(
       (a, b) => clusterLen(b) - clusterLen(a) || clusterMinEdge(a) - clusterMinEdge(b),
     );
-    ranked.forEach((cl, rank) => {
-      const off = shift + base[kOrder[rank]!]!;
-      cl.forEach((u) => {
-        u.offset = off;
+    // 交叉嵌套约束（端点完全不同的边任何部分不得重叠）：同线两簇（所属
+    // 边无共享端点）在共用端点行/列上各有一段反向延伸的正交段（一条向
+    // +偏移轴、另一条向 −）时，两拐点必须嵌套 —— 向 + 延伸者的车道槽位
+    // 必须大于向 − 延伸者，否则两条正交段在共用行/列线上交叠（槽位差
+    // = 组内间距，即规则要求的最小空隙）。共享端点的边（sibling/bundle）
+    // 允许共线共用，不参与约束。
+    const predOf = new Map<LaneUnit[], Set<LaneUnit[]>>();
+    const linkBefore = (a: LaneUnit[], b: LaneUnit[]): void => {
+      const set = predOf.get(b);
+      if (set) set.add(a);
+      else predOf.set(b, new Set([a]));
+    };
+    for (let i = 0; i < members.length; i++) {
+      for (let j = i + 1; j < members.length; j++) {
+        for (const u of members[i]!) {
+          for (const v of members[j]!) {
+            if (edgeRelation(routes[u.edge]!, routes[v.edge]!) !== 'other') continue;
+            for (const eu of u.ends) {
+              for (const ev of v.ends) {
+                if (eu.at !== ev.at) continue;
+                if (eu.dir === 1 && ev.dir === -1) linkBefore(members[j]!, members[i]!);
+                else if (eu.dir === -1 && ev.dir === 1) linkBefore(members[i]!, members[j]!);
+              }
+            }
+          }
+        }
+      }
+    }
+    if (predOf.size === 0) {
+      ranked.forEach((cl, rank) => {
+        const off = shift + base[kOrder[rank]!]!;
+        cl.forEach((u) => {
+          u.offset = off;
+        });
       });
-    });
+    } else {
+      // 约束感知分配：rank 优先的拓扑序 → 升序槽位（base 随 k 升序）；
+      // 约束成环时按 rank 序破开（兜底，保证确定性终止）。
+      const order: LaneUnit[][] = [];
+      const remaining = new Set(members);
+      while (remaining.size > 0) {
+        let pick: LaneUnit[] | null = null;
+        for (const cl of ranked) {
+          if (!remaining.has(cl)) continue;
+          const preds = predOf.get(cl);
+          let blocked = false;
+          if (preds) {
+            for (const p of preds) {
+              if (remaining.has(p)) {
+                blocked = true;
+                break;
+              }
+            }
+          }
+          if (!blocked) {
+            pick = cl;
+            break;
+          }
+        }
+        if (!pick) pick = ranked.find((cl) => remaining.has(cl))!;
+        order.push(pick);
+        remaining.delete(pick);
+      }
+      order.forEach((cl, k) => {
+        const off = shift + base[k]!;
+        cl.forEach((u) => {
+          u.offset = off;
+        });
+      });
+    }
   }
 
   // 写回段偏移：只有存在非零偏移的边才设置（无偏移边走现状物理化路径）。

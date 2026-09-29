@@ -23,6 +23,7 @@ import {
   OrthogonalPolylinePathStrategy,
   PlainCrossingStrategy,
   SharpCornerStrategy,
+  dominantSide,
 } from '../src/index.js';
 import type { EdgePath, GraphSpec, Vec2 } from '../src/index.js';
 import { estimateLabelBox } from '../src/label.js';
@@ -227,6 +228,79 @@ describe('连线装配回归（树 21 节点）', () => {
       pts[pts.length - 2]!.y - pts[pts.length - 3]!.y,
     );
     expect(prev).toBeGreaterThanOrEqual(ARROW_SIZE);
+  });
+
+  it('全边末段沿端口法向（端点垂直，回归：曾沿盒边切进端口成椭圆切线）', () => {
+    for (let i = 0; i < evs.length; i++) {
+      const s = views[evs[i]!.sourceIndex]!;
+      const t = views[evs[i]!.targetIndex]!;
+      const pts = ptsOfEdge(i);
+      const a = pts[pts.length - 2]!;
+      const b = pts[pts.length - 1]!;
+      // 端口侧 = 目标端「指向对端」的主导轴（与端口策略同一 dominantSide 口径）；
+      // 左右侧端口 → 末段水平，上下侧端口 → 末段垂直。
+      const horizontal = ((side) => side === 'right' || side === 'left')(
+        dominantSide(s.x! - t.x!, s.y! - t.y!),
+      );
+      const label = `${idOf(evs[i]!.sourceIndex)}->${idOf(evs[i]!.targetIndex)} 末段 (${a.x.toFixed(1)},${a.y.toFixed(1)})→(${b.x.toFixed(1)},${b.y.toFixed(1)})`;
+      if (horizontal) {
+        expect(Math.abs(b.y - a.y), `${label} 应垂直于左右侧端口`).toBeLessThan(1e-9);
+        expect(Math.abs(b.x - a.x), `${label} 末段退化为 0 长`).toBeGreaterThan(1e-9);
+      } else {
+        expect(Math.abs(b.x - a.x), `${label} 应垂直于上下侧端口`).toBeLessThan(1e-9);
+        expect(Math.abs(b.y - a.y), `${label} 末段退化为 0 长`).toBeGreaterThan(1e-9);
+      }
+    }
+  });
+
+  it('走线段不与任何节点盒边线共线重叠（车道贴盒回归：偶数格盒物理越界切线）', () => {
+    const eps = 1e-6;
+    for (let i = 0; i < evs.length; i++) {
+      const pts = ptsOfEdge(i);
+      const label = `${idOf(evs[i]!.sourceIndex)}->${idOf(evs[i]!.targetIndex)}`;
+      for (let k = 1; k < pts.length; k++) {
+        const p1 = pts[k - 1]!;
+        const p2 = pts[k]!;
+        for (const t of views) {
+          const b = { minX: t.x! - t.w! / 2, maxX: t.x! + t.w! / 2, minY: t.y! - t.h! / 2, maxY: t.y! + t.h! / 2 };
+          // 水平段与盒上/下边线共线，且 x 区间与盒 x 区间有正长度重叠
+          let tangent = false;
+          if (Math.abs(p1.y - p2.y) < eps) {
+            const lo = Math.min(p1.x, p2.x);
+            const hi = Math.max(p1.x, p2.x);
+            tangent =
+              (Math.abs(p1.y - b.minY) < eps || Math.abs(p1.y - b.maxY) < eps) &&
+              lo < b.maxX - eps && b.minX + eps < hi;
+          }
+          // 垂直段与盒左/右边线共线，且 y 区间与盒 y 区间有正长度重叠
+          if (!tangent && Math.abs(p1.x - p2.x) < eps) {
+            const lo = Math.min(p1.y, p2.y);
+            const hi = Math.max(p1.y, p2.y);
+            tangent =
+              (Math.abs(p1.x - b.minX) < eps || Math.abs(p1.x - b.maxX) < eps) &&
+              lo < b.maxY - eps && b.minY + eps < hi;
+          }
+          expect(tangent, `${label} 段${k - 1} 与节点 ${String(t.id)} 盒边线共线重叠（贴边）`).toBe(false);
+        }
+      }
+    }
+  });
+
+  it('同端点同向 sibling 共线优先：b3→l3-0 与 l3-1/l3-2 共用干线拐点（回归：曾提前拐离干线）', () => {
+    // 折线第 2 点 = 离开源端口后的首个拐点（分岔点）：三条左出 sibling
+    // 边的分岔点应同 x —— 干线从端口延伸到通道中央车道后才各自分岔。
+    const branchX = (sid: string, tid: string) => {
+      const i = indexOf(sid, tid);
+      expect(i, `${sid}->${tid} 存在`).toBeGreaterThanOrEqual(0);
+      const pts = ptsOfEdge(i);
+      expect(pts.length, `${sid}->${tid} 有分岔点`).toBeGreaterThan(2);
+      // 分岔点在源端口的行线上（干线与端口侧同轴）
+      expect(pts[1]!.y, `${sid}->${tid} 干线沿端口行`).toBe(pts[0]!.y);
+      return pts[1]!.x;
+    };
+    const trunk = branchX('b3', 'l3-1');
+    expect(branchX('b3', 'l3-0'), 'b3→l3-0 与 sibling 共用干线拐点').toBe(trunk);
+    expect(branchX('b3', 'l3-2'), 'b3→l3-2 与 sibling 共用干线拐点').toBe(trunk);
   });
 });
 

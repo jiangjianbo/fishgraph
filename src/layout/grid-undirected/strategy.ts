@@ -18,8 +18,11 @@
  *    → 走廊插入（阶段 6：ensureCorridor）→ 通道压实（阶段 7：compact，
  *    相邻行列空隙统一到 channelMargin 走线走廊）→ 行列居中对齐（阶段
  *    7.5：alignCenters，同带元素中心共线）；
- *  - 阶段 8 用 GridSpaceContext.routeEdge（A* 正交寻路 + 拐点惩罚）在
- *    逻辑格上走线；物理化与可渲染图装配委托尺寸映射策略
+ *  - 阶段 8 用 GridSpaceContext.routeEdge（A* 正交寻路 + 拐点/贴边惩罚，
+ *    贴边 = 车道线与偶数格盒物理越界边重合，等价路径优先走通道中央）
+ *    在逻辑格上走线，随后做二轮同端点同向共线对齐：共享端点且端口同侧
+ *    的 sibling 边以首轮骨架线为参照带车道折扣重寻路，同向边尽量延长
+ *    共用干线（共线距离越长越好）；物理化与可渲染图装配委托尺寸映射策略
  *    （LayoutOptions.metric，缺省 DefaultMetricStrategy：1 格 = 矩形
  *    基准格，x 轴 cellW、y 轴 cellH）；
  *  - 阶段 8.5 用 lane.ts 的 assignLanes 做通道车道分配：同通道平行
@@ -49,6 +52,7 @@ import type { GraphStore } from '../../graph/store.js';
 import { isSubgraphNode } from '../../graph/store.js';
 import type { Box, Point } from './space-types.js';
 import { GridSpaceContext } from './grid-context.js';
+import type { LaneBonus } from './grid-route.js';
 import { dominantSide } from '../../edge/ports.js';
 import { registerStrategy } from '../strategy.js';
 import type { LayoutStrategy, ResolvedLayoutOptions } from '../strategy.js';
@@ -76,6 +80,83 @@ import {
 const DEFAULT_CHANNEL_MARGIN = 1;
 /** 默认链折叠的最小长度：低于该长度的链不折叠。 */
 const DEFAULT_FOLD_CHAIN_MIN = 3;
+/**
+ * 同向 sibling 车道折扣（每步，格）：4 步共线 ≈ 省 1 步长、5 步 ≈ 省
+ * 1 拐点 —— 只在代价相当的路径间向共用干线倾斜（共线距离越长越好），
+ * 纯绕远路径永远无法凭折扣胜出。引擎侧钳到 ≤ 0.5（保单位步长为正、
+ * 启发可采纳）。
+ */
+const SIBLING_LANE_DISCOUNT = 0.25;
+
+/** 骨架在共线参照中登记的格线集合（垂直段 → 列、水平段 → 行）。 */
+interface RouteLineSets {
+  cols: Set<number>;
+  rows: Set<number>;
+}
+
+/**
+ * 路由骨架占用的格线集合（含锚点→端点外的首末步 —— 干线从端口算起）。
+ * exact 斜向降级直线（中心格不共线）无正交线可登记，返回空集。
+ */
+function routeLineSets(route: LayoutRoute): RouteLineSets {
+  const sets: RouteLineSets = { cols: new Set(), rows: new Set() };
+  for (let i = 1; i < route.cells.length; i++) {
+    const a = route.cells[i - 1]!;
+    const b = route.cells[i]!;
+    if (a.x === b.x) sets.cols.add(a.x);
+    else if (a.y === b.y) sets.rows.add(a.y);
+  }
+  return sets;
+}
+
+/**
+ * 每条边两端的分组键 =「端点下标 : 该端端口主导侧」（与端口锚点同一
+ * dominantSide 口径）—— 共享端点且同侧的边即同端点同方向的 sibling。
+ */
+function endSideKeys(
+  edges: ReadonlyArray<{ sourceIndex: number; targetIndex: number }>,
+  centers: ReadonlyArray<Point>,
+): Array<[string, string]> {
+  return edges.map((e) => {
+    const s = centers[e.sourceIndex]!;
+    const t = centers[e.targetIndex]!;
+    return [
+      `${e.sourceIndex}:${dominantSide(t.x - s.x, t.y - s.y)}`,
+      `${e.targetIndex}:${dominantSide(s.x - t.x, s.y - t.y)}`,
+    ] as [string, string];
+  });
+}
+
+/**
+ * ei 的共线参照：同组 sibling（共享任一键）首轮骨架线的格线并集
+ * （排除自身）。无 sibling 或 sibling 无正交线时返回 null（不重寻路）。
+ */
+function siblingLaneBonus(
+  ei: number,
+  keys: ReadonlyArray<[string, string]>,
+  routes: ReadonlyArray<LayoutRoute>,
+): LaneBonus | null {
+  const lineSets = new Map<number, RouteLineSets>();
+  const collect = (j: number): RouteLineSets => {
+    const cached = lineSets.get(j);
+    if (cached) return cached;
+    const sets = routeLineSets(routes[j]!);
+    lineSets.set(j, sets);
+    return sets;
+  };
+  const cols = new Set<number>();
+  const rows = new Set<number>();
+  for (const key of keys[ei]!) {
+    for (let j = 0; j < keys.length; j++) {
+      if (j === ei) continue;
+      if (keys[j]![0] !== key && keys[j]![1] !== key) continue;
+      const sets = collect(j);
+      sets.cols.forEach((c) => cols.add(c));
+      sets.rows.forEach((r) => rows.add(r));
+    }
+  }
+  return cols.size > 0 || rows.size > 0 ? { cols, rows, rate: SIBLING_LANE_DISCOUNT } : null;
+}
 
 /** 作用域布局产物：视图项 AABB（相对坐标）+ 包裹尺寸（格）。 */
 interface ScopeLayout {
@@ -538,7 +619,8 @@ export class GridUndirectedStrategy implements LayoutStrategy {
     // 障碍 = 全部非容器节点 AABB（含两端自身：A* 端点在盒外一格，首末段
     // 因此必然沿端口法向穿出/进入，不会折回节点内部）。
     const obstacles = boxes.filter((_, i) => !isSubgraphNode(elements[i]!));
-    return this.store.edges.map((e) => {
+    const routeOne = (ei: number, laneBonus?: LaneBonus): LayoutRoute => {
+      const e = this.store.edges[ei]!;
       const sa = portAnchor(e.sourceIndex, centers[e.targetIndex]!);
       const ta = portAnchor(e.targetIndex, centers[e.sourceIndex]!);
       // A* 端点 = 锚点沿外法向外移一格（盒外）：骨架首末步强制沿端口
@@ -546,7 +628,7 @@ export class GridUndirectedStrategy implements LayoutStrategy {
       // —— 消除"从侧面进入锚点格导致端口跑到另一侧 + 缝合碎拐"。
       const startOut = { x: sa.point.x + sa.normal.x, y: sa.point.y + sa.normal.y };
       const goalOut = { x: ta.point.x + ta.normal.x, y: ta.point.y + ta.normal.y };
-      const path = ctx.routeEdge(startOut, goalOut, obstacles);
+      const path = ctx.routeEdge(startOut, goalOut, obstacles, laneBonus ? { laneBonus } : {});
       if (path) {
         // 正对位直线升级：两锚点同列/同行且 A* 解为无拐点直线（通道畅通
         // 由 A* 自证）时，改走经两端端口边界中点的精确直线 —— 偶数格尺寸
@@ -612,6 +694,17 @@ export class GridUndirectedStrategy implements LayoutStrategy {
           { x: b.x + Math.floor(b.width / 2) + 0.5, y: b.y + Math.floor(b.height / 2) + 0.5 },
         ],
       };
+    };
+    // 首轮：逐边独立最优（步长 + 拐点 + 贴边）。
+    const routes = this.store.edges.map((_, ei) => routeOne(ei));
+    // 二轮（同端点同向共线优先）：共享端点且端口同侧的 sibling 边以首轮
+    // 骨架线为共线参照重寻路 —— 同向边尽量延长共用干线（共线距离越长
+    // 越好）。折扣小于单位步长，纯绕远永远不胜出，只在代价相当的路径间
+    // 倾斜；exact 直线（正对位升级 / 降级兜底）不重寻路，其骨架线仍作
+    // 为参照输出。
+    return this.store.edges.map((_, ei) => {
+      const bonus = siblingLaneBonus(ei, endSideKeys(this.store.edges, centers), routes);
+      return !bonus || routes[ei]!.exact ? routes[ei]! : routeOne(ei, bonus);
     });
   }
 

@@ -420,6 +420,53 @@ describe('assignLanes（车道分配单元）', () => {
       { x: 4, y: 2 },
     ]);
   });
+
+  it('交叉嵌套约束：端点完全不同的两边共用拐点行/列时，向 + 延伸者得更大槽位（正交段不交叠）', () => {
+    // 树 21 图 root→b2 与 b0→l0-2 的缩影：两边骨架都必经拐点格 (14,6)
+    // （b0 的出口格 / root→b2 的转折行），共用列线 x=14。a 在拐点处向
+    // +x 延伸（转右进 b2 端口），b 从 −x 侧到达（b0 出口向右）—— 若 a
+    // 的槽位小于 b，两端正交段在共用行线上交叠（回归：曾重叠半格）。
+    // 约束感知分配：b（向 − 延伸）取小槽位、a（向 + 延伸）取大槽位，
+    // 槽位差 = 组内间距 = 最小空隙。
+    // cells 与生产 routeInCells 输出同构（A* 压缩拐点 + 两端锚点）——
+    // 路由长度（cells.length - 1）同为 4：蛇形排序平局按边序 a 优先、
+    // 取小槽位，正是回归的交叉场景。
+    const a: LayoutRoute = {
+      source: 0,
+      target: 1,
+      cells: [
+        { x: 13, y: 4 },
+        { x: 14, y: 4 },
+        { x: 14, y: 6 },
+        { x: 16, y: 6 },
+        { x: 17, y: 6 },
+      ],
+    };
+    const b: LayoutRoute = {
+      source: 2,
+      target: 3,
+      cells: [
+        { x: 13, y: 6 },
+        { x: 14, y: 6 },
+        { x: 14, y: 10 },
+        { x: 15, y: 10 },
+        { x: 16, y: 10 },
+      ],
+    };
+    const boxes: Box[] = [
+      { x: 12, y: 4, width: 2, height: 1 }, // root（偶宽，端点盒约束抬升可用区下界）
+      { x: 17, y: 6, width: 1, height: 1 }, // b2
+      { x: 13, y: 6, width: 1, height: 1 }, // b0
+      { x: 16, y: 10, width: 2, height: 1 }, // l0-2
+    ];
+    assignLanes([a, b], 1, boxes, new Set([0, 1, 2, 3]));
+    expect(a.laneOffsets).toBeDefined();
+    expect(b.laneOffsets).toBeDefined();
+    const offA = Math.max(...a.laneOffsets!);
+    const offB = Math.max(...b.laneOffsets!);
+    expect(offA, 'a（向 + 延伸）槽位应大于 b（向 − 延伸）').toBeGreaterThan(offB);
+    expect(offA - offB, '槽位差 = 组内间距（最小空隙）').toBeCloseTo(0.5, 9);
+  });
 });
 
 describe('终点贴边段保障（enforceEndStub 经公开路径行为）', () => {

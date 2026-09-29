@@ -15,6 +15,7 @@ import {
   FixedPortStrategy,
   ForceLayout,
   NoneEndCapStrategy,
+  OrthogonalPolylinePathStrategy,
   PlainCrossingStrategy,
   SharpCornerStrategy,
   StraightLinePathStrategy,
@@ -212,4 +213,73 @@ describe('star 直线模式渲染层（R6 修复回归哨兵）', () => {
         expect(Math.max(pa1!, pb1!) < Math.min(pa2!, pb2!) - 1e-9, `直线线段重合：${names}`).toBe(false);
       }
   });
+});
+
+describe('端点完全不同的折线无重叠（通道走线交叉不留隙即违规）', () => {
+  const eps = 1e-6;
+  /** 渲染折线的正交段（demo 默认风格：正交折线 + 固定四点 + AABB 贴合）。 */
+  function orthoSegs(geo: { path: EdgePath }): Array<{ axis: 'h' | 'v'; fixed: number; lo: number; hi: number }> {
+    const pts: Vec2[] = [geo.path.start];
+    for (const seg of geo.path.segments) if (seg.kind === 'line') pts.push(seg.to);
+    const out: Array<{ axis: 'h' | 'v'; fixed: number; lo: number; hi: number }> = [];
+    for (let k = 1; k < pts.length; k++) {
+      const a = pts[k - 1]!;
+      const b = pts[k]!;
+      if (Math.abs(a.y - b.y) < eps) out.push({ axis: 'h', fixed: a.y, lo: Math.min(a.x, b.x), hi: Math.max(a.x, b.x) });
+      else if (Math.abs(a.x - b.x) < eps) out.push({ axis: 'v', fixed: a.x, lo: Math.min(a.y, b.y), hi: Math.max(a.y, b.y) });
+    }
+    return out;
+  }
+
+  for (const name of Object.keys(GRAPHS)) {
+    if (name === 'random') continue; // 用户口径：random 80 不进单测
+    // 已知残留（另立待办，不在本不变量内）：
+    //  - mixed：K4 紧凑团组两条对角线共用列且可用偏移区间塌缩——通道
+    //    容量不足的兜底范畴（doc §4.6「高密度区域扩廊/最小线距」待办）；
+    //  - flow：work→done 与 check→retry 路由拓扑互锁（四个端口把两行
+    //    全部钉死，任何车道序都有一行交叠）——需跨边感知重路由。
+    if (name === 'mixed' || name === 'flow') continue;
+    it(`${name}: 端点完全不同的边，任何段不正长度重叠、同线不同段留有空隙`, () => {
+      const { views, layout } = run(name);
+      const geos = new EdgeStyleRenderer({
+        source: { ports: new FixedPortStrategy(), fit: new AabbEndpointFitStrategy(), cap: new NoneEndCapStrategy() },
+        target: { ports: new FixedPortStrategy(), fit: new AabbEndpointFitStrategy(), cap: new NoneEndCapStrategy() },
+        path: new OrthogonalPolylinePathStrategy(),
+        corners: new SharpCornerStrategy(),
+        crossings: new PlainCrossingStrategy(),
+      }).render({ nodeViews: [...layout.nodeViews], subgraphViews: [...layout.subgraphViews], edgeViews: [...layout.edgeViews] });
+      const segs = [...layout.edgeViews].map((e, i) => ({
+        si: e.sourceIndex as number,
+        ti: e.targetIndex as number,
+        name: `${String(views[e.sourceIndex]?.id)}->${String(views[e.targetIndex]?.id)}`,
+        segs: orthoSegs(geos[i]!),
+      }));
+      for (let a = 0; a < segs.length; a++) {
+        for (let b = a + 1; b < segs.length; b++) {
+          const A = segs[a]!;
+          const B = segs[b]!;
+          // 端点完全不同（无共享端点）才约束；容器虚拟边跳过
+          if (A.si === B.si || A.si === B.ti || A.ti === B.si || A.ti === B.ti) continue;
+          if (!views[A.si] || !views[A.ti] || !views[B.si] || !views[B.ti]) continue;
+          for (const sa of A.segs) {
+            for (const sb of B.segs) {
+              if (sa.axis !== sb.axis || Math.abs(sa.fixed - sb.fixed) > eps) continue;
+              const lo = Math.max(sa.lo, sb.lo);
+              const hi = Math.min(sa.hi, sb.hi);
+              const overlap = hi - lo;
+              const axis = sa.axis === 'h' ? 'y' : 'x';
+              expect(
+                overlap > eps,
+                `${name}: ${A.name} 与 ${B.name} 在 ${axis}=${sa.fixed.toFixed(1)} 上正长度重叠 [${lo.toFixed(1)}, ${hi.toFixed(1)}]`,
+              ).toBe(false);
+              expect(
+                overlap > -eps,
+                `${name}: ${A.name} 与 ${B.name} 在 ${axis}=${sa.fixed.toFixed(1)} 上零间距相触 @ ${lo.toFixed(1)}（同线不同段须留空隙）`,
+              ).toBe(false);
+            }
+          }
+        }
+      }
+    });
+  }
 });
