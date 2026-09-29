@@ -6,7 +6,8 @@
  * 中运行（世界坐标由尺寸映射策略物理化，渲染端自由缩放）：
  *   [质点拓扑粗布局] → [节点中心对称膨胀物化为 AABB] → [膨胀后调整
  *   （消压线）] → [行列整理（扫描合并 → 走廊插入 → 通道压实 → 行列
- *   居中对齐）] → [网格 A* 避障走线] → [映射策略：格解 → 可渲染图]
+ *   居中对齐）] → [网格 A* 避障走线] → [通道车道分配] → [映射策略：
+ *   格解 → 可渲染图]
  *  - 阶段 2 用 coarse.ts 的质点网格放置（波纹连通生长 + 死锁插行列）。
  *    direction = 'none'（默认）用无向放置美学（张力 − 环周长 + 环内方位
  *    分类 + 扫描序平局）；'TB'/'LR' 用有向层级放置（解环 + 最长路径
@@ -21,6 +22,11 @@
  *    逻辑格上走线；物理化与可渲染图装配委托尺寸映射策略
  *    （LayoutOptions.metric，缺省 DefaultMetricStrategy：1 格 = 矩形
  *    基准格，x 轴 cellW、y 轴 cellH）；
+ *  - 阶段 8.5 用 lane.ts 的 assignLanes 做通道车道分配：同通道平行
+ *    走线按冲突组等距分流（端点关系定共用——共享一端的边聚簇共用路
+ *    径、两端相同的边与无关边错开；长线优先居中、同边同通道位置固定、
+ *    障碍感知不穿盒），骨架拓扑不变，偏移由物理化换算为拐点处车道线
+ *    交点；
  *  - 节点位置一旦物化不再被走线反向推开（连线不占空间，走线只在
  *    自由通道格中流转）。
  *
@@ -35,7 +41,8 @@
  * （coordinateSystem）不适用——网格解本身就是格点。
  *
  * 第一期边界（后续工作）：连线文字不占格（虚拟文本节点待第二期）；
- * subgraph 容器按声明形状参与网格；平行走线的通道内等距分布待做。
+ * subgraph 容器按声明形状参与网格；通道容量不足（n 条线挤不足宽的
+ * 通道）时的最小线距 + 扩廊待做（现按可用物理空间等差铺满兜底）。
  */
 
 import type { GraphStore } from '../../graph/store.js';
@@ -51,6 +58,7 @@ import type { GridPos, ProjectionAnchor } from './coarse.js';
 import { computeLevels } from './levels.js';
 import { directedHeuristics } from './directed-placement.js';
 import { ExpansionGrid, deflectEdgeCrossings } from './expansion.js';
+import { assignLanes } from './lane.js';
 import type { LayoutRoute, RenderGraph } from '../metric/types.js';
 import {
   buildFoldPlan,
@@ -459,6 +467,15 @@ export class GridUndirectedStrategy implements LayoutStrategy {
     const elements = this.store.elements;
     const basis = { cellW: this.store.gradeCellW, cellH: this.store.gradeCellH };
     const routes = this.routeInCells(boxes);
+    // 阶段 8.5：通道车道分配 —— 同通道平行走线等距分流（端点关系定
+    // 共用：共享一端的边聚簇共用路径，bundle 与无关边错开；长线优先
+    // 居中）。骨架拓扑不变，偏移由物理化换算为拐点处车道线交点；障碍
+    // 口径与 A* 走线一致（容器不构成走线障碍）。
+    const obstacleIdx = new Set<number>();
+    boxes.forEach((_, i) => {
+      if (!isSubgraphNode(elements[i]!)) obstacleIdx.add(i);
+    });
+    assignLanes(routes, this.marginCells, boxes, obstacleIdx);
     const graph = this.store.metricStrategy.render({ boxes, routes, containerPaddings }, basis);
     for (let i = 0; i < elements.length; i++) {
       const el = elements[i]!;

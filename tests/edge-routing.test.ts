@@ -15,6 +15,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   AabbEndpointFitStrategy,
+  ArrowEndCapStrategy,
   EdgeStyleRenderer,
   FixedPortStrategy,
   ForceLayout,
@@ -79,7 +80,8 @@ function groupsGraph(): GraphSpec {
 const mkRenderer = () =>
   new EdgeStyleRenderer({
     source: { ports: new FixedPortStrategy(), fit: new AabbEndpointFitStrategy(), cap: new NoneEndCapStrategy() },
-    target: { ports: new FixedPortStrategy(), fit: new AabbEndpointFitStrategy(), cap: new NoneEndCapStrategy() },
+    // 终点箭头与「尾巴 ≥ 箭头长」断言语义一致（minStub 随箭头 tipLength 生效）
+    target: { ports: new FixedPortStrategy(), fit: new AabbEndpointFitStrategy(), cap: new ArrowEndCapStrategy() },
     path: new OrthogonalPolylinePathStrategy(),
     corners: new SharpCornerStrategy(),
     crossings: new PlainCrossingStrategy(),

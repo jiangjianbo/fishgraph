@@ -15,6 +15,7 @@
 import { estimateLabelBox } from '../../label.js';
 import { halfExtentsOf } from '../../geometry.js';
 import { gradeBoxes, type BoxSize, type GradeBasis } from '../grade.js';
+import { compressCorners } from '../grid-undirected/lane.js';
 import { registerMetricStrategy } from './registry.js';
 import type { Box } from '../grid-undirected/space-types.js';
 import type { GridCellMetric, LayoutSolution, MetricElementInfo, MetricStrategy, RenderGraph } from './types.js';
@@ -67,11 +68,32 @@ export class DefaultMetricStrategy implements MetricStrategy {
       x: (p.x + 0.5) * cellW + ox,
       y: (p.y + 0.5) * cellH + oy,
     });
-    const edges = solution.routes.map((r) => ({
-      source: r.source,
-      target: r.target,
-      waypoints: r.exact ? [toPhys(r.exact[0]), toPhys(r.exact[1])] : r.cells.map(toCellCenter),
-    }));
+    const edges = solution.routes.map((r) => {
+      if (r.exact) return { source: r.source, target: r.target, waypoints: [toPhys(r.exact[0]), toPhys(r.exact[1])] };
+      if (!r.laneOffsets) return { source: r.source, target: r.target, waypoints: r.cells.map(toCellCenter) };
+      // 车道偏移边：拐点 = 相邻段车道线的交点 —— 垂直段固定
+      // x′ = 格心 + δx、水平段固定 y′ = 格心 + δy，交点保持正交，
+      // 首末段偏移恒 0（端口格心不变，贴边段垂直）。
+      const corners = compressCorners(r.cells);
+      const offs = r.laneOffsets;
+      const pts = [toCellCenter(corners[0]!)];
+      for (let j = 1; j + 1 < corners.length; j++) {
+        const prevV = corners[j - 1]!.x === corners[j]!.x;
+        pts.push(
+          prevV
+            ? {
+                x: (corners[j - 1]!.x + 0.5 + offs[j - 1]!) * cellW + ox,
+                y: (corners[j]!.y + 0.5 + offs[j]!) * cellH + oy,
+              }
+            : {
+                x: (corners[j]!.x + 0.5 + offs[j]!) * cellW + ox,
+                y: (corners[j - 1]!.y + 0.5 + offs[j - 1]!) * cellH + oy,
+              },
+        );
+      }
+      pts.push(toCellCenter(corners[corners.length - 1]!));
+      return { source: r.source, target: r.target, waypoints: pts };
+    });
     const containerShapes = solution.containerPaddings.map((pad, i) =>
       pad === null
         ? null

@@ -12,6 +12,7 @@ import type { EdgePath, EndCapDecoration, EndCapStrategy } from './types.js';
 /** 无端帽：起终点无任何装饰。 */
 export class NoneEndCapStrategy implements EndCapStrategy {
   readonly name = 'none';
+  readonly tipLength = 0;
 
   decorate(_tip: Vec2, _dx: number, _dy: number, _at: 'source' | 'target'): EndCapDecoration {
     return {};
@@ -21,11 +22,14 @@ export class NoneEndCapStrategy implements EndCapStrategy {
 /** 实心三角箭头（尺寸 = 沿切向的长度，半张角固定 0.4rad ≈ 23°）。 */
 export class ArrowEndCapStrategy implements EndCapStrategy {
   readonly name = 'arrow';
+  readonly tipLength: number;
 
   constructor(
     /** 箭头沿切向的长度（布局坐标，默认 8）。 */
     private size = 8,
-  ) {}
+  ) {
+    this.tipLength = size;
+  }
 
   decorate(tip: Vec2, dx: number, dy: number, _at: 'source' | 'target'): EndCapDecoration {
     const base = { x: tip.x - dx * this.size, y: tip.y - dy * this.size };
@@ -49,11 +53,14 @@ export class ArrowEndCapStrategy implements EndCapStrategy {
 /** 开放式箭头（V 形两笔，不闭合不填充）。 */
 export class OpenEndCapStrategy implements EndCapStrategy {
   readonly name = 'open';
+  readonly tipLength: number;
 
   constructor(
     /** V 形沿切向的深度（布局坐标，默认 7）。 */
     private size = 7,
-  ) {}
+  ) {
+    this.tipLength = size;
+  }
 
   decorate(tip: Vec2, dx: number, dy: number, _at: 'source' | 'target'): EndCapDecoration {
     const nx = -dy;
@@ -79,11 +86,15 @@ export class OpenEndCapStrategy implements EndCapStrategy {
  */
 export class DotEndCapStrategy implements EndCapStrategy {
   readonly name = 'dot';
+  readonly tipLength: number;
 
   constructor(
     /** 圆点半径（布局坐标，默认 3）。 */
     private radius = 3,
-  ) {}
+  ) {
+    // 圆点装饰不占线体（偏移到端点外侧），按半径保守约束贴边段。
+    this.tipLength = radius;
+  }
 
   decorate(tip: Vec2, dx: number, dy: number, _at: 'source' | 'target'): EndCapDecoration {
     return {

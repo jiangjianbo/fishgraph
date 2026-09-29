@@ -99,6 +99,9 @@ export class EdgeStyleRenderer {
         targetBox: b,
         waypoints: e.waypoints ?? [],
         bundle: bundles[i]!,
+        // 终点贴边段下限 = 两端端帽占线的最大值（路径策略保证贴边
+        // 末段不短于它，端帽之下保有完整线体尾巴）。
+        minStub: Math.max(this.options.source.cap.tipLength, this.options.target.cap.tipLength),
       });
       const shaped = this.options.crossings.apply(this.options.corners.apply(base), drawn);
       drawn.push(shaped);

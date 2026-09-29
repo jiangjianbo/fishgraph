@@ -89,6 +89,8 @@ export interface EndCapDecoration {
  */
 export interface EndCapStrategy {
   readonly name: string;
+  /** 端帽沿切向占用的线体长度（路径策略据此保证贴边末段不短于它）。 */
+  readonly tipLength: number;
   decorate(tip: Vec2, dx: number, dy: number, at: 'source' | 'target'): EndCapDecoration;
 }
 
@@ -123,6 +125,12 @@ export interface EdgeRouteContext {
    * count = 1 表示无平行伙伴。
    */
   bundle: { slot: number; count: number };
+  /**
+   * 终点贴边段的最小长度约束（两端端帽沿切向占用的最大线长；装配器
+   * 传入，缺省 0）。路径策略保证终点贴边段不短于该值 —— 端帽之下
+   * 保有完整的线体尾巴（终点垂直段 ≥ 箭头长度）。
+   */
+  minStub?: number;
 }
 
 /**

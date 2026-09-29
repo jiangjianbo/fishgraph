@@ -98,6 +98,7 @@ export class OrthogonalPolylinePathStrategy implements PathStrategy {
     appendApproach(pts, entry, target, target.nx, target.ny);
     pushPoint(pts, { x: target.x, y: target.y });
     simplify(pts);
+    enforceEndStub(pts, Math.max(this.breakout, ctx.minStub ?? 0));
     return toPath(pts);
   }
 }
@@ -112,6 +113,40 @@ function simplify(pts: Vec2[]): void {
     if ((p.x === c.x && c.x === n.x) || (p.y === c.y && c.y === n.y)) pts.splice(i, 1);
     else i++;
   }
+}
+
+/**
+ * 终点贴边段保障：末段短于 minStub（端口 breakout 或端帽占线长）时，
+ * 把末拐点外推到末段轴上距 tip 恰好 minStub 处，并在其与倒数第三点
+ * 之间补一个正交肘点（先沿倒数第三点所在轴对齐，再水平/垂直接入
+ * moved）—— 全折线保持正交，末段方向不变，仍垂直贴边。
+ * 肘臂与来路共线反向（会折出 180° 回折钉）时放弃外推保持原状。
+ */
+function enforceEndStub(pts: Vec2[], minStub: number): void {
+  if (minStub <= 0 || pts.length < 3) return;
+  const tip = pts[pts.length - 1]!;
+  const prev = pts[pts.length - 2]!;
+  const dx = tip.x - prev.x;
+  const dy = tip.y - prev.y;
+  const len = Math.hypot(dx, dy);
+  if (len === 0 || len >= minStub) return;
+  const vertical = dx === 0;
+  const moved = { x: tip.x - (dx / len) * minStub, y: tip.y - (dy / len) * minStub };
+  const q = pts[pts.length - 3]!;
+  const elbow = vertical ? { x: q.x, y: moved.y } : { x: moved.x, y: q.y };
+  const fore = pts.length >= 4 ? pts[pts.length - 4]! : null;
+  if (fore) {
+    const inX = q.x - fore.x;
+    const inY = q.y - fore.y;
+    const armX = elbow.x - q.x;
+    const armY = elbow.y - q.y;
+    if (armX * inY - armY * inX === 0 && armX * inX + armY * inY < 0) return;
+  }
+  pts[pts.length - 2] = moved;
+  if ((elbow.x !== q.x || elbow.y !== q.y) && (elbow.x !== moved.x || elbow.y !== moved.y)) {
+    pts.splice(pts.length - 2, 0, elbow);
+  }
+  simplify(pts);
 }
 
 /**
