@@ -437,17 +437,12 @@ export class GridUndirectedStrategy implements LayoutStrategy {
     deflectEdgeCrossings(expansion, viewEdgePairs, containerItems);
     expansion.tighten();
     // R6 防线同非折叠路径（视图项下标与 expansion 下标一致）。
-    expansion.mergeLines(viewEdgePairs);
-    if ((globalThis as any).DBG_STAGE) expansion.dbgDump('after-merge');
-    expansion.ensureCorridor(margin);
-    if ((globalThis as any).DBG_STAGE) expansion.dbgDump('after-corridor');
-    expansion.compact(margin);
-    if ((globalThis as any).DBG_STAGE) expansion.dbgDump('after-compact');
+    expansion.mergeLines(viewEdgePairs);;
+    expansion.ensureCorridor(margin);;
+    expansion.compact(margin);;
     // 阶段 7.2：对齐合并重试（同非折叠路径，见其注释）。
-    expansion.mergeLines(viewEdgePairs, true);
-    if ((globalThis as any).DBG_STAGE) expansion.dbgDump('after-retry');
-    expansion.alignCenters(viewEdgePairs);
-    if ((globalThis as any).DBG_STAGE) expansion.dbgDump('after-align');
+    expansion.mergeLines(viewEdgePairs, true);;
+    expansion.alignCenters(viewEdgePairs);;
 
     // 包围盒归一（左上角 → 0,0），得到作用域内相对布局。
     const boxes = expansion.boxes();

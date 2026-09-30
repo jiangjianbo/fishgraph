@@ -126,16 +126,6 @@ export class ExpansionGrid {
    * 贴邻/重叠的独居元素（被贴邻挡住、走廊腾出后即可入列），过滤长距
    * 离重排。
    */
-  dbgDump(tag: string): void {
-    if (!(globalThis as any).DBG_STAGE) return;
-    const parts: string[] = [];
-    for (let i = 0; i < this.anchorOf.length; i++) {
-      if (!this.anchorOf[i]) continue;
-      parts.push(`i${i}=(${this.anchorOf[i]!.gx},${this.anchorOf[i]!.gy})`);
-    }
-    console.log(`DBG ${tag}: ${parts.join(' ')}`);
-  }
-
   mergeLines(edges?: readonly EdgePair[], adjacentOnly = false): void {
     const adj = buildAdjacency(edges);
     if ((globalThis as any).DBG_RETRY) console.log(`DBG mergeLines call adjacentOnly=${adjacentOnly}`);
@@ -304,7 +294,7 @@ export class ExpansionGrid {
           if (this.tryShift(i, axis, delta, adj)) break;
         }
       }
-    };
+    };;
     for (let k = 1; k <= sorted.length; k++) {
       if (k === sorted.length) {
         flush(groupStart, k);
