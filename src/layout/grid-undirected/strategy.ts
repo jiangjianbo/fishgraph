@@ -266,6 +266,11 @@ export class GridUndirectedStrategy implements LayoutStrategy {
     // 阶段 7：通道约束压实（Channel Safety Margin）；阶段 7.5：行列
     // 居中对齐（同带元素中心共线，同行列连线严格水平/垂直）。
     expansion.compact(this.marginCells);
+    // 阶段 7.2：对齐合并重试——首轮吸附被贴邻元素挡住的独居元素，在
+    // 走廊/压实腾出空间后重试（吸附落点按移动方向定对齐方向），重试
+    // 后与主线列带重叠，交由 7.5 居中收口。重试仅吸收与主线贴邻的元
+    // 素（adjacentOnly），过滤长距离重排。
+    expansion.mergeLines(edgePairs, true);
     expansion.alignCenters(edgePairs);
 
     // 物理化 + 走线（映射策略出口：可渲染图）。
@@ -433,9 +438,16 @@ export class GridUndirectedStrategy implements LayoutStrategy {
     expansion.tighten();
     // R6 防线同非折叠路径（视图项下标与 expansion 下标一致）。
     expansion.mergeLines(viewEdgePairs);
+    if ((globalThis as any).DBG_STAGE) expansion.dbgDump('after-merge');
     expansion.ensureCorridor(margin);
+    if ((globalThis as any).DBG_STAGE) expansion.dbgDump('after-corridor');
     expansion.compact(margin);
+    if ((globalThis as any).DBG_STAGE) expansion.dbgDump('after-compact');
+    // 阶段 7.2：对齐合并重试（同非折叠路径，见其注释）。
+    expansion.mergeLines(viewEdgePairs, true);
+    if ((globalThis as any).DBG_STAGE) expansion.dbgDump('after-retry');
     expansion.alignCenters(viewEdgePairs);
+    if ((globalThis as any).DBG_STAGE) expansion.dbgDump('after-align');
 
     // 包围盒归一（左上角 → 0,0），得到作用域内相对布局。
     const boxes = expansion.boxes();
@@ -548,6 +560,14 @@ export class GridUndirectedStrategy implements LayoutStrategy {
     const elements = this.store.elements;
     const basis = { cellW: this.store.gradeCellW, cellH: this.store.gradeCellH };
     const routes = this.routeInCells(boxes);
+    for (const r of routes) {
+      if (r.cells.some((p) => !Number.isFinite(p.x) || !Number.isFinite(p.y)) || (r.exact && r.exact.some((p) => !Number.isFinite(p.x) || !Number.isFinite(p.y)))) {
+        console.log(`DBG NaN route ${r.source}->${r.target} cells=${JSON.stringify(r.cells)} exact=${JSON.stringify(r.exact ?? null)}`);
+      }
+    }
+    for (const el of elements) {
+      if (!Number.isFinite(el.x) || !Number.isFinite(el.y)) console.log(`DBG NaN element at finalize? (pre-render check skipped)`);
+    }
     // 阶段 8.5：通道车道分配 —— 同通道平行走线等距分流（端点关系定
     // 共用：共享一端的边聚簇共用路径，bundle 与无关边错开；长线优先
     // 居中）。骨架拓扑不变，偏移由物理化换算为拐点处车道线交点；障碍
@@ -557,6 +577,11 @@ export class GridUndirectedStrategy implements LayoutStrategy {
       if (!isSubgraphNode(elements[i]!)) obstacleIdx.add(i);
     });
     assignLanes(routes, this.marginCells, boxes, obstacleIdx);
+    for (const r of routes) {
+      if (r.laneOffsets?.some((o) => !Number.isFinite(o))) {
+        console.log(`DBG NaN laneOffsets ${r.source}->${r.target} ${JSON.stringify(r.laneOffsets)} cells=${JSON.stringify(r.cells)}`);
+      }
+    }
     const graph = this.store.metricStrategy.render({ boxes, routes, containerPaddings }, basis);
     for (let i = 0; i < elements.length; i++) {
       const el = elements[i]!;

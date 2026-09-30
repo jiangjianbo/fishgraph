@@ -119,17 +119,32 @@ export class ExpansionGrid {
    * 对齐成列/成行。候选主线按距离升序尝试，平局取更靠近包围盒中心的
    * 一条；约束：平移后与任何元素 AABB 无重叠、不扩大全局包围盒、且
    * 不新增同起点连线共线（R6，`edges` 缺省时跳过该检查）——全部候选
-   * 不可行则保持原位。迭代至不动点（有界）。异宽元素对齐的是格线
-   * （左缘对齐）；同宽元素即中心对齐。
+   * 不可行则保持原位。迭代至不动点（有界）。吸附落点按移动方向确定
+   * 对齐方向：向右移至少右对齐、最好中间对齐；向左移至少左对齐、最好
+   * 中间对齐；上下移同理（先试中心落点、再试行进前缘对齐落点；同宽
+   * 时两者重合即锚点对齐）。adjacentOnly = 重试模式：只吸附与主线列带
+   * 贴邻/重叠的独居元素（被贴邻挡住、走廊腾出后即可入列），过滤长距
+   * 离重排。
    */
-  mergeLines(edges?: readonly EdgePair[]): void {
+  dbgDump(tag: string): void {
+    if (!(globalThis as any).DBG_STAGE) return;
+    const parts: string[] = [];
+    for (let i = 0; i < this.anchorOf.length; i++) {
+      if (!this.anchorOf[i]) continue;
+      parts.push(`i${i}=(${this.anchorOf[i]!.gx},${this.anchorOf[i]!.gy})`);
+    }
+    console.log(`DBG ${tag}: ${parts.join(' ')}`);
+  }
+
+  mergeLines(edges?: readonly EdgePair[], adjacentOnly = false): void {
     const adj = buildAdjacency(edges);
-    this.mergeAxis('x', adj);
-    this.mergeAxis('y', adj);
+    if ((globalThis as any).DBG_RETRY) console.log(`DBG mergeLines call adjacentOnly=${adjacentOnly}`);
+    this.mergeAxis('x', adj, adjacentOnly);
+    this.mergeAxis('y', adj, adjacentOnly);
   }
 
   /** 单轴对齐合并：主线频次统计 → 独居元素按距离序试吸附 → 不动点迭代。 */
-  private mergeAxis(axis: 'x' | 'y', adj: ReadonlyMap<number, readonly number[]>): void {
+  private mergeAxis(axis: 'x' | 'y', adj: ReadonlyMap<number, readonly number[]>, adjacentOnly: boolean): void {
     const n = this.anchorOf.length;
     if (n === 0) return;
     const coordOf = (i: number): number => (axis === 'x' ? this.anchorOf[i]!.gx : this.anchorOf[i]!.gy);
@@ -138,7 +153,14 @@ export class ExpansionGrid {
     for (let round = 0; round < n; round++) {
       let moved = false;
       const counts = new Map<number, number>();
-      for (let i = 0; i < n; i++) counts.set(coordOf(i), (counts.get(coordOf(i)) ?? 0) + 1);
+      const membersOf = new Map<number, number[]>();
+      for (let i = 0; i < n; i++) {
+        const c = coordOf(i);
+        counts.set(c, (counts.get(c) ?? 0) + 1);
+        const list = membersOf.get(c);
+        if (list) list.push(i);
+        else membersOf.set(c, [i]);
+      }
       const lines = [...counts.entries()]
         .filter(([, c]) => c >= 2)
         .map(([c]) => c)
@@ -158,32 +180,56 @@ export class ExpansionGrid {
         const candidates = [...lines].sort(
           (a, b) => Math.abs(a - cur) - Math.abs(b - cur) || Math.abs(a - mid) - Math.abs(b - mid) || a - b,
         );
-        for (const t of candidates) {
-          if (t === cur) continue;
-          const delta = t - cur;
-          const p = projOf(this.rectOf(i));
-          if (p.lo + delta < lo || p.hi + delta > hi) continue; // 包围盒不扩大
-          const r = this.rectOf(i);
-          const shifted = axis === 'x' ? { ...r, minX: r.minX + delta, maxX: r.maxX + delta } : { ...r, minY: r.minY + delta, maxY: r.maxY + delta };
-          let clash = false;
-          for (let j = 0; j < n && !clash; j++) {
-            if (j === i || !this.anchorOf[j]) continue;
-            const q = this.rectOf(j);
-            clash =
-              shifted.minX <= q.maxX &&
-              q.minX <= shifted.maxX &&
-              shifted.minY <= q.maxY &&
-              q.minY <= shifted.maxY;
+        // 吸附落点按移动方向确定对齐方向（R11 前置规则）：落点 = 主线
+        // 锚点 + ⌊主线跨度/2⌋ - ⌊自身尺寸/2⌋（中间对齐，优先）；行进
+        // 前缘对齐（向右移右对齐 / 向左移左对齐 / 向下移下对齐 / 向上
+        // 移上对齐）为至少要求（兜底）。同宽时两落点重合 = 锚点对齐。
+        const sizeI = this.sizeOf[i]!;
+        const wI = axis === 'x' ? sizeI.w : sizeI.h;
+        const loI = cur;
+        const hiI = cur + wI - 1;
+        const lineSpans = candidates.map((t) => {
+          let hiLine = t;
+          for (const j of membersOf.get(t) ?? []) {
+            const sz = this.sizeOf[j]!;
+            hiLine = Math.max(hiLine, t + (axis === 'x' ? sz.w : sz.h) - 1);
           }
-          if (clash) continue;
-          if (this.introducesCollinearEdge(i, axis, delta, adj)) continue;
-          const a = this.anchorOf[i]!;
-          if (axis === 'x') a.gx += delta;
-          else a.gy += delta;
-          counts.set(cur, (counts.get(cur) ?? 0) - 1);
-          counts.set(t, (counts.get(t) ?? 0) + 1);
-          moved = true;
-          break;
+          return { t, hiLine };
+        });
+        for (const { t, hiLine } of lineSpans) {
+          const spots: number[] = [t + Math.floor((hiLine - t + 1) / 2) - Math.floor(wI / 2)];
+          if (hiI < t) spots.push(hiLine - wI + 1); // 元素在线左侧、向右移：右对齐
+          else if (loI > hiLine) spots.push(t); // 元素在线右侧、向左移：左对齐
+          for (const g of spots) {
+            const delta = g - cur;
+            if (delta === 0) continue;
+            // 重试模式：落点盒须与主线跨度贴邻或重叠（过滤长距离重排）。
+            if (adjacentOnly && (g + wI - 1 < t - 1 || g > hiLine + 1)) continue;
+            const p = projOf(this.rectOf(i));
+            if (p.lo + delta < lo || p.hi + delta > hi) continue; // 包围盒不扩大
+            const r = this.rectOf(i);
+            const shifted = axis === 'x' ? { ...r, minX: r.minX + delta, maxX: r.maxX + delta } : { ...r, minY: r.minY + delta, maxY: r.maxY + delta };
+            let clash = false;
+            for (let j = 0; j < n && !clash; j++) {
+              if (j === i || !this.anchorOf[j]) continue;
+              const q = this.rectOf(j);
+              clash =
+                shifted.minX <= q.maxX &&
+                q.minX <= shifted.maxX &&
+                shifted.minY <= q.maxY &&
+                q.minY <= shifted.maxY;
+            }
+            if (clash) continue;
+            if (this.introducesCollinearEdge(i, axis, delta, adj)) continue;
+            const a = this.anchorOf[i]!;
+            if (axis === 'x') a.gx = g;
+            else a.gy = g;
+            counts.set(cur, (counts.get(cur) ?? 0) - 1);
+            counts.set(g, (counts.get(g) ?? 0) + 1);
+            moved = true;
+            break;
+          }
+          if (moved) break;
         }
       }
       if (!moved) return;

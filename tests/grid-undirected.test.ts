@@ -13,6 +13,7 @@ import {
 import type { GraphSpec } from '../src/types.js';
 import { estimateLabelBox } from '../src/label.js';
 import { ExpansionGrid, deflectEdgeCrossings } from '../src/layout/grid-undirected/expansion.js';
+import { starGraph } from '../demo/graphs.js';
 import {
   coarseGridPlacement,
   isCollinearRay,
@@ -873,6 +874,59 @@ describe('物化后整理（阶段 4~7：消压线 + 行列整理三步）', () 
     expect(a!.x).toBe(0); // 列带不重叠 → x 不动
     expect(b).toEqual({ x: 4, y: 0, width: 2, height: 4 });
     expectNoOverlap(g);
+  });
+
+  it('阶段 5 异宽吸附落点按移动方向定对齐方向：向右移中心/右对齐（左缘被挡仍可入列）', () => {
+    // star 图 s10 案例缩影：2x1 独居元素在主线（1x1 × 2）左侧一格——
+    // 旧"左缘对齐"落点占主线列 + 右邻列，右邻列有同排元素挡死 → 永不
+    // 吸附；新规则（按移动方向定对齐方向）中心/右对齐落点与主线列带
+    // 重叠且无重叠，吸附后中心格 = 主线锚点（同列）。
+    const g = new ExpansionGrid(4);
+    put(g, 0, -4, -1, 2, 1); // M：2x1 独居元素（被吸附者，下标最小先处理）
+    put(g, 1, -2, 0); // A：主线成员
+    put(g, 2, -2, 1); // B：主线成员
+    put(g, 3, -1, -1); // C：挡在旧左缘落点溢出列上的同排元素
+    g.mergeLines();
+    expect(g.anchorOf[0]!.gx, 'M 吸附后中心格 = 主线锚点（-3，盒 [-3,-2]）').toBe(-3);
+    expect(g.anchorOf[1]!.gx).toBe(-2);
+    expect(g.anchorOf[2]!.gx).toBe(-2);
+    expect(g.anchorOf[3]!.gx, '挡路的同排元素不被 displaced').toBe(-1);
+  });
+
+  it('阶段 5 异宽吸附：向左移中心/左对齐（镜像方向同理）', () => {
+    // 2x1 独居元素在主线右侧：旧左缘落点（锚点 = 主线锚点）向左溢出
+    // 列被同排元素挡死；新规则中心/左对齐落点可行（E 持住包围盒左界，
+    // 中心落点不扩包围盒）。
+    const g = new ExpansionGrid(5);
+    put(g, 0, 0, 2, 2, 1); // M：2x1 独居元素在主线右侧（先处理）
+    put(g, 1, -2, 0); // A：主线成员
+    put(g, 2, -2, 1); // B：主线成员
+    put(g, 3, -1, 2); // D：挡在旧左缘落点上的同排元素
+    put(g, 4, -3, 0); // E：持住包围盒左界（自身吸附被 A 挡住）
+    g.mergeLines();
+    expect(g.anchorOf[0]!.gx, 'M 向左移吸附后中心格 = 主线锚点（-3）').toBe(-3);
+    expect(g.anchorOf[3]!.gx, '挡路元素不被 displaced').toBe(-1);
+    expect(g.anchorOf[4]!.gx, 'E 的吸附被 A 挡住保持原位').toBe(-3);
+  });
+
+  it('阶段 7.2 对齐合并重试：star 图 s10 与 s4/s1 归并同列（异宽方向感知 + 重试回归）', () => {
+    // 用户口径回归：demo star 图 s10 曾独占列线（异宽左缘对齐被同排
+    // s0 挡死、走廊腾出后无人重试）。现在：首轮方向感知落点 + 阶段
+    // 7.2 压实后重试 → s10 与 s4/s1 中心同列。
+    const layout = new ForceLayout(starGraph(), {
+      algorithm: 'grid-undirected',
+      direction: 'none',
+      naturalLength: 6,
+      channelMargin: 1,
+      labelCollision: true,
+      folding: true,
+      seed: 42,
+    });
+    layout.run();
+    const nv = [...layout.nodeViews] as Array<{ id: string; x: number }>;
+    const byId = (id: string): number => nv.find((v) => v.id === id)!.x;
+    expect(byId('s10'), 's10 与 s4 中心同列').toBe(byId('s4'));
+    expect(byId('s10'), 's10 与 s1 中心同列').toBe(byId('s1'));
   });
 
   it('阶段 7.5：理想落点被占时向原位逐格回退，保证无重叠', () => {
